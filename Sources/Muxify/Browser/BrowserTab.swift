@@ -2,29 +2,41 @@ import AppKit
 import Observation
 import WebKit
 
-/// One browser page (a WKWebView plus the state the toolbar shows). Each tmux
-/// window gets its own tab, so switching windows switches the page with it.
+/// One Tab in a Window's Browser: a page with its own history. The
+/// WKWebView is created the first time the Tab is shown, so Tabs restored
+/// from tmux cost nothing until you look at them.
 @Observable
-final class BrowserTab: NSObject {
-    let windowID: String
-    @ObservationIgnored let webView: WKWebView
+final class BrowserTab: NSObject, Identifiable {
+    let id = UUID()
 
-    private(set) var urlString = ""
+    private(set) var urlString: String
     private(set) var title = ""
     private(set) var canGoBack = false
     private(set) var canGoForward = false
     private(set) var isLoading = false
     private(set) var progress: Double = 0
-    private(set) var hasPage = false
-    /// Set to ask the panel to focus its address field (consumed by the panel).
-    var wantsAddressFocus = false
 
+    /// Whether the Tab shows (or will show, once loaded) a page.
+    var hasPage: Bool { !urlString.isEmpty }
+
+    var displayTitle: String {
+        if !title.isEmpty { return title }
+        if let host = URL(string: urlString)?.host { return host }
+        return urlString.isEmpty ? "New Tab" : urlString
+    }
+
+    /// target=_blank links and window.open ask for a new Tab.
+    @ObservationIgnored var onOpenInNewTab: ((URL) -> Void)?
+    /// The Tab's URL changed (for persisting the Browser).
+    @ObservationIgnored var onURLChange: (() -> Void)?
+
+    @ObservationIgnored private var loadedWebView: WKWebView?
+    @ObservationIgnored private var pendingURL: URL?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
-    @ObservationIgnored var onURLChange: ((String) -> Void)?
 
     private static let configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
-        // Persistent cookies/storage shared by every tab, like a normal browser profile.
+        // One persistent profile shared by every Tab, like a normal browser.
         config.websiteDataStore = .default()
         // Without a Safari token some sites serve degraded "unsupported browser" pages.
         config.applicationNameForUserAgent = "Version/26.0 Safari/605.1.15"
@@ -32,25 +44,56 @@ final class BrowserTab: NSObject {
         return config
     }()
 
-    init(windowID: String) {
-        self.windowID = windowID
-        webView = WKWebView(frame: .zero, configuration: Self.configuration)
+    init(url: URL?) {
+        pendingURL = url
+        urlString = url?.absoluteString ?? ""
         super.init()
+    }
+
+    var webView: WKWebView {
+        if let loadedWebView { return loadedWebView }
+        let webView = WKWebView(frame: .zero, configuration: Self.configuration)
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
         webView.isInspectable = true
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        observe()
+        loadedWebView = webView
+        observe(webView)
+        if let pendingURL {
+            self.pendingURL = nil
+            load(pendingURL)
+        }
+        return webView
     }
 
-    private func observe() {
+    /// Stops the page and releases its web content.
+    func close() {
+        loadedWebView?.stopLoading()
+        loadedWebView?.removeFromSuperview()
+        loadedWebView = nil
+        observations = []
+    }
+
+    /// Key for "is this URL already open": ignores the fragment, a trailing
+    /// slash, and the case of the scheme and host.
+    static func matchKey(_ string: String) -> String {
+        guard var components = URLComponents(string: string) else { return string }
+        components.fragment = nil
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        var key = components.string ?? string
+        while key.hasSuffix("/") { key.removeLast() }
+        return key
+    }
+
+    private func observe(_ webView: WKWebView) {
         observations = [
-            webView.observe(\.url, options: [.initial, .new]) { [weak self] webView, _ in
+            webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
                 self?.update { tab in
-                    tab.urlString = webView.url?.absoluteString ?? ""
-                    tab.hasPage = webView.url != nil
-                    if let url = webView.url?.absoluteString { tab.onURLChange?(url) }
+                    guard let url = webView.url?.absoluteString, url != tab.urlString else { return }
+                    tab.urlString = url
+                    tab.onURLChange?()
                 }
             },
             webView.observe(\.title, options: [.new]) { [weak self] webView, _ in
@@ -88,34 +131,42 @@ final class BrowserTab: NSObject {
     }
 
     func load(_ url: URL) {
-        if url.isFileURL {
-            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        let changed = url.absoluteString != urlString
+        urlString = url.absoluteString
+        if let loadedWebView {
+            if url.isFileURL {
+                loadedWebView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            } else {
+                loadedWebView.load(URLRequest(url: url))
+            }
         } else {
-            webView.load(URLRequest(url: url))
+            pendingURL = url
         }
+        if changed { onURLChange?() }
     }
 
-    func goBack() { webView.goBack() }
-    func goForward() { webView.goForward() }
+    func goBack() { loadedWebView?.goBack() }
+    func goForward() { loadedWebView?.goForward() }
 
     func reloadOrStop() {
-        if webView.isLoading { webView.stopLoading() } else { webView.reload() }
+        guard let loadedWebView else { return }
+        if loadedWebView.isLoading { loadedWebView.stopLoading() } else { loadedWebView.reload() }
     }
 
     func openInDefaultBrowser() {
-        guard let url = webView.url else { return }
+        guard let url = URL(string: urlString), hasPage else { return }
         NSWorkspace.shared.open(url)
     }
 
     func copyURL() {
-        guard let url = webView.url else { return }
+        guard hasPage else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        NSPasteboard.general.setString(urlString, forType: .string)
     }
 }
 
 extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
-    /// target=_blank links and window.open load in place instead of vanishing.
+    /// target=_blank links and window.open become a new Tab.
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
@@ -123,13 +174,9 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
-            webView.load(URLRequest(url: url))
+            onOpenInNewTab?(url)
         }
         return nil
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        NSLog("muxify: browser loaded \(webView.url?.absoluteString ?? "-") (\(webView.title ?? ""))")
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

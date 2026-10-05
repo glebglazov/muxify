@@ -13,10 +13,14 @@ struct TmuxWindow: Identifiable, Hashable {
     let command: String
     let isActive: Bool
     let paneCount: Int
-    var hasBell: Bool
-    var hasActivity: Bool
+    let hasBell: Bool
+    let hasActivity: Bool
     let sessionActivity: Int
     var branch: String?
+    /// The Window's Browser as last written to its tmux options.
+    var storedBrowser: StoredBrowser
+    /// URLs a program asked to open via `@muxify_open` (not yet consumed).
+    var openRequests: [String]
 
     /// The pane title is what shells and TUIs set via OSC 0/2 (fish sets it to
     /// `~/w/project`), so it is the best human label. tmux defaults it to the
@@ -33,6 +37,39 @@ struct TmuxWindow: Identifiable, Hashable {
     var abbreviatedPath: String { Paths.tildify(path) }
 }
 
+/// A Window's Browser as stored in tmux window options (ADR 0003). Tab URLs
+/// are space-separated (URLs never contain spaces); an empty Tab is
+/// `about:blank`.
+struct StoredBrowser: Hashable {
+    var tabURLs: [String] = []
+    var activeTab = 0
+    var isOpen = false
+
+    init(tabURLs: [String] = [], activeTab: Int = 0, isOpen: Bool = false) {
+        self.tabURLs = tabURLs
+        self.activeTab = activeTab
+        self.isOpen = isOpen
+    }
+
+    init(tabs: String, activeTab: String, open: String) {
+        tabURLs = tabs.split(separator: " ").map(String.init)
+        self.activeTab = Int(activeTab) ?? 0
+        isOpen = open == "on"
+    }
+
+    /// `set-option` arguments that write this state onto `windowID`.
+    func setOptionArgs(windowID: String) -> [String] {
+        guard !tabURLs.isEmpty else {
+            return Array([Tmux.tabsOption, Tmux.activeTabOption, Tmux.browserOpenOption].flatMap {
+                ["set-option", "-wqu", "-t", windowID, $0, ";"]
+            }.dropLast())
+        }
+        return ["set-option", "-wq", "-t", windowID, Tmux.tabsOption, tabURLs.joined(separator: " "),
+                ";", "set-option", "-wq", "-t", windowID, Tmux.activeTabOption, String(activeTab),
+                ";", "set-option", "-wq", "-t", windowID, Tmux.browserOpenOption, isOpen ? "on" : "off"]
+    }
+}
+
 /// A client attached to the tmux server (one of them is ours).
 struct TmuxClient: Hashable {
     let tty: String
@@ -41,11 +78,11 @@ struct TmuxClient: Hashable {
 }
 
 struct TmuxSnapshot {
-    /// Windows of the user's real sessions (Muxify's view sessions excluded).
     var windows: [TmuxWindow]
     var clients: [TmuxClient]
-    /// Names of every session on the server, view sessions included.
-    var sessionNames: Set<String>
+    /// The Window last selected in Muxify (a server-wide option, so it can't
+    /// outlive the server and point at a reused window id).
+    var lastWindowID: String?
     var serverRunning: Bool
 }
 
@@ -67,8 +104,13 @@ enum Tmux {
     static let shortHostName = hostName.split(separator: ".").first.map(String.init) ?? hostName
     static let shellNames: Set<String> = ["fish", "zsh", "bash", "sh", "nu", "elvish", "xonsh", "login"]
 
-    /// Session user option marking the grouped sessions Muxify attaches to.
-    static let viewMarker = "@muxify_view"
+    // tmux user options Muxify keeps its state in.
+    static let tabsOption = "@muxify_tabs"
+    static let activeTabOption = "@muxify_active_tab"
+    static let browserOpenOption = "@muxify_browser"
+    /// One-shot: programs set it to open a Tab; Muxify consumes and clears it.
+    static let openOption = "@muxify_open"
+    static let lastWindowOption = "@muxify_last_window"
 
     private static let queue = DispatchQueue(label: "muxify.tmux", qos: .userInitiated)
     private static let separator = "\u{241F}"
@@ -120,7 +162,9 @@ enum Tmux {
             "W", "#{window_id}", "#{session_id}", "#{session_name}", "#{window_index}",
             "#{window_name}", "#{pane_title}", "#{pane_current_path}", "#{pane_current_command}",
             "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{window_activity_flag}",
-            "#{session_activity}", "#{\(viewMarker)}",
+            "#{session_activity}",
+            "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(browserOpenOption)}", "#{\(openOption)}",
+            "#{\(lastWindowOption)}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}"].joined(separator: s)
 
@@ -128,42 +172,31 @@ enum Tmux {
         do {
             output = try run(["list-windows", "-a", "-F", windowFormat, ";", "list-clients", "-F", clientFormat])
         } catch {
-            return TmuxSnapshot(windows: [], clients: [], sessionNames: [], serverRunning: false)
+            return TmuxSnapshot(windows: [], clients: [], lastWindowID: nil, serverRunning: false)
         }
 
         var windows: [TmuxWindow] = []
         var clients: [TmuxClient] = []
-        var sessionNames = Set<String>()
-        // Bell/activity flags are per session; the view session's flags are
-        // the ones that reflect what the user has (not) looked at in Muxify.
-        var viewFlags: [String: (bell: Bool, activity: Bool)] = [:]
+        var lastWindowID: String?
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let f = line.components(separatedBy: s)
-            if f.first == "W", f.count >= 15 {
-                sessionNames.insert(f[3])
-                if f[14] == "1" {
-                    viewFlags[f[1]] = (f[11] == "1", f[12] == "1")
-                    continue
-                }
+            if f.first == "W", f.count >= 19 {
                 windows.append(TmuxWindow(
                     id: f[1], sessionID: f[2], sessionName: f[3], index: Int(f[4]) ?? 0,
                     name: f[5], paneTitle: f[6], path: f[7], command: f[8],
                     isActive: f[9] == "1", paneCount: Int(f[10]) ?? 1,
                     hasBell: f[11] == "1", hasActivity: f[12] == "1",
                     sessionActivity: Int(f[13]) ?? 0,
-                    branch: GitInfo.branch(at: f[7])
+                    branch: GitInfo.branch(at: f[7]),
+                    storedBrowser: StoredBrowser(tabs: f[14], activeTab: f[15], open: f[16]),
+                    openRequests: f[17].split(separator: " ").map(String.init)
                 ))
+                if !f[18].isEmpty { lastWindowID = f[18] }
             } else if f.first == "C", f.count >= 4 {
                 clients.append(TmuxClient(tty: f[1], sessionID: f[2], windowID: f[3]))
             }
         }
-        for i in windows.indices {
-            if let flags = viewFlags[windows[i].id] {
-                windows[i].hasBell = flags.bell
-                windows[i].hasActivity = flags.activity
-            }
-        }
-        return TmuxSnapshot(windows: windows, clients: clients, sessionNames: sessionNames, serverRunning: true)
+        return TmuxSnapshot(windows: windows, clients: clients, lastWindowID: lastWindowID, serverRunning: true)
     }
 
     static func shellQuote(_ value: String) -> String {

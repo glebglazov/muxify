@@ -20,31 +20,49 @@ struct MuxifyApp: App {
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.hiddenTitleBar)
         .commands {
-            SidebarCommands()
+            CommandGroup(replacing: .sidebar) {
+                Button(store.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { store.toggleSidebar() }
+                    .keyboardShortcut("s", modifiers: [.control, .command])
+            }
+            // Browser shortcuts act only when focus is outside the terminal;
+            // in the terminal your Ghostty/tmux bindings handle the keys.
             CommandGroup(replacing: .newItem) {
-                Button("New tmux Window") { store.newWindow() }
+                Button("New Tab") { store.browserCommand { $0.newTab() } }
                     .keyboardShortcut("t", modifiers: .command)
+                Button("New tmux Window") { store.newWindow() }
                 Button("New tmux Session") { store.newSession() }
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandMenu("Browser") {
-                Button(store.browserVisible ? "Hide Browser" : "Show Browser") { store.toggleBrowser() }
+                Button(store.currentBrowser?.isOpen == true ? "Hide Browser" : "Show Browser") { store.toggleBrowser() }
                     .keyboardShortcut("b", modifiers: [.command, .shift])
-                Button("Open Location…") { store.focusAddressBar() }
+                Button("Open Location…") { store.browserCommand { _ in store.focusAddressBar() } }
                     .keyboardShortcut("l", modifiers: .command)
                 Divider()
-                Button("Back") { store.currentBrowserTab?.goBack() }
+                Button("Close Tab") { store.browserCommand { $0.closeActiveTab() } }
+                    .keyboardShortcut("w", modifiers: .command)
+                Button("Show Next Tab") { store.browserCommand { $0.selectTab(offset: 1) } }
+                    .keyboardShortcut("]", modifiers: [.command, .shift])
+                Button("Show Previous Tab") { store.browserCommand { $0.selectTab(offset: -1) } }
+                    .keyboardShortcut("[", modifiers: [.command, .shift])
+                Divider()
+                Button("Back") { store.browserCommand { $0.activeTab?.goBack() } }
                     .keyboardShortcut("[", modifiers: .command)
-                    .disabled(!store.browserVisible)
-                Button("Forward") { store.currentBrowserTab?.goForward() }
+                Button("Forward") { store.browserCommand { $0.activeTab?.goForward() } }
                     .keyboardShortcut("]", modifiers: .command)
-                    .disabled(!store.browserVisible)
-                Button("Reload Page") { store.currentBrowserTab?.reloadOrStop() }
+                Button("Reload Page") { store.browserCommand { $0.activeTab?.reloadOrStop() } }
                     .keyboardShortcut("r", modifiers: .command)
-                    .disabled(!store.browserVisible)
                 Divider()
                 Button("Focus Terminal") { store.focusTerminal() }
                     .keyboardShortcut("`", modifiers: .command)
+            }
+            // ⌘1–9 pick tmux Windows wherever focus is (in the terminal your
+            // Ghostty bindings already send them to tmux).
+            CommandMenu("tmux") {
+                ForEach(1..<10) { index in
+                    Button("Window \(index)") { store.selectWindow(index: index) }
+                        .keyboardShortcut(KeyEquivalent(Character(String(index))), modifiers: .command)
+                }
             }
             CommandGroup(after: .appSettings) {
                 Button("Reload Ghostty Config") { GhosttyRuntime.shared.reloadConfig() }

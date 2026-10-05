@@ -1,61 +1,79 @@
 import SwiftUI
 
 struct ContentView: View {
-    @Bindable var store: WorkspaceStore
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-
-    private var sidebarHidden: Bool { columnVisibility == .detailOnly }
+    let store: WorkspaceStore
+    @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
+    /// One width for every Window's Browser.
+    @AppStorage("browserWidth") private var browserWidth: Double = 640
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(store: store, toggleSidebar: toggleSidebar)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 420)
-                .toolbar(removing: .sidebarToggle)
-        } detail: {
-            VStack(spacing: 0) {
-                // With the sidebar collapsed its controls would be gone, so a
-                // slim bar next to the traffic lights brings them back.
-                if sidebarHidden {
-                    HStack(spacing: 2) {
-                        TitlebarButton(systemName: "sidebar.left", help: "Show Sidebar (⌃⌘S)", action: toggleSidebar)
-                        Spacer()
-                        BrowserToggle(store: store)
-                    }
-                    .padding(.leading, TitlebarMetrics.trafficLightsWidth)
-                    .padding(.trailing, 8)
-                    .frame(height: TitlebarMetrics.height)
-                    .background(WindowDragArea())
+        GeometryReader { proxy in
+            let sidebar = store.sidebarVisible ? clamp(sidebarWidth, 180, 420) : 0
+            let browserMax = max(320, proxy.size.width - sidebar - 360)
+            // Panels appear and disappear without animation, so switching
+            // between Windows with and without a Browser is instant.
+            HStack(spacing: 0) {
+                if store.sidebarVisible {
+                    SidebarView(store: store)
+                        .frame(width: sidebar)
+                        .background(VisualEffectBackground(material: .sidebar))
+                    PanelResizeHandle(width: $sidebarWidth, range: 180...420, edge: .leading)
                 }
                 TerminalArea(store: store)
-            }
-            .ignoresSafeArea(.container, edges: [.top, .bottom])
-            // Names the window for the Window menu and Mission Control.
-            .navigationTitle(store.selectedWindow?.sessionName ?? "Muxify")
-            .inspector(isPresented: $store.browserVisible) {
-                browser
-                    .ignoresSafeArea(.container, edges: .top)
-                    .inspectorColumnWidth(min: 320, ideal: 640, max: 1800)
+                if let browser = store.currentBrowser, browser.isOpen {
+                    PanelResizeHandle(width: $browserWidth, range: 320...browserMax, edge: .trailing)
+                    BrowserPanel(browser: browser)
+                        .id(browser.windowID)
+                        .frame(width: clamp(browserWidth, 320, browserMax))
+                }
             }
         }
+        .padding(.top, TitlebarMetrics.height)
+        // An overlay, so it is above everything for clicks: scroll views below
+        // (sidebar list, tab strip) reach up under the title bar area and would
+        // otherwise swallow clicks on the toggles.
+        .overlay(alignment: .top) { HeaderBar(store: store) }
+        .ignoresSafeArea()
+        // Names the window for the Window menu and Mission Control.
+        .navigationTitle(store.selectedWindow?.sessionName ?? "Muxify")
         .onAppear { store.start() }
         .onOpenURL { store.handle($0) }
     }
 
-    private func toggleSidebar() {
-        withAnimation(.easeOut(duration: 0.2)) {
-            columnVisibility = sidebarHidden ? .all : .detailOnly
-        }
+    private func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
+        min(max(value, low), high)
     }
+}
 
-    @ViewBuilder
-    private var browser: some View {
-        if let tab = store.currentBrowserTab {
-            BrowserPanel(tab: tab) { store.toggleBrowser() }
-                .id(tab.windowID)
-        } else {
-            Text("Select a tmux window")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+/// The fixed strip along the top: room for the traffic lights, the window's
+/// drag handle, and the two panel toggles on the right.
+private struct HeaderBar: View {
+    let store: WorkspaceStore
+
+    var body: some View {
+        let browserOpen = store.currentBrowser?.isOpen ?? false
+        HStack(spacing: 2) {
+            Spacer()
+            TitlebarButton(
+                systemName: "sidebar.left",
+                help: store.sidebarVisible ? "Hide Sidebar (⌃⌘S)" : "Show Sidebar (⌃⌘S)",
+                isOn: store.sidebarVisible,
+                action: store.toggleSidebar
+            )
+            TitlebarButton(
+                systemName: "sidebar.right",
+                help: browserOpen ? "Hide Browser (⇧⌘B)" : "Show Browser (⇧⌘B)",
+                isOn: browserOpen,
+                action: store.toggleBrowser
+            )
+        }
+        .padding(.leading, TitlebarMetrics.trafficLightsWidth)
+        .padding(.trailing, 8)
+        .frame(height: TitlebarMetrics.height)
+        .background(WindowDragArea())
+        .background(VisualEffectBackground(material: .titlebar))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
         }
     }
 }
@@ -102,8 +120,8 @@ private struct TerminalHostRepresentable: NSViewRepresentable {
 // MARK: - Title bar controls
 
 enum TitlebarMetrics {
-    /// Height of the strip that lines up with the traffic lights.
-    static let height: CGFloat = 36
+    /// Height of the header; the traffic lights sit centred in it.
+    static let height: CGFloat = 30
     /// Room to leave on the leading edge for the traffic lights.
     static let trafficLightsWidth: CGFloat = 78
 }
@@ -131,19 +149,20 @@ struct TitlebarButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(help)
+        .actsOnFirstClick()
     }
 }
 
-struct BrowserToggle: View {
-    let store: WorkspaceStore
-
-    var body: some View {
-        TitlebarButton(
-            systemName: "sidebar.right",
-            help: store.browserVisible ? "Hide Browser (⇧⌘B)" : "Show Browser (⇧⌘B)",
-            isOn: store.browserVisible,
-            action: store.toggleBrowser
-        )
+private extension View {
+    /// Like toolbar buttons: a click on an inactive window both activates it
+    /// and presses the button.
+    @ViewBuilder
+    func actsOnFirstClick() -> some View {
+        if #available(macOS 15.0, *) {
+            allowsWindowActivationEvents(true)
+        } else {
+            self
+        }
     }
 }
 
@@ -159,5 +178,57 @@ struct WindowDragArea: View {
         } else {
             Color.clear
         }
+    }
+}
+
+/// The divider between terminal and Browser; drag it to resize the Browser.
+private struct PanelResizeHandle: View {
+    @Binding var width: Double
+    let range: ClosedRange<Double>
+    /// Which side of the handle the resized panel is on.
+    let edge: HorizontalEdge
+
+    @State private var startWidth: Double?
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .overlay {
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let start = startWidth ?? width
+                                if startWidth == nil { startWidth = start }
+                                let delta = edge == .leading ? value.translation.width : -value.translation.width
+                                width = min(max(start + delta, range.lowerBound), range.upperBound)
+                            }
+                            .onEnded { _ in startWidth = nil }
+                    )
+            }
+            .zIndex(1)
+    }
+}
+
+/// Native translucent material (the sidebar and title bar look).
+private struct VisualEffectBackground: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
     }
 }

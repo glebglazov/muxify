@@ -150,7 +150,10 @@ final class GhosttyRuntime {
         case GHOSTTY_ACTION_RELOAD_CONFIG:
             reloadConfig()
         case GHOSTTY_ACTION_RING_BELL:
-            NSSound.beep()
+            // tmux rings the bell for activity in other Windows (monitor-activity),
+            // which is constant with agents running, so never beep. Like
+            // Ghostty's default, only ask for attention while in the background.
+            if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
         case GHOSTTY_ACTION_SET_TITLE, GHOSTTY_ACTION_PWD, GHOSTTY_ACTION_CELL_SIZE,
              GHOSTTY_ACTION_COLOR_CHANGE, GHOSTTY_ACTION_CONFIG_CHANGE, GHOSTTY_ACTION_MOUSE_OVER_LINK,
              GHOSTTY_ACTION_RENDERER_HEALTH, GHOSTTY_ACTION_SCROLLBAR:

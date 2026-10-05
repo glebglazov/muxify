@@ -8,23 +8,25 @@ struct SessionGroup: Identifiable {
     var windows: [TmuxWindow]
 }
 
-/// App state: the tmux windows in the sidebar, the one libghostty surface
-/// running our tmux client, and a browser tab per tmux window.
+/// App state: the tmux Windows in the sidebar, the one libghostty surface
+/// running our tmux client, and a Browser per Window.
 ///
-/// The terminal is a single `tmux attach` client. Clicking a sidebar window
-/// runs `switch-client -c <our tty> -t <window>`, so tmux itself renders the
-/// window with all of its splits, and anything you do inside tmux (prefix+n,
-/// choose-tree, …) is reflected back into the sidebar selection.
+/// The terminal is a single `tmux attach` client attached straight to your
+/// Sessions. Clicking a sidebar Window runs `switch-client -c <our tty> -t
+/// <window>`, so tmux renders it with all its Panes, and anything you do
+/// inside tmux (prefix+n, choose-tree, …) is reflected back into the sidebar.
 @Observable
 final class WorkspaceStore {
     private(set) var windows: [TmuxWindow] = []
     private(set) var serverRunning = true
-    private(set) var selectedWindowID: String?
+    private(set) var selectedWindowID: String? {
+        didSet { rememberSelection() }
+    }
     private(set) var surface: TerminalSurfaceView?
     private(set) var terminalMessage: String?
 
-    var browserVisible = false {
-        didSet { UserDefaults.standard.set(browserVisible, forKey: Keys.browserVisible) }
+    var sidebarVisible = UserDefaults.standard.object(forKey: "sidebarVisible") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sidebarVisible, forKey: "sidebarVisible") }
     }
 
     var selectedWindow: TmuxWindow? {
@@ -45,25 +47,24 @@ final class WorkspaceStore {
     }
 
     @ObservationIgnored let terminalHost = TerminalHostView()
-    @ObservationIgnored private var browsers: [String: BrowserTab] = [:]
-    @ObservationIgnored private var savedURLs: [String: String]
+    @ObservationIgnored private var browsers: [String: Browser] = [:]
+    @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
+    /// Windows whose `@muxify_open` we consumed and are clearing.
+    @ObservationIgnored private var consumingOpen = Set<String>()
+    @ObservationIgnored private var rememberedWindowID: String?
     @ObservationIgnored private var clientTTY: String?
-    @ObservationIgnored private var sessionNames = Set<String>()
-    @ObservationIgnored private var ownedViews = Set<String>()
     /// A click we sent to tmux that the next snapshots may not reflect yet.
     @ObservationIgnored private var pendingSelection: (windowID: String, deadline: Date)?
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var isRefreshing = false
     @ObservationIgnored private var started = false
 
-    private enum Keys {
-        static let browserVisible = "browserVisible"
-        static let browserURLs = "browserURLs"
-    }
-
     init() {
-        savedURLs = UserDefaults.standard.dictionary(forKey: Keys.browserURLs) as? [String: String] ?? [:]
-        browserVisible = UserDefaults.standard.bool(forKey: Keys.browserVisible)
+        // Browser state used to be kept here, keyed by window id; it now lives
+        // on the tmux Windows (ADR 0003).
+        UserDefaults.standard.removeObject(forKey: "browserURLs")
+        UserDefaults.standard.removeObject(forKey: "browserVisible")
     }
 
     func start() {
@@ -78,6 +79,7 @@ final class WorkspaceStore {
             terminalMessage = "tmux was not found. Install it with `brew install tmux`."
             return
         }
+        installKeyMonitor()
         refresh(attachIfNeeded: true)
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -102,15 +104,29 @@ final class WorkspaceStore {
     private func apply(_ snapshot: TmuxSnapshot, attachIfNeeded: Bool) {
         if windows != snapshot.windows { windows = snapshot.windows }
         if serverRunning != snapshot.serverRunning { serverRunning = snapshot.serverRunning }
-        sessionNames = snapshot.sessionNames
 
         if attachIfNeeded, surface == nil {
-            attach(to: Self.initialWindow(in: snapshot.windows).map(ViewTarget.init))
-            return
+            rememberedWindowID = snapshot.lastWindowID
+            let last = snapshot.lastWindowID.flatMap { id in snapshot.windows.first { $0.id == id } }
+            attach(to: (last ?? Self.initialWindow(in: snapshot.windows)).map(Target.init))
+        } else {
+            followClient(snapshot.clients)
         }
+        consumeOpenRequests()
 
+        if snapshot.serverRunning {
+            let live = Set(windows.map(\.id))
+            for (id, browser) in browsers where !live.contains(id) {
+                browser.tearDown()
+                browsers[id] = nil
+            }
+        }
+    }
+
+    /// The sidebar follows whatever window our tmux client is showing.
+    private func followClient(_ clients: [TmuxClient]) {
         if clientTTY == nil { clientTTY = surface?.ttyName }
-        if let tty = clientTTY, let client = snapshot.clients.first(where: { $0.tty == tty }) {
+        if let tty = clientTTY, let client = clients.first(where: { $0.tty == tty }) {
             if let pending = pendingSelection, client.windowID == pending.windowID || Date() > pending.deadline {
                 pendingSelection = nil
             }
@@ -120,76 +136,45 @@ final class WorkspaceStore {
         } else if surface == nil, let selectedWindowID, !windows.contains(where: { $0.id == selectedWindowID }) {
             self.selectedWindowID = nil
         }
-
-        if snapshot.serverRunning {
-            let live = Set(windows.map(\.id))
-            browsers = browsers.filter { live.contains($0.key) }
-        }
     }
 
-    /// The active window of the most recently used session.
+    /// The current window of the most recently used Session.
     private static func initialWindow(in windows: [TmuxWindow]) -> TmuxWindow? {
         windows.filter(\.isActive).max { $0.sessionActivity < $1.sessionActivity } ?? windows.first
     }
 
-    // MARK: - View sessions
-    //
-    // Clients attached to the same tmux session share its current window, so
-    // switching windows here would also switch them in every other terminal
-    // attached to that session. Instead our client sits in a *grouped* session
-    // (`new-session -t <session>`): same windows, independent current window.
-    // It is marked with @muxify_view (hidden from the sidebar) and set to
-    // destroy-unattached, so tmux removes it as soon as our client leaves it.
-
-    private struct ViewTarget {
-        let sessionID: String
-        let sessionName: String
-        let windowID: String
-        let path: String?
-
-        init(_ window: TmuxWindow) {
-            self.init(sessionID: window.sessionID, sessionName: window.sessionName, windowID: window.id, path: window.path)
-        }
-
-        init(sessionID: String, sessionName: String, windowID: String, path: String?) {
-            self.sessionID = sessionID
-            self.sessionName = sessionName
-            self.windowID = windowID
-            self.path = path
-        }
-    }
-
-    private func viewName(for sessionName: String) -> String {
-        let name = "\(sessionName)·muxify"
-        // Taken by something we did not create (e.g. another Muxify instance).
-        if sessionNames.contains(name), !ownedViews.contains(name) { return "\(name)-\(getpid())" }
-        return name
-    }
-
-    /// tmux arguments that create the view session for `target` and finish
-    /// with our client in it, showing the target window. (Inside one command
-    /// list tmux can't resolve `=name` targets for a session created earlier
-    /// in that list, so these use plain names.)
-    private func createViewArgs(_ target: ViewTarget, view: String, attach: [String]) -> [String] {
-        ["new-session", "-d", "-t", target.sessionID, "-s", view,
-         ";", "set-option", "-t", view, Tmux.viewMarker, "1",
-         ";", "select-window", "-t", "\(view):\(target.windowID)",
-         ";"] + attach +
-        [";", "set-option", "-t", view, "destroy-unattached", "on"]
+    /// Stored server-wide in tmux rather than in preferences, so it can't
+    /// outlive the server and point at a reused window id.
+    private func rememberSelection() {
+        guard let selectedWindowID, selectedWindowID != rememberedWindowID else { return }
+        rememberedWindowID = selectedWindowID
+        Tmux.runAsync(["set-option", "-gq", Tmux.lastWindowOption, selectedWindowID])
     }
 
     // MARK: - Terminal
 
-    /// Starts our tmux client on `target`, or a fresh session if there is none.
-    private func attach(to target: ViewTarget?) {
-        let args: [String]
-        if let target {
-            let view = viewName(for: target.sessionName)
-            ownedViews.insert(view)
-            args = ["-u"] + createViewArgs(target, view: view, attach: ["attach-session", "-t", view])
-        } else {
-            args = ["-u", "new-session", "-A", "-s", "main", "-c", NSHomeDirectory()]
+    private struct Target {
+        let sessionID: String
+        let windowID: String
+        let path: String?
+
+        init(_ window: TmuxWindow) {
+            self.init(sessionID: window.sessionID, windowID: window.id, path: window.path)
         }
+
+        init(sessionID: String, windowID: String, path: String?) {
+            self.sessionID = sessionID
+            self.windowID = windowID
+            self.path = path
+        }
+
+        var tmuxTarget: String { "\(sessionID):\(windowID)" }
+    }
+
+    /// Starts our tmux client on `target`, or a fresh session if there is none.
+    private func attach(to target: Target?) {
+        let args = target.map { ["-u", "attach-session", "-t", $0.tmuxTarget] }
+            ?? ["-u", "new-session", "-A", "-s", "main", "-c", NSHomeDirectory()]
         guard let command = Tmux.commandLine(args),
               let view = TerminalSurfaceView(command: command, workingDirectory: target?.path)
         else {
@@ -208,14 +193,21 @@ final class WorkspaceStore {
     }
 
     func reattach() {
-        attach(to: (selectedWindow ?? Self.initialWindow(in: windows)).map(ViewTarget.init))
+        attach(to: (selectedWindow ?? Self.initialWindow(in: windows)).map(Target.init))
     }
 
     func select(_ window: TmuxWindow) {
-        switchClient(to: ViewTarget(window))
+        switchClient(to: Target(window))
     }
 
-    private func switchClient(to target: ViewTarget) {
+    /// ⌘1–9: the Window with that tmux index in the current Session.
+    func selectWindow(index: Int) {
+        guard let current = selectedWindow else { return }
+        let siblings = windows.filter { $0.sessionID == current.sessionID }
+        if let window = siblings.first(where: { $0.index == index }) { select(window) }
+    }
+
+    private func switchClient(to target: Target) {
         selectedWindowID = target.windowID
         pendingSelection = (target.windowID, Date().addingTimeInterval(2))
         focusTerminal()
@@ -224,21 +216,17 @@ final class WorkspaceStore {
             return
         }
         clientTTY = tty
-        let view = viewName(for: target.sessionName)
-        ownedViews.insert(view)
-        let switchArgs = ["switch-client", "-c", tty, "-t", "=\(view):\(target.windowID)"]
-        let createArgs = createViewArgs(
-            target, view: view, attach: ["switch-client", "-c", tty, "-t", "\(view):\(target.windowID)"]
-        )
-        // The snapshot can be a second stale, so fall back to the other path.
-        let (first, fallback) = sessionNames.contains(view) ? (switchArgs, createArgs) : (createArgs, switchArgs)
-        Tmux.runAsync(first) { [weak self] result in
-            if case .failure = result {
-                Tmux.runAsync(fallback) { _ in self?.refresh() }
-            } else {
-                self?.refresh()
-            }
-        }
+        Tmux.runAsync(["switch-client", "-c", tty, "-t", target.tmuxTarget]) { [weak self] _ in self?.refresh() }
+    }
+
+    var isTerminalFocused: Bool {
+        guard let surface else { return false }
+        return surface.window?.firstResponder === surface
+    }
+
+    /// Keyboard focus is in the current Window's Browser (its page or omnibox).
+    var isBrowserFocused: Bool {
+        !isTerminalFocused && currentBrowser?.isOpen == true
     }
 
     func focusTerminal() {
@@ -257,28 +245,25 @@ final class WorkspaceStore {
             newSession()
             return
         }
-        // -d: don't change the window other clients of that session are looking at.
+        // -d, then switch only our client: other Sessions' current windows stay put.
         let args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(sessionID):", "-c", sibling.path]
         Tmux.runAsync(args) { [weak self] result in
             guard let self, case .success(let output) = result else { return }
             let windowID = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            self.switchClient(to: ViewTarget(
-                sessionID: sessionID, sessionName: sibling.sessionName, windowID: windowID, path: sibling.path
-            ))
+            self.switchClient(to: Target(sessionID: sessionID, windowID: windowID, path: sibling.path))
         }
     }
 
     func newSession() {
         let cwd = selectedWindow?.path ?? NSHomeDirectory()
-        var args = ["new-session", "-d", "-P", "-F", "#{session_id}:#{window_id}:#{session_name}", "-c", cwd]
+        var args = ["new-session", "-d", "-P", "-F", "#{session_id}:#{window_id}", "-c", cwd]
         let name = (cwd as NSString).lastPathComponent.replacingOccurrences(of: ".", with: "_")
-        if !name.isEmpty, !sessionNames.contains(name) { args += ["-s", name] }
+        if !name.isEmpty, !windows.contains(where: { $0.sessionName == name }) { args += ["-s", name] }
         Tmux.runAsync(args) { [weak self] result in
             guard let self, case .success(let output) = result else { return }
-            let parts = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                .split(separator: ":", maxSplits: 2).map(String.init)
-            guard parts.count == 3 else { return }
-            self.switchClient(to: ViewTarget(sessionID: parts[0], sessionName: parts[2], windowID: parts[1], path: cwd))
+            let ids = output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":").map(String.init)
+            guard ids.count == 2 else { return }
+            self.switchClient(to: Target(sessionID: ids[0], windowID: ids[1], path: cwd))
         }
     }
 
@@ -303,44 +288,114 @@ final class WorkspaceStore {
 
     // MARK: - Browser
 
-    func browserTab(for windowID: String) -> BrowserTab {
-        if let tab = browsers[windowID] { return tab }
-        let tab = BrowserTab(windowID: windowID)
-        tab.onURLChange = { [weak self] url in
-            guard let self else { return }
-            self.savedURLs[windowID] = url
-            UserDefaults.standard.set(self.savedURLs, forKey: Keys.browserURLs)
-        }
-        if let saved = savedURLs[windowID], let url = URL(string: saved) { tab.load(url) }
-        browsers[windowID] = tab
-        return tab
+    /// The Window's Browser, restored from its tmux options on first use.
+    func browser(for windowID: String) -> Browser {
+        if let browser = browsers[windowID] { return browser }
+        let stored = windows.first { $0.id == windowID }?.storedBrowser ?? StoredBrowser()
+        let browser = Browser(windowID: windowID, stored: stored)
+        browser.onChange = { [weak self] in self?.persist($0) }
+        browsers[windowID] = browser
+        return browser
     }
 
-    var currentBrowserTab: BrowserTab? {
-        selectedWindowID.map(browserTab(for:))
+    var currentBrowser: Browser? {
+        selectedWindowID.map(browser(for:))
+    }
+
+    /// For the sidebar badge, without restoring Browsers nobody has looked at.
+    func tabCount(for window: TmuxWindow) -> Int {
+        browsers[window.id]?.tabs.count ?? window.storedBrowser.tabURLs.count
+    }
+
+    func toggleSidebar() {
+        sidebarVisible.toggle()
+    }
+
+    func setBrowserOpen(_ open: Bool) {
+        currentBrowser?.setOpen(open)
+        if !open { focusTerminal() }
     }
 
     func toggleBrowser() {
-        browserVisible.toggle()
-        if browserVisible {
-            if let tab = currentBrowserTab, !tab.hasPage { tab.wantsAddressFocus = true }
-        } else {
-            focusTerminal()
-        }
+        guard let browser = currentBrowser else { return }
+        setBrowserOpen(!browser.isOpen)
     }
 
     func focusAddressBar() {
-        browserVisible = true
-        currentBrowserTab?.wantsAddressFocus = true
+        guard let browser = currentBrowser else { return }
+        browser.setOpen(true)
+        browser.wantsAddressFocus = true
     }
 
-    func openInBrowser(_ url: URL) {
-        guard let tab = currentBrowserTab else {
+    /// Menu actions for the Browser. Their shortcuts only count when focus is
+    /// outside the terminal, where Ghostty/tmux bindings own the keyboard;
+    /// clicking the menu item always works.
+    func browserCommand(_ body: (Browser) -> Void) {
+        if NSApp.currentEvent?.type == .keyDown, isTerminalFocused { return }
+        guard let browser = currentBrowser else { return }
+        body(browser)
+        if !browser.isOpen { focusTerminal() }
+    }
+
+    /// Opens `url` as a Tab in a Window's Browser (the current Window by
+    /// default). For another Window it happens quietly: you aren't moved.
+    func openInBrowser(_ url: URL, windowID: String? = nil) {
+        guard let id = windowID ?? selectedWindowID else {
             NSWorkspace.shared.open(url)
             return
         }
-        browserVisible = true
-        tab.load(url)
+        browser(for: id).open(url)
+    }
+
+    /// Programs inside a Window open Tabs with `tmux set -w @muxify_open <url>`
+    /// (several URLs may be space-separated); we open them and clear the option.
+    private func consumeOpenRequests() {
+        for window in windows where !window.openRequests.isEmpty && !consumingOpen.contains(window.id) {
+            consumingOpen.insert(window.id)
+            for request in window.openRequests {
+                if let url = Omnibox.url(for: request) { openInBrowser(url, windowID: window.id) }
+            }
+            Tmux.runAsync(["set-option", "-wqu", "-t", window.id, Tmux.openOption]) { [weak self] _ in
+                self?.consumingOpen.remove(window.id)
+            }
+        }
+    }
+
+    /// Writes a Browser back onto its tmux Window, coalescing bursts of
+    /// changes (redirects, quick Tab switching) into one tmux call.
+    private func persist(_ browser: Browser) {
+        let id = browser.windowID
+        persistWork[id]?.cancel()
+        let work = DispatchWorkItem { [weak self, weak browser] in
+            self?.persistWork[id] = nil
+            guard let browser else { return }
+            Tmux.runAsync(browser.stored.setOptionArgs(windowID: id))
+        }
+        persistWork[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    // MARK: - Keyboard
+
+    /// Shortcuts the menu can't express. ⌘W closes a Tab when the Browser has
+    /// focus and never the app window (which would quit Muxify); ⌃Tab and
+    /// ⌃⇧Tab switch Tabs. Terminal focus is left to Ghostty/tmux bindings.
+    private func installKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === self.terminalHost.window else { return event }
+            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            let key = event.charactersIgnoringModifiers?.lowercased()
+
+            if flags == .command, key == "w" {
+                if self.isBrowserFocused { self.browserCommand { $0.closeActiveTab() } }
+                return nil
+            }
+            if event.keyCode == 0x30, flags == .control || flags == [.control, .shift], self.isBrowserFocused {
+                self.currentBrowser?.selectTab(offset: flags.contains(.shift) ? -1 : 1)
+                return nil
+            }
+            return event
+        }
     }
 }
 
@@ -361,11 +416,7 @@ extension WorkspaceStore {
             if let id = value("window"), let window = windows.first(where: { $0.id == id }) { select(window) }
         case "open":
             guard let input = value("url"), let target = Omnibox.url(for: input) else { return }
-            if let id = value("window"), id != selectedWindowID {
-                browserTab(for: id).load(target)
-            } else {
-                openInBrowser(target)
-            }
+            openInBrowser(target, windowID: value("window"))
         case "toggle-browser":
             toggleBrowser()
         default:
@@ -378,7 +429,7 @@ extension WorkspaceStore {
 
 extension WorkspaceStore: GhosttyRuntimeDelegate {
     func ghosttyOpenURL(_ url: URL) {
-        // cmd+click on a link in the terminal opens it in the sidebar browser.
+        // Cmd+click on a link in the terminal opens it as a Tab in this Window's Browser.
         if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
             openInBrowser(url)
         } else {

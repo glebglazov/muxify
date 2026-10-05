@@ -3,22 +3,12 @@ import SwiftUI
 
 struct SidebarView: View {
     let store: WorkspaceStore
-    let toggleSidebar: () -> Void
 
     /// Expanded sessions, by name (names survive tmux server restarts, ids don't).
     @State private var expanded: Set<String> = Self.loadExpanded()
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 2) {
-                Spacer()
-                TitlebarButton(systemName: "sidebar.left", help: "Hide Sidebar (⌃⌘S)", action: toggleSidebar)
-                BrowserToggle(store: store)
-            }
-            .padding(.leading, TitlebarMetrics.trafficLightsWidth)
-            .padding(.trailing, 8)
-            .frame(height: TitlebarMetrics.height)
-            .background(WindowDragArea())
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
@@ -33,7 +23,11 @@ struct SidebarView: View {
                             )
                             if isExpanded {
                                 ForEach(session.windows) { window in
-                                    WindowRow(window: window, isSelected: window.id == store.selectedWindowID)
+                                    WindowRow(
+                                        window: window,
+                                        isSelected: window.id == store.selectedWindowID,
+                                        tabCount: store.tabCount(for: window)
+                                    )
                                         .id(window.id)
                                         .onTapGesture { store.select(window) }
                                         .contextMenu { menu(for: window) }
@@ -53,7 +47,6 @@ struct SidebarView: View {
             Divider()
             footer
         }
-        .ignoresSafeArea(.container, edges: .top)
         .overlay {
             if store.windows.isEmpty {
                 Text(store.serverRunning ? "No windows" : "No tmux server")
@@ -214,6 +207,7 @@ private struct SessionHeader: View {
 private struct WindowRow: View {
     let window: TmuxWindow
     let isSelected: Bool
+    let tabCount: Int
 
     @State private var hovering = false
 
@@ -229,6 +223,15 @@ private struct WindowRow: View {
                     Circle()
                         .fill(isSelected ? Color.white : (window.hasBell ? Color.orange : Color.accentColor))
                         .frame(width: 5, height: 5)
+                }
+                if tabCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "globe")
+                        Text("\(tabCount)")
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(secondaryStyle)
+                    .help("\(tabCount) browser tab(s)")
                 }
                 if window.paneCount > 1 {
                     HStack(spacing: 2) {

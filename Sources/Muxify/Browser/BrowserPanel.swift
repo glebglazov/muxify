@@ -1,10 +1,126 @@
 import SwiftUI
 import WebKit
 
-/// The right-hand browser sidebar: navigation controls, an omnibox and the page.
+/// A Window's Browser: a tab strip over the active Tab's toolbar and page.
 struct BrowserPanel: View {
+    let browser: Browser
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TabStrip(browser: browser)
+            Divider()
+            if let tab = browser.activeTab {
+                TabContent(browser: browser, tab: tab)
+                    .id(tab.id)
+            } else {
+                Color(nsColor: .windowBackgroundColor)
+            }
+        }
+    }
+}
+
+// MARK: - Tab strip
+
+private struct TabStrip: View {
+    let browser: Browser
+
+    var body: some View {
+        GeometryReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(browser.tabs) { tab in
+                        TabItem(
+                            tab: tab,
+                            isActive: tab.id == browser.activeTabID,
+                            width: tabWidth(available: proxy.size.width),
+                            onSelect: { browser.select(tab) },
+                            onClose: { browser.close(tab) }
+                        )
+                    }
+                    ToolbarIconButton(systemName: "plus", help: "New Tab (⌘T)", action: browser.newTab)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: proxy.size.height)
+            }
+        }
+        .frame(height: 36)
+        .background(WindowDragArea())
+        .background(Color.primary.opacity(0.035))
+    }
+
+    /// Tabs share the strip like Chrome's, between a readable minimum and a
+    /// maximum; past the minimum the strip scrolls.
+    private func tabWidth(available: CGFloat) -> CGFloat {
+        let count = CGFloat(max(browser.tabs.count, 1))
+        let room = available - 16 - 30 - 4 * count
+        return min(220, max(110, room / count))
+    }
+}
+
+private struct TabItem: View {
     let tab: BrowserTab
+    let isActive: Bool
+    let width: CGFloat
+    let onSelect: () -> Void
     let onClose: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if tab.isLoading {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 14)
+            Text(tab.displayTitle)
+                .font(.system(size: 12))
+                .foregroundStyle(isActive ? .primary : .secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .opacity(isActive || hovering ? 1 : 0)
+            .help("Close Tab (⌘W)")
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .frame(width: width, height: 26)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(background)
+                .shadow(color: .black.opacity(isActive ? 0.08 : 0), radius: 1, y: 0.5)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .onTapGesture(perform: onSelect)
+        .onHover { hovering = $0 }
+        .help(tab.hasPage ? tab.urlString : "New Tab")
+    }
+
+    private var background: Color {
+        if isActive { return Color(nsColor: .controlBackgroundColor) }
+        return hovering ? Color.primary.opacity(0.06) : .clear
+    }
+}
+
+// MARK: - Active Tab
+
+/// The active Tab's navigation row, omnibox and page.
+private struct TabContent: View {
+    let browser: Browser
+    let tab: BrowserTab
 
     @State private var address = ""
     @State private var ports: [Int] = []
@@ -28,7 +144,7 @@ struct BrowserPanel: View {
         .onChange(of: tab.urlString) { _, newValue in
             if !addressFocused { address = newValue }
         }
-        .onChange(of: tab.wantsAddressFocus) { _, _ in consumeFocusRequest() }
+        .onChange(of: browser.wantsAddressFocus) { _, _ in consumeFocusRequest() }
     }
 
     // MARK: - Toolbar
@@ -53,7 +169,8 @@ struct BrowserPanel: View {
                 Button("Open in Default Browser", action: tab.openInDefaultBrowser).disabled(!tab.hasPage)
                 Button("Copy URL", action: tab.copyURL).disabled(!tab.hasPage)
                 Divider()
-                Button("Close Browser", action: onClose)
+                Button("Close Tab") { browser.close(tab) }
+                Button("Hide Browser") { browser.setOpen(false) }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .medium))
@@ -66,7 +183,7 @@ struct BrowserPanel: View {
             .help("More")
         }
         .padding(.horizontal, 10)
-        .frame(height: 44)
+        .frame(height: 40)
         .overlay(alignment: .bottom) { progressBar }
     }
 
@@ -164,8 +281,8 @@ struct BrowserPanel: View {
     /// Only explicit requests (opening the panel, ⌘L) take focus; merely
     /// switching tmux windows keeps the keyboard in the terminal.
     private func consumeFocusRequest() {
-        guard tab.wantsAddressFocus else { return }
-        tab.wantsAddressFocus = false
+        guard browser.wantsAddressFocus else { return }
+        browser.wantsAddressFocus = false
         DispatchQueue.main.async { addressFocused = true }
     }
 
@@ -175,7 +292,7 @@ struct BrowserPanel: View {
     }
 
     private func scanPorts() {
-        DevServerScanner.scan(windowID: tab.windowID) { ports = $0 }
+        DevServerScanner.scan(windowID: browser.windowID) { ports = $0 }
     }
 }
 
@@ -205,8 +322,8 @@ private struct ToolbarIconButton: View {
     }
 }
 
-/// Hosts a tab's long-lived WKWebView. The web view is re-parented rather
-/// than recreated, so pages survive switching tmux windows.
+/// Hosts a Tab's long-lived WKWebView. The web view is re-parented rather
+/// than recreated, so pages survive switching Tabs and Windows.
 private struct WebViewHost: NSViewRepresentable {
     let tab: BrowserTab
 
