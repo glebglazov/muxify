@@ -31,9 +31,11 @@ Each Extension writes two tmux pane options on the Agent's own Pane
   fails the Agent's hook: tmux errors are ignored.
 
 Muxify reads both options in its once-a-second tmux poll and lists the Agent in
-the sidebar's Agents section with a Status dot: working blue, blocked orange,
-done green, failed red, no dot without a Status. An Agent whose Pane is back at
-a plain shell is hidden, which covers options left behind by a crash.
+the sidebar's Agents section. An Agent whose Pane is back at a plain shell is
+hidden, which covers options left behind by a crash. Muxify itself sets a third
+option, `@muxify_agent_unread`, when the Agent reaches done, failed or blocked
+while you aren't looking at its Window (see the main README); Extensions never
+touch it.
 
 ## Install
 
@@ -218,8 +220,8 @@ its handlers with `pi.on`. It reports only when `ctx.mode` is `"tui"`: Pi
 processes started in `json`, `print` or `rpc` mode (subagents, scripts) inherit
 the Pane's `TMUX_PANE` and stay silent. It writes synchronously, so the writes
 follow event order. It uses only TypeScript that Node can run by stripping
-types (no enums, namespaces or parameter properties), so the tests load it with
-plain Node 24.
+types (no enums, namespaces or parameter properties), so plain Node 24 can load
+it too.
 
 | Pi event                                   | Status                                    |
 | ------------------------------------------ | ----------------------------------------- |
@@ -246,35 +248,3 @@ failed.
 
 Known gap: a `/new`, `/resume` or `/fork` session keeps the previous session's
 last Status until its first run starts.
-
-## Tests
-
-```sh
-sh extensions/test.sh
-```
-
-The script needs only `jq` and `node` (24 or later); no Agent has to be installed. It puts a
-fake `tmux` first on `PATH` that logs each invocation's arguments, sets
-`TMUX_PANE` to a fake Pane id (`%99`), feeds each Extension sample events and
-checks the logged tmux calls. Shell hooks get the event JSON on stdin; the
-Codex daemon guard is checked by running the hook from a `sh -c` whose
-arguments end in `app-server --listen unix:// --managed-daemon` (as its parent,
-and two levels up), which must write nothing, and from one without the marker,
-which must still report. Because the guard looks at every ancestor, the suite
-fails early if one of its own ancestors mentions `--managed-daemon` (as when it
-runs inside Codex's daemon). The
-OpenCode plugin is loaded by a small Node script that calls `setup` with a fake
-`api` (a session tree with a subagent, an unrelated session, a router showing
-the root session) and emits events through the captured `listen` callback. The
-Pi extension is loaded the same way (Node 24 strips its types), its default
-export is called with a fake `pi` that records the `pi.on` handlers, and the
-events are fired with a fake `ctx` whose `mode` and `isIdle()` each case sets.
-It then runs `install.sh` against temporary home directories (with foreign hooks
-to preserve, such as herdr's and lavish's Codex `SessionStart` hooks, without
-`settings.json` or `hooks.json`, without the Agent's config directory, without
-`jq`) and checks the copied files, the added hook entries, the `.bak` copy, the
-Codex reminders and that a second run leaves `settings.json` and `hooks.json`
-byte-identical. The
-real home directory is never touched. It stops at the first mismatch, printing
-the failing case, and exits non-zero; on success it prints
-`ok: <n> checks passed`.

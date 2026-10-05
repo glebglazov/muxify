@@ -76,7 +76,7 @@ private struct SectionResizeHandle: View {
     }
 }
 
-/// The Sessions and their Windows, with the New Window/New Session footer.
+/// The Sessions and their Windows.
 private struct SessionsSection: View {
     let store: WorkspaceStore
 
@@ -94,8 +94,7 @@ private struct SessionsSection: View {
                                 session: session,
                                 isExpanded: isExpanded,
                                 containsSelection: session.windows.contains { $0.id == store.selectedWindowID },
-                                onToggle: { toggle(session.name) },
-                                onNewWindow: { store.newWindow(inSession: session.id) }
+                                onToggle: { toggle(session.name) }
                             )
                             if isExpanded {
                                 ForEach(session.windows) { window in
@@ -111,8 +110,8 @@ private struct SessionsSection: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
                 }
                 .scrollIndicators(.never)
                 .onChange(of: store.selectedWindowID) { _, id in
@@ -120,8 +119,6 @@ private struct SessionsSection: View {
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
                 }
             }
-            Divider()
-            footer
         }
         .overlay {
             if store.windows.isEmpty {
@@ -150,30 +147,6 @@ private struct SessionsSection: View {
         withAnimation(.easeOut(duration: 0.15)) {
             if expanded.contains(name) { expanded.remove(name) } else { expanded.insert(name) }
         }
-    }
-
-    private var footer: some View {
-        HStack(spacing: 4) {
-            Button {
-                store.newWindow()
-            } label: {
-                Label("New Window", systemImage: "plus")
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .buttonStyle(.borderless)
-            .help("New tmux window in this session (⌘T)")
-            Spacer()
-            Button {
-                store.newSession()
-            } label: {
-                Image(systemName: "rectangle.stack.badge.plus")
-            }
-            .buttonStyle(.borderless)
-            .help("New tmux session (⌘N)")
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
     @ViewBuilder
@@ -224,7 +197,6 @@ private struct SessionHeader: View {
     let isExpanded: Bool
     let containsSelection: Bool
     let onToggle: () -> Void
-    let onNewWindow: () -> Void
 
     @State private var hovering = false
 
@@ -236,31 +208,18 @@ private struct SessionHeader: View {
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 .frame(width: 10)
             Text(session.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(highlighted ? Color.accentColor : Color.primary)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            if hovering {
-                Button(action: onNewWindow) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .help("New window in \(session.name)")
-            } else {
-                if !isExpanded, session.windows.contains(where: \.hasBell) {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 5, height: 5)
-                }
-                Text("\(session.windows.count)")
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.tertiary)
+            if !isExpanded, session.windows.contains(where: \.hasBell) {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 5, height: 5)
             }
         }
         .padding(.horizontal, 8)
-        .frame(height: 28)
+        .frame(height: 24)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(background)
@@ -268,7 +227,7 @@ private struct SessionHeader: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
         .onHover { hovering = $0 }
-        .padding(.top, 2)
+        .padding(.top, 1)
     }
 
     /// A collapsed session hiding the current window still shows where you are.
@@ -288,47 +247,40 @@ private struct WindowRow: View {
     @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 6) {
-                Text(window.displayTitle)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 4)
-                if window.hasBell {
-                    Circle()
-                        .fill(isSelected ? Color.white : Color.orange)
-                        .frame(width: 5, height: 5)
-                }
-                if tabCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "globe")
-                        Text("\(tabCount)")
-                    }
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(secondaryStyle)
-                    .help("\(tabCount) browser tab(s)")
-                }
-                if window.paneCount > 1 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "rectangle.split.2x1")
-                        Text("\(window.paneCount)")
-                    }
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(secondaryStyle)
-                }
+        HStack(spacing: 6) {
+            Logo(name: window.logoName)
+            Text(window.displayTitle)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            if window.hasBell {
+                Circle()
+                    .fill(isSelected ? Color.white : Color.orange)
+                    .frame(width: 5, height: 5)
             }
-            if let branch = window.branch {
-                Text(branch)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(secondaryStyle)
-                    .lineLimit(1)
+            if tabCount > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "globe")
+                    Text("\(tabCount)")
+                }
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(secondaryStyle)
+                .help("\(tabCount) browser tab(s)")
+            }
+            if window.paneCount > 1 {
+                HStack(spacing: 2) {
+                    Image(systemName: "rectangle.split.2x1")
+                    Text("\(window.paneCount)")
+                }
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(secondaryStyle)
             }
         }
         .foregroundStyle(isSelected ? Color.white : Color.primary)
-        .padding(.leading, 24)
-        .padding(.trailing, 8)
-        .padding(.vertical, 5)
+        .padding(.leading, 20)
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -391,7 +343,7 @@ private struct AgentRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            AgentIcon(kind: agent.kind)
+            Logo(name: agent.kind.rawValue)
             VStack(alignment: .leading, spacing: 1) {
                 Text(agent.windowTitle)
                     .font(.system(size: 12))
@@ -403,9 +355,9 @@ private struct AgentRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if let status = agent.status {
+            if let color = agent.dotColor {
                 Circle()
-                    .fill(status.color)
+                    .fill(color)
                     .frame(width: 7, height: 7)
             }
         }
@@ -418,43 +370,61 @@ private struct AgentRow: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
-        .help("\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")")
+        .help("\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")\(agent.unread ? ", unread" : "")")
     }
 }
 
-/// The Agent's logo from `Resources/Agents`. The black-only logos are drawn
-/// in the text color so they stay visible on dark themes.
-private struct AgentIcon: View {
-    let kind: AgentKind
+/// A program's logo from `Resources/Logos` (`<name>.svg` or `<name>.png`),
+/// or the terminal logo when there is none. On a dark theme `<name>.dark.svg`
+/// wins when there is one; black-only logos without one are drawn in the text
+/// color so they stay visible.
+private struct Logo: View {
+    let name: String
+
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Group {
-            if let image = NSImage(named: kind.rawValue) {
+            if let image = (colorScheme == .dark ? Self.image(name + ".dark") : nil) ?? Self.image(name) ?? Self.image("terminal") {
                 Image(nsImage: image)
-                    .renderingMode(kind.isMonochrome ? .template : .original)
+                    .renderingMode(Self.monochrome.contains(name) ? .template : .original)
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
             } else {
-                Image(systemName: "sparkle")
+                Image(systemName: "terminal")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
         }
         .foregroundStyle(.primary)
-        .frame(width: 16, height: 16)
+        .frame(width: 14, height: 14)
+    }
+
+    private static let monochrome: Set<String> = ["pi"]
+    /// Looked up once per name; nil when the bundle has no logo for it.
+    private static var cache: [String: NSImage?] = [:]
+
+    private static func image(_ name: String) -> NSImage? {
+        if let cached = cache[name] { return cached }
+        let url = name.isEmpty ? nil : ["svg", "png"].lazy
+            .compactMap { Bundle.main.url(forResource: name, withExtension: $0) }.first
+        let image = url.flatMap(NSImage.init(contentsOf:))
+        cache[name] = image
+        return image
     }
 }
 
-private extension AgentKind {
-    var isMonochrome: Bool { self == .opencode || self == .pi }
-}
-
-private extension AgentStatus {
-    var color: Color {
-        switch self {
+private extension Agent {
+    /// Working blue, blocked orange, failed red, done green while unread.
+    /// A read Agent that is done (or hasn't run a turn) gets no dot.
+    var dotColor: Color? {
+        switch status {
         case .working: return .blue
         case .blocked: return .orange
-        case .done: return .green
         case .failed: return .red
+        case .done: return unread ? .green : nil
+        case nil: return nil
         }
     }
 }

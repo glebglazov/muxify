@@ -36,8 +36,12 @@ _Avoid_: bot, assistant, agent session
 
 **Status**:
 What an Agent is doing: working (a turn is running), blocked (waiting for the user to answer a permission prompt or question), done (the last turn ended, including by Esc) or failed (the last turn ended with an error). An Agent that has not run a turn yet has no Status.
-_Avoid_: state, idle, unread
+_Avoid_: state, idle
+
+**Unread**:
+An Agent that reached done, failed or blocked while the user wasn't looking at its Window. Looking at the Window makes it read.
+_Avoid_: unseen, new, notification
 
 **Extension**:
-The single file installed into an Agent's own plugin or hook system that reports the Agent and its Status to Muxify.
+The file or plugin folder installed into an Agent's own plugin or hook system that reports the Agent and its Status to Muxify.
 _Avoid_: integration, hook (when you mean the whole file), plugin (when you mean ours)

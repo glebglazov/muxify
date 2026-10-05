@@ -57,9 +57,13 @@ is defined in
   happen. Titles, paths and bells are polled once a second. Sessions are collapsible
   groups; the current one opens automatically, and which ones are open is
   remembered. Each Window row shows:
+  - the logo of what its active Pane runs: the Agent reporting there, else the
+    command (`Resources/Logos/<command>.svg` or `.png`, e.g. `nvim`, `node`; a
+    version suffix and case are ignored, and a few commands share a logo, such
+    as `cargo` → `rust`; shells get `terminal`), else the terminal logo. On a dark theme
+    `<command>.dark.svg` is used when there is one
   - a title: the pane title (fish sets it to `~/w/project`), falling back to the
-    window name
-  - the git branch, read from `.git/HEAD`
+    window name; the glyph Claude Code puts in front is dropped
   - a globe with the Tab count, if the Window's Browser has Tabs
   - the pane count
   - a dot if a Pane rang the bell
@@ -76,16 +80,21 @@ is defined in
   (`claude`, `codex`, `opencode` or `pi`) and `@muxify_agent_status`
   (`working`, `blocked`, `done` or `failed`; unset until the first turn).
   Muxify reads them with `list-panes -a` in the same once-a-second poll. A row
-  shows the Agent's icon, its Window's title and `session:window`, and a Status
-  dot: blue working, orange blocked, green done, red failed, none before the
-  first turn. A Pane that is back at a plain shell is hidden, in case a crashed
-  Agent left its options behind. Clicking a row switches to the Window and
+  shows the Agent's icon, its Window's title (without the glyph Claude Code
+  puts in front) and `session:window`, and a dot: blue working, orange blocked,
+  red failed, green done but unread. An Agent becomes **unread** when it
+  reaches done, failed or blocked while you aren't looking at its Window (the
+  Window is selected and Muxify is in front); looking at it makes it read.
+  Muxify keeps this on the Pane as `@muxify_agent_unread`, so it survives a
+  relaunch. A read Agent that is done, or hasn't run a turn yet, has no dot.
+  Unread Agents are listed first, then the read ones, each in tmux order. A
+  Pane that is back at a plain shell is hidden, in case a crashed Agent left
+  its options behind. Clicking a row switches to the Window and
   selects the Agent's Pane. The Extensions live in [extensions/](extensions);
   the contract is
   [ADR 0004](docs/adr/0004-agents-report-status-through-pane-options.md).
-  View → Show Sessions and Show Agents hide either section (the New Window/New
-  Session footer goes with Sessions); the other then fills the sidebar, and with
-  both hidden the sidebar stays open but empty. With both shown, drag the
+  View → Show Sessions and Show Agents hide either section; the other then
+  fills the sidebar, and with both hidden the sidebar stays open but empty. With both shown, drag the
   divider between them to resize; the split is remembered.
 - **Browser.** Each Window has its own Browser in a panel on the right: a tab
   strip, back/forward/reload, an omnibox (URLs, bare hosts like `localhost:3000`,

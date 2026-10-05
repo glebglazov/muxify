@@ -12,3 +12,5 @@ This keeps tmux the single source of truth (ADR 0001). An Extension needs nothin
 ## Consequences
 
 An Agent killed without a chance to clean up (crash, `kill -9`) leaves its options behind. To cover that, Muxify hides an Agent whose Pane is back at a plain shell.
+
+Whether an Agent is Unread is kept the same way, in a third pane option, `@muxify_agent_unread`. Muxify sets and clears it itself, because only Muxify knows whether you are looking at the Window; the Extensions don't touch it.

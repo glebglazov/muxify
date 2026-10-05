@@ -18,7 +18,9 @@ targets:
       - path: Sources/Muxify
       - path: Resources/AppIcon.icon
         buildPhase: resources
-      - path: Resources/Agents
+      # Program logos for Window and Agent rows, named after the command
+      # (or Agent) they stand for.
+      - path: Resources/Logos
         buildPhase: resources
       # A folder reference keeps the layout, so the bundled install.sh finds
       # the Extension files next to it (Contents/Resources/extensions/...).

@@ -15,7 +15,8 @@ struct TmuxWindow: Identifiable, Hashable {
     let paneCount: Int
     let hasBell: Bool
     let sessionActivity: Int
-    var branch: String?
+    /// The active Pane's `@muxify_agent`, empty when no Agent reports there.
+    let agent: String
     /// The Window's Browser as last written to its tmux options.
     var storedBrowser: StoredBrowser
     /// URLs a program asked to open via `@muxify_open` (not yet consumed).
@@ -25,7 +26,7 @@ struct TmuxWindow: Identifiable, Hashable {
     /// `~/w/project`), so it is the best human label. tmux defaults it to the
     /// hostname, in which case we fall back to the window name or the path.
     var displayTitle: String {
-        let title = paneTitle.trimmingCharacters(in: .whitespaces)
+        let title = Self.withoutLeadingGlyph(paneTitle.trimmingCharacters(in: .whitespaces))
         if !title.isEmpty, title != Tmux.hostName, title != Tmux.shortHostName {
             return title
         }
@@ -34,6 +35,36 @@ struct TmuxWindow: Identifiable, Hashable {
     }
 
     var abbreviatedPath: String { Paths.tildify(path) }
+
+    /// The logo for what the active Pane runs (`Resources/Logos`): the Agent
+    /// it reports, else its command. Claude Code shows up as its version
+    /// number (`2.1.289`) until its Extension reports. A command's version
+    /// suffix and case don't matter (`python3.12`, `Python` → `python`).
+    /// Shells get the terminal logo.
+    var logoName: String {
+        if AgentKind(rawValue: agent) != nil { return agent }
+        if Tmux.shellNames.contains(command) { return "terminal" }
+        if command.range(of: #"^\d+\.\d+\.\d+$"#, options: .regularExpression) != nil { return AgentKind.claude.rawValue }
+        if let alias = Self.commandAliases[command] { return alias }
+        let name = command.lowercased().replacingOccurrences(of: #"[\d.]+$"#, with: "", options: .regularExpression)
+        return Self.commandAliases[name] ?? (name.isEmpty ? command : name)
+    }
+
+    /// Commands that share another command's logo.
+    private static let commandAliases = [
+        "vim": "nvim", "vi": "nvim",
+        "cargo": "rust", "rustc": "rust",
+        "postgres": "psql",
+        "redis-cli": "redis", "redis-server": "redis",
+    ]
+
+    /// Claude Code titles its terminal "✳ <conversation>" and animates the
+    /// glyph while it works; the logo already says it's Claude.
+    private static func withoutLeadingGlyph(_ title: String) -> String {
+        let scalars = title.unicodeScalars.drop { $0.properties.generalCategory == .otherSymbol || $0 == "·" }
+        let text = String(String.UnicodeScalarView(scalars)).trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? title : text
+    }
 }
 
 /// A Window's Browser as stored in tmux window options (ADR 0003). Tab URLs
@@ -88,6 +119,8 @@ struct TmuxPane: Hashable {
     let agent: String
     /// `@muxify_agent_status`, empty when unset.
     let agentStatus: String
+    /// `@muxify_agent_unread`, which Muxify itself sets.
+    let unread: Bool
 }
 
 struct TmuxSnapshot {
@@ -131,6 +164,9 @@ enum Tmux {
     // Pane options an Agent's Extension writes (ADR 0004).
     static let agentOption = "@muxify_agent"
     static let agentStatusOption = "@muxify_agent_status"
+    /// Set by Muxify, not the Extension: the Agent finished or got blocked
+    /// while you weren't looking at its Window.
+    static let agentUnreadOption = "@muxify_agent_unread"
 
     private static let queue = DispatchQueue(label: "muxify.tmux", qos: .userInitiated)
     private static let separator = "\u{241F}"
@@ -184,12 +220,12 @@ enum Tmux {
             "#{window_name}", "#{pane_title}", "#{pane_current_path}", "#{pane_current_command}",
             "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{session_activity}",
             "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(browserOpenOption)}", "#{\(openOption)}",
-            "#{\(lastWindowOption)}",
+            "#{\(lastWindowOption)}", "#{\(agentOption)}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}"].joined(separator: s)
         let paneFormat = [
             "P", "#{pane_id}", "#{window_id}", "#{pane_current_command}",
-            "#{\(agentOption)}", "#{\(agentStatusOption)}",
+            "#{\(agentOption)}", "#{\(agentStatusOption)}", "#{\(agentUnreadOption)}",
         ].joined(separator: s)
 
         let output: String
@@ -209,22 +245,25 @@ enum Tmux {
         var lastWindowID: String?
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let f = line.components(separatedBy: s)
-            if f.first == "W", f.count >= 18 {
+            if f.first == "W", f.count >= 19 {
                 windows.append(TmuxWindow(
                     id: f[1], sessionID: f[2], sessionName: f[3], index: Int(f[4]) ?? 0,
                     name: f[5], paneTitle: f[6], path: f[7], command: f[8],
                     isActive: f[9] == "1", paneCount: Int(f[10]) ?? 1,
                     hasBell: f[11] == "1",
                     sessionActivity: Int(f[12]) ?? 0,
-                    branch: GitInfo.branch(at: f[7]),
+                    agent: f[18],
                     storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], open: f[15]),
                     openRequests: f[16].split(separator: " ").map(String.init)
                 ))
                 if !f[17].isEmpty { lastWindowID = f[17] }
             } else if f.first == "C", f.count >= 4 {
                 clients.append(TmuxClient(tty: f[1], sessionID: f[2], windowID: f[3]))
-            } else if f.first == "P", f.count >= 6 {
-                panes.append(TmuxPane(id: f[1], windowID: f[2], command: f[3], agent: f[4], agentStatus: f[5]))
+            } else if f.first == "P", f.count >= 7 {
+                panes.append(TmuxPane(
+                    id: f[1], windowID: f[2], command: f[3],
+                    agent: f[4], agentStatus: f[5], unread: f[6] == "1"
+                ))
             }
         }
         return TmuxSnapshot(

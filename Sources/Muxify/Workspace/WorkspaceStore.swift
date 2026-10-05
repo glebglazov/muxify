@@ -72,6 +72,9 @@ final class WorkspaceStore {
     @ObservationIgnored private var isRefreshing = false
     /// Something changed while a snapshot was in flight; take another one.
     @ObservationIgnored private var refreshAgain = false
+    /// Each Pane's `@muxify_agent_status` in the last snapshot, to catch changes.
+    @ObservationIgnored private var agentStatuses: [String: String] = [:]
+    @ObservationIgnored private var activationObserver: Any?
     @ObservationIgnored private var started = false
 
     init() {
@@ -95,6 +98,10 @@ final class WorkspaceStore {
             return
         }
         installKeyMonitor()
+        // Coming back to Muxify reads the Agents in the Window on screen.
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.refresh() }
         events.onEvent = { [weak self] in self?.handle($0) }
         refresh(attachIfNeeded: true)
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -149,6 +156,7 @@ final class WorkspaceStore {
             followClient(snapshot.clients)
         }
         consumeOpenRequests()
+        updateUnread(snapshot.panes)
 
         // (Re)start listening once there is a Session to attach to.
         if snapshot.serverRunning, !events.isRunning,
@@ -252,6 +260,32 @@ final class WorkspaceStore {
         } else {
             switchClient(to: Target(sessionID: agent.sessionID, windowID: agent.windowID, path: nil))
         }
+    }
+
+    /// An Agent becomes unread when it reaches done, failed or blocked while
+    /// you aren't looking at its Window (selected, with Muxify in front), and
+    /// read again once you are. The flag is a Pane option, so it outlives a
+    /// relaunch; it goes when the Agent does.
+    private func updateUnread(_ panes: [TmuxPane]) {
+        let lookingAt = NSApp.isActive ? selectedWindowID : nil
+        var commands: [[String]] = []
+        for pane in panes {
+            let previous = agentStatuses[pane.id]
+            agentStatuses[pane.id] = pane.agentStatus
+            let isAgent = Agent.runs(in: pane)
+            if pane.unread {
+                if !isAgent || pane.windowID == lookingAt {
+                    commands.append(["set-option", "-pqu", "-t", pane.id, Tmux.agentUnreadOption])
+                }
+            } else if isAgent, pane.windowID != lookingAt, let previous, previous != pane.agentStatus,
+                      AgentStatus(rawValue: pane.agentStatus)?.needsAttention == true {
+                commands.append(["set-option", "-pq", "-t", pane.id, Tmux.agentUnreadOption, "1"])
+            }
+        }
+        let live = Set(panes.map(\.id))
+        agentStatuses = agentStatuses.filter { live.contains($0.key) }
+        guard !commands.isEmpty else { return }
+        Tmux.runAsync(Array(commands.joined(separator: [";"]))) { [weak self] _ in self?.refresh() }
     }
 
     private func switchClient(to target: Target) {

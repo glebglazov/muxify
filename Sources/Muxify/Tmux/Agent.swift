@@ -18,6 +18,9 @@ enum AgentKind: String, CaseIterable {
 /// What an Agent is doing, from the Pane's `@muxify_agent_status` option.
 enum AgentStatus: String {
     case working, blocked, done, failed
+
+    /// Reaching this Status while you aren't looking makes the Agent unread.
+    var needsAttention: Bool { self != .working }
 }
 
 /// An Agent running in a Pane, as listed in the sidebar's Agents section.
@@ -27,6 +30,8 @@ struct Agent: Identifiable, Hashable {
     let kind: AgentKind
     /// nil until the Agent has run a turn.
     let status: AgentStatus?
+    /// It finished or got blocked while you weren't looking at its Window.
+    let unread: Bool
     let windowID: String
     let sessionID: String
     let sessionName: String
@@ -39,20 +44,26 @@ struct Agent: Identifiable, Hashable {
     /// `session:window`, e.g. `muxify:2`.
     var location: String { "\(sessionName):\(windowIndex)" }
 
-    /// One Agent per Pane whose `@muxify_agent` names a known Agent, in tmux
-    /// order (Session, Window, Pane). A Pane back at a plain shell is skipped:
+    /// Whether the Pane runs an Agent. A Pane back at a plain shell doesn't:
     /// an Agent killed without cleaning up leaves its options behind.
+    static func runs(in pane: TmuxPane) -> Bool {
+        AgentKind(rawValue: pane.agent) != nil && !Tmux.shellNames.contains(pane.command)
+    }
+
+    /// One Agent per Pane that runs one: the unread Agents first, then the
+    /// read ones, each in tmux order (Session, Window, Pane).
     static func list(panes: [TmuxPane], windows: [TmuxWindow]) -> [Agent] {
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return panes.compactMap { pane in
-            guard let kind = AgentKind(rawValue: pane.agent),
-                  !Tmux.shellNames.contains(pane.command),
+        let agents = panes.compactMap { pane -> Agent? in
+            guard runs(in: pane),
+                  let kind = AgentKind(rawValue: pane.agent),
                   let window = windowsByID[pane.windowID]
             else { return nil }
             return Agent(
                 paneID: pane.id,
                 kind: kind,
                 status: AgentStatus(rawValue: pane.agentStatus),
+                unread: pane.unread,
                 windowID: window.id,
                 sessionID: window.sessionID,
                 sessionName: window.sessionName,
@@ -60,5 +71,6 @@ struct Agent: Identifiable, Hashable {
                 windowTitle: window.displayTitle
             )
         }
+        return agents.filter(\.unread) + agents.filter { !$0.unread }
     }
 }
