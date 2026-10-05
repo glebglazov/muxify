@@ -12,6 +12,42 @@ protocol GhosttyRuntimeDelegate: AnyObject {
     func ghosttyEqualizeSplits()
     func ghosttyGotoTab(_ tab: Int32)
     func ghosttySurfaceClosed(_ view: TerminalSurfaceView)
+    func ghosttyThemeChanged(_ theme: TerminalTheme)
+}
+
+/// The colors of the active Ghostty theme, for tinting Muxify's own chrome.
+struct TerminalTheme: Equatable {
+    let background: NSColor
+    let foreground: NSColor
+
+    init?(config: ghostty_config_t) {
+        guard let background = Self.color(config, "background"),
+              let foreground = Self.color(config, "foreground") else { return nil }
+        self.background = background
+        self.foreground = foreground
+    }
+
+    var isDark: Bool {
+        guard let rgb = background.usingColorSpace(.sRGB) else { return false }
+        return 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent < 0.5
+    }
+
+    /// Header and sidebar: the terminal background shaded slightly toward the
+    /// foreground, so they read as chrome around the terminal.
+    var chrome: NSColor {
+        background.blended(withFraction: 0.06, of: foreground) ?? background
+    }
+
+    var separator: NSColor {
+        foreground.withAlphaComponent(isDark ? 0.18 : 0.14)
+    }
+
+    private static func color(_ config: ghostty_config_t, _ key: String) -> NSColor? {
+        var color = ghostty_config_color_s()
+        let found = key.withCString { ghostty_config_get(config, &color, $0, UInt(key.utf8.count)) }
+        guard found else { return nil }
+        return NSColor(srgbRed: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255, blue: CGFloat(color.b) / 255, alpha: 1)
+    }
 }
 
 /// Owns the single `ghostty_app_t` and bridges libghostty's C callbacks.
@@ -20,6 +56,7 @@ final class GhosttyRuntime {
 
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
+    private(set) var theme: TerminalTheme?
     weak var delegate: GhosttyRuntimeDelegate?
 
     private init() {}
@@ -58,6 +95,16 @@ final class GhosttyRuntime {
         )
         app = ghostty_app_new(&runtime, config)
         if app == nil { NSLog("muxify: ghostty_app_new failed") }
+        // Resolve a light:/dark: theme pair right away so the chrome has the
+        // right colors before the first terminal exists. libghostty only
+        // re-applies the config when the scheme *changes* (it starts as
+        // light), so apply it once explicitly to get a CONFIG_CHANGE.
+        setColorScheme(dark: NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+        if let app, let config { ghostty_app_update_config(app, config) }
+        configStamp = Self.configFilesStamp()
+        configWatcher = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+            GhosttyRuntime.shared.reloadIfConfigFilesChanged()
+        }
 
         let center = NotificationCenter.default
         center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
@@ -83,11 +130,66 @@ final class GhosttyRuntime {
         ghostty_app_set_color_scheme(app, dark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
     }
 
+    /// Re-reads the config files. libghostty answers with CONFIG_CHANGE,
+    /// which carries the resolved theme colors.
     func reloadConfig() {
         guard let app, let fresh = Self.loadConfig() else { return }
+        configStamp = Self.configFilesStamp()
         ghostty_app_update_config(app, fresh)
+        // Free the old config only after libghostty has switched to the new one.
         if let old = config { ghostty_config_free(old) }
         config = fresh
+    }
+
+    /// Re-applies the current config, e.g. after the light/dark appearance
+    /// changed and a theme pair needs to resolve to the other theme.
+    private func softReload(target: ghostty_target_s) {
+        guard let app, let config else { return }
+        if target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface {
+            ghostty_surface_update_config(surface, config)
+        } else {
+            ghostty_app_update_config(app, config)
+        }
+    }
+
+    // MARK: - Following the config files
+
+    // Ghostty itself reloads only on request; Muxify borrows Ghostty's config,
+    // so it follows edits (often made for standalone Ghostty) by itself.
+    private var configStamp = ""
+    private var configWatcher: Timer?
+
+    private func reloadIfConfigFilesChanged() {
+        let stamp = Self.configFilesStamp()
+        guard stamp != configStamp else { return }
+        reloadConfig()
+    }
+
+    /// Modification times of every file the config can come from, including
+    /// custom themes.
+    private static func configFilesStamp() -> String {
+        let fm = FileManager.default
+        let home = NSHomeDirectory()
+        let xdg = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"] ?? "\(home)/.config"
+        let dirs = ["\(xdg)/ghostty", "\(home)/Library/Application Support/com.mitchellh.ghostty"]
+        var files: [String] = []
+        for dir in dirs {
+            files += ["\(dir)/config", "\(dir)/config.ghostty"]
+            let themes = "\(dir)/themes"
+            files += ((try? fm.contentsOfDirectory(atPath: themes)) ?? []).map { "\(themes)/\($0)" }
+        }
+        return files.sorted().map { path in
+            let date = (try? fm.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+            return "\(path)@\(date?.timeIntervalSince1970 ?? 0)"
+        }.joined(separator: "|")
+    }
+
+    /// Only from CONFIG_CHANGE: a freshly loaded config has the built-in
+    /// default colors until libghostty applies the light/dark state to it.
+    private func updateTheme(from config: ghostty_config_t) {
+        guard let theme = TerminalTheme(config: config), theme != self.theme else { return }
+        self.theme = theme
+        delegate?.ghosttyThemeChanged(theme)
     }
 
     /// The user's normal Ghostty config (~/.config/ghostty/config etc.), so
@@ -148,14 +250,21 @@ final class GhosttyRuntime {
             guard let surfaceView else { return false }
             DispatchQueue.main.async { self.delegate?.ghosttySurfaceClosed(surfaceView) }
         case GHOSTTY_ACTION_RELOAD_CONFIG:
-            reloadConfig()
+            if action.action.reload_config.soft {
+                softReload(target: target)
+            } else {
+                reloadConfig()
+            }
         case GHOSTTY_ACTION_RING_BELL:
             // tmux rings the bell for activity in other Windows (monitor-activity),
             // which is constant with agents running, so never beep. Like
             // Ghostty's default, only ask for attention while in the background.
             if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
+        case GHOSTTY_ACTION_CONFIG_CHANGE:
+            // Only valid during this callback, so read the colors right away.
+            if let changed = action.action.config_change.config { updateTheme(from: changed) }
         case GHOSTTY_ACTION_SET_TITLE, GHOSTTY_ACTION_PWD, GHOSTTY_ACTION_CELL_SIZE,
-             GHOSTTY_ACTION_COLOR_CHANGE, GHOSTTY_ACTION_CONFIG_CHANGE, GHOSTTY_ACTION_MOUSE_OVER_LINK,
+             GHOSTTY_ACTION_COLOR_CHANGE, GHOSTTY_ACTION_MOUSE_OVER_LINK,
              GHOSTTY_ACTION_RENDERER_HEALTH, GHOSTTY_ACTION_SCROLLBAR:
             // Sidebar labels come from tmux; nothing to do for these in the POC.
             return true

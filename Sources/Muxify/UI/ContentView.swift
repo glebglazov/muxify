@@ -16,7 +16,7 @@ struct ContentView: View {
                 if store.sidebarVisible {
                     SidebarView(store: store)
                         .frame(width: sidebar)
-                        .background(VisualEffectBackground(material: .sidebar))
+                        .chrome(theme: store.theme, material: .sidebar)
                     PanelResizeHandle(width: $sidebarWidth, range: 180...420, edge: .leading)
                 }
                 TerminalArea(store: store)
@@ -71,15 +71,33 @@ private struct HeaderBar: View {
         .padding(.trailing, 8)
         .frame(height: TitlebarMetrics.height)
         .background(WindowDragArea())
-        .background(VisualEffectBackground(material: .titlebar))
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+            Rectangle()
+                .fill(Color(nsColor: store.theme?.separator ?? .separatorColor))
+                .frame(height: 1)
+        }
+        .chrome(theme: store.theme, material: .titlebar)
+    }
+}
+
+private extension View {
+    /// Header and sidebar take their background from the Ghostty theme, and
+    /// their text follows its lightness, so a dark theme stays readable while
+    /// macOS is in light mode. Without a theme they use the system materials.
+    @ViewBuilder
+    func chrome(theme: TerminalTheme?, material: NSVisualEffectView.Material) -> some View {
+        if let theme {
+            background(Color(nsColor: theme.chrome))
+                .environment(\.colorScheme, theme.isDark ? .dark : .light)
+        } else {
+            background(VisualEffectBackground(material: material))
         }
     }
 }
 
 private struct TerminalArea: View {
     let store: WorkspaceStore
+    @Environment(\.colorScheme) private var systemColorScheme
 
     var body: some View {
         ZStack {
@@ -106,7 +124,8 @@ private struct TerminalArea: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(nsColor: store.theme?.background ?? .windowBackgroundColor))
+        .environment(\.colorScheme, store.theme.map { $0.isDark ? .dark : .light } ?? systemColorScheme)
     }
 }
 

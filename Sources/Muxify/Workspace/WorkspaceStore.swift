@@ -24,6 +24,8 @@ final class WorkspaceStore {
     }
     private(set) var surface: TerminalSurfaceView?
     private(set) var terminalMessage: String?
+    /// The Ghostty theme's colors; the header and sidebar follow them.
+    private(set) var theme: TerminalTheme?
 
     var sidebarVisible = UserDefaults.standard.object(forKey: "sidebarVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(sidebarVisible, forKey: "sidebarVisible") }
@@ -71,6 +73,7 @@ final class WorkspaceStore {
         guard !started else { return }
         started = true
         GhosttyRuntime.shared.delegate = self
+        theme = GhosttyRuntime.shared.theme
         guard GhosttyRuntime.shared.app != nil else {
             terminalMessage = "libghostty failed to initialize."
             return
@@ -435,6 +438,10 @@ extension WorkspaceStore: GhosttyRuntimeDelegate {
         } else {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    func ghosttyThemeChanged(_ theme: TerminalTheme) {
+        self.theme = theme
     }
 
     func ghosttyNewTab() { newWindow() }
