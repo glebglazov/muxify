@@ -56,14 +56,6 @@ struct MuxifyApp: App {
                 Button("Focus Terminal") { store.focusTerminal() }
                     .keyboardShortcut("`", modifiers: .command)
             }
-            // ⌘1–9 pick tmux Windows wherever focus is (in the terminal your
-            // Ghostty bindings already send them to tmux).
-            CommandMenu("tmux") {
-                ForEach(1..<10) { index in
-                    Button("Window \(index)") { store.selectWindow(index: index) }
-                        .keyboardShortcut(KeyEquivalent(Character(String(index))), modifiers: .command)
-                }
-            }
             CommandGroup(after: .appSettings) {
                 Button("Reload Ghostty Config") { GhosttyRuntime.shared.reloadConfig() }
                     .keyboardShortcut(",", modifiers: [.command, .shift])

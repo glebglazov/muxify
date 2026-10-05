@@ -98,7 +98,6 @@ Ghostty/tmux bindings keep their meaning.
 | Shortcut | Anywhere |
 | --- | --- |
 | ⌘B | Show/hide this Window's Browser |
-| ⌘1–9 | Select tmux Window 1–9 of the current Session |
 | ⌘\` | Focus terminal |
 | ⌘N | New tmux Session |
 | ⌘S (or ⌃⌘S) | Toggle sidebar |

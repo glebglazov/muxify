@@ -231,13 +231,6 @@ final class WorkspaceStore {
         switchClient(to: Target(window))
     }
 
-    /// ⌘1–9: the Window with that tmux index in the current Session.
-    func selectWindow(index: Int) {
-        guard let current = selectedWindow else { return }
-        let siblings = windows.filter { $0.sessionID == current.sessionID }
-        if let window = siblings.first(where: { $0.index == index }) { select(window) }
-    }
-
     private func switchClient(to target: Target) {
         selectedWindowID = target.windowID
         pendingSelection = (target.windowID, Date().addingTimeInterval(2))
