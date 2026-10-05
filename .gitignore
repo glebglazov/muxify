@@ -1,0 +1,5 @@
+/build/
+/vendor/
+/Muxify.xcodeproj/
+.DS_Store
+xcuserdata/

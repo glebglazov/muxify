@@ -1,0 +1,52 @@
+name: Muxify
+options:
+  bundleIdPrefix: dev.muxify
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: YES
+targets:
+  Muxify:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Muxify
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: Muxify
+        CFBundleDisplayName: Muxify
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHighResolutionCapable: true
+        NSPrincipalClass: NSApplication
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.muxify.shell
+            CFBundleURLSchemes: [muxify]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_NAME: Muxify
+        PRODUCT_BUNDLE_IDENTIFIER: dev.muxify.shell
+        SWIFT_INCLUDE_PATHS: $(PROJECT_DIR)/vendor/ghostty/include
+        LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/vendor/ghostty/lib
+        OTHER_LDFLAGS: "-lghostty -lc++ -framework Carbon"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        DEAD_CODE_STRIPPING: YES
+        GENERATE_INFOPLIST_FILE: NO
+    postBuildScripts:
+      - name: Bundle Ghostty resources
+        script: "\"$PROJECT_DIR/scripts/bundle-ghostty-resources.sh\""
+        basedOnDependencyAnalysis: false
