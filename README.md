@@ -39,7 +39,8 @@ You can also open `Muxify.xcodeproj` in Xcode after `make project`.
 
 ## How it works
 
-The vocabulary (Session, Window, Pane, Browser, Tab) is defined in
+The vocabulary (Session, Window, Pane, Browser, Tab, Agent, Status, Extension)
+is defined in
 [CONTEXT.md](CONTEXT.md); the decisions behind the design are in
 [docs/adr](docs/adr).
 
@@ -68,6 +69,20 @@ The vocabulary (Session, Window, Pane, Browser, Tab) is defined in
   Session switch with it. Navigating inside tmux (prefix+n, choose-tree, …) moves
   the sidebar selection too. On launch Muxify returns to the Window you last
   had selected (`@muxify_last_window`, a server-wide tmux option).
+
+  Below Sessions, the **Agents** section lists the coding Agents (Claude Code,
+  Codex, OpenCode, Pi) running in your Panes, in tmux order. Each Agent's
+  Extension writes two tmux pane options on its own Pane: `@muxify_agent`
+  (`claude`, `codex`, `opencode` or `pi`) and `@muxify_agent_status`
+  (`working`, `blocked`, `done` or `failed`; unset until the first turn).
+  Muxify reads them with `list-panes -a` in the same once-a-second poll. A row
+  shows the Agent's icon, its Window's title and `session:window`, and a Status
+  dot: blue working, orange blocked, green done, red failed, none before the
+  first turn. A Pane that is back at a plain shell is hidden, in case a crashed
+  Agent left its options behind. Clicking a row switches to the Window and
+  selects the Agent's Pane. The Extensions live in [extensions/](extensions);
+  the contract is
+  [ADR 0004](docs/adr/0004-agents-report-status-through-pane-options.md).
 - **Browser.** Each Window has its own Browser in a panel on the right: a tab
   strip, back/forward/reload, an omnibox (URLs, bare hosts like `localhost:3000`,
   or search terms) and the page (WKWebView). Whether it's open, its Tabs and the
@@ -126,9 +141,10 @@ open "muxify://toggle-browser"
 
 ## Proof-of-concept limits
 
-- Pane titles, paths, bells and `@muxify_open` are polled once a second, so they
-  can take up to a second to show up.
+- Pane titles, paths, bells, Agent Statuses and `@muxify_open` are polled once
+  a second, so they can take up to a second to show up.
 - The Browser is WebKit, not Chromium (ADR 0002): no Chrome extensions, and no
   CDP for agents.
 - There is no terminal search UI, and no inspector or quick-look.
-- The sidebar shows Windows only, not individual Panes.
+- The Sessions list shows Windows only, not individual Panes; only Panes
+  running an Agent appear, in the Agents section.

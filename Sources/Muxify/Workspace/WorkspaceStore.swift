@@ -18,6 +18,8 @@ struct SessionGroup: Identifiable {
 @Observable
 final class WorkspaceStore {
     private(set) var windows: [TmuxWindow] = []
+    /// Agents reporting through their Pane's options (ADR 0004), in tmux order.
+    private(set) var agents: [Agent] = []
     private(set) var serverRunning = true
     private(set) var selectedWindowID: String? {
         didSet { rememberSelection() }
@@ -128,6 +130,8 @@ final class WorkspaceStore {
 
     private func apply(_ snapshot: TmuxSnapshot, attachIfNeeded: Bool) {
         if windows != snapshot.windows { windows = snapshot.windows }
+        let agents = snapshot.agents
+        if self.agents != agents { self.agents = agents }
         if serverRunning != snapshot.serverRunning { serverRunning = snapshot.serverRunning }
 
         if attachIfNeeded, surface == nil {
@@ -229,6 +233,18 @@ final class WorkspaceStore {
 
     func select(_ window: TmuxWindow) {
         switchClient(to: Target(window))
+    }
+
+    /// Switches to the Agent's Window with its Pane active. The Pane is
+    /// selected first (tmux commands run in order) so the Window shows up
+    /// with the Agent already focused.
+    func select(_ agent: Agent) {
+        Tmux.runAsync(["select-pane", "-t", agent.paneID])
+        if let window = windows.first(where: { $0.id == agent.windowID }) {
+            select(window)
+        } else {
+            switchClient(to: Target(sessionID: agent.sessionID, windowID: agent.windowID, path: nil))
+        }
     }
 
     private func switchClient(to target: Target) {

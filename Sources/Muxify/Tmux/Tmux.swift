@@ -76,13 +76,31 @@ struct TmuxClient: Hashable {
     let windowID: String
 }
 
+/// A tmux Pane, with the options an Agent's Extension writes onto it (ADR 0004).
+struct TmuxPane: Hashable {
+    /// Server-unique pane id, e.g. "%42".
+    let id: String
+    let windowID: String
+    /// `#{pane_current_command}`. It can't identify an Agent (Claude Code's is
+    /// its version number), but a plain shell here means no Agent is running.
+    let command: String
+    /// `@muxify_agent`, empty when unset.
+    let agent: String
+    /// `@muxify_agent_status`, empty when unset.
+    let agentStatus: String
+}
+
 struct TmuxSnapshot {
     var windows: [TmuxWindow]
     var clients: [TmuxClient]
+    var panes: [TmuxPane]
     /// The Window last selected in Muxify (a server-wide option, so it can't
     /// outlive the server and point at a reused window id).
     var lastWindowID: String?
     var serverRunning: Bool
+
+    /// The Agents running in this snapshot's Panes, in tmux order.
+    var agents: [Agent] { Agent.list(panes: panes, windows: windows) }
 }
 
 enum TmuxError: Error, CustomStringConvertible {
@@ -110,6 +128,9 @@ enum Tmux {
     /// One-shot: programs set it to open a Tab; Muxify consumes and clears it.
     static let openOption = "@muxify_open"
     static let lastWindowOption = "@muxify_last_window"
+    // Pane options an Agent's Extension writes (ADR 0004).
+    static let agentOption = "@muxify_agent"
+    static let agentStatusOption = "@muxify_agent_status"
 
     private static let queue = DispatchQueue(label: "muxify.tmux", qos: .userInitiated)
     private static let separator = "\u{241F}"
@@ -154,7 +175,8 @@ enum Tmux {
         }
     }
 
-    /// One round trip that lists every window on the server and every client.
+    /// One round trip that lists every window on the server, every client and
+    /// every pane (for the Agents in them).
     static func snapshot() -> TmuxSnapshot {
         let s = separator
         let windowFormat = [
@@ -165,16 +187,25 @@ enum Tmux {
             "#{\(lastWindowOption)}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}"].joined(separator: s)
+        let paneFormat = [
+            "P", "#{pane_id}", "#{window_id}", "#{pane_current_command}",
+            "#{\(agentOption)}", "#{\(agentStatusOption)}",
+        ].joined(separator: s)
 
         let output: String
         do {
-            output = try run(["list-windows", "-a", "-F", windowFormat, ";", "list-clients", "-F", clientFormat])
+            output = try run([
+                "list-windows", "-a", "-F", windowFormat,
+                ";", "list-clients", "-F", clientFormat,
+                ";", "list-panes", "-a", "-F", paneFormat,
+            ])
         } catch {
-            return TmuxSnapshot(windows: [], clients: [], lastWindowID: nil, serverRunning: false)
+            return TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: false)
         }
 
         var windows: [TmuxWindow] = []
         var clients: [TmuxClient] = []
+        var panes: [TmuxPane] = []
         var lastWindowID: String?
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let f = line.components(separatedBy: s)
@@ -192,9 +223,14 @@ enum Tmux {
                 if !f[17].isEmpty { lastWindowID = f[17] }
             } else if f.first == "C", f.count >= 4 {
                 clients.append(TmuxClient(tty: f[1], sessionID: f[2], windowID: f[3]))
+            } else if f.first == "P", f.count >= 6 {
+                panes.append(TmuxPane(id: f[1], windowID: f[2], command: f[3], agent: f[4], agentStatus: f[5]))
             }
         }
-        return TmuxSnapshot(windows: windows, clients: clients, lastWindowID: lastWindowID, serverRunning: true)
+        return TmuxSnapshot(
+            windows: windows, clients: clients, panes: panes,
+            lastWindowID: lastWindowID, serverRunning: true
+        )
     }
 
     static func shellQuote(_ value: String) -> String {

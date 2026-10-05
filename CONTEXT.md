@@ -27,3 +27,17 @@ _Avoid_: webview, inspector, sidebar browser
 **Tab**:
 One page in a Window's Browser, with its own back/forward history. "Tab" never means a tmux Window.
 _Avoid_: page (when you mean the Tab itself), browser window
+
+### Agents
+
+**Agent**:
+A coding-agent CLI (Claude Code, Codex, OpenCode or Pi) running in a Pane, which reports its Status to Muxify through its Extension. The agent's own conversation is a "conversation", never a Session.
+_Avoid_: bot, assistant, agent session
+
+**Status**:
+What an Agent is doing: working (a turn is running), blocked (waiting for the user to answer a permission prompt or question), done (the last turn ended, including by Esc) or failed (the last turn ended with an error). An Agent that has not run a turn yet has no Status.
+_Avoid_: state, idle, unread
+
+**Extension**:
+The single file installed into an Agent's own plugin or hook system that reports the Agent and its Status to Muxify.
+_Avoid_: integration, hook (when you mean the whole file), plugin (when you mean ours)

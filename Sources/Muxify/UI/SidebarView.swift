@@ -1,7 +1,28 @@
 import AppKit
 import SwiftUI
 
+/// Two sections stacked vertically: Sessions on top, Agents below.
 struct SidebarView: View {
+    let store: WorkspaceStore
+
+    /// The share of the sidebar's height the Agents section gets.
+    private static let agentsFraction: CGFloat = 0.35
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                SessionsSection(store: store)
+                    .frame(maxHeight: .infinity)
+                Divider()
+                AgentsSection(store: store)
+                    .frame(height: (proxy.size.height * Self.agentsFraction).rounded())
+            }
+        }
+    }
+}
+
+/// The Sessions and their Windows, with the New Window/New Session footer.
+private struct SessionsSection: View {
     let store: WorkspaceStore
 
     /// Expanded sessions, by name (names survive tmux server restarts, ids don't).
@@ -57,7 +78,7 @@ struct SidebarView: View {
         // Moving to another session (click, tmux navigation, new window) opens it.
         .onChange(of: store.selectedWindow?.sessionName, initial: true) { _, name in
             guard let name, !expanded.contains(name) else { return }
-            withAnimation(.easeOut(duration: 0.15)) { expanded.insert(name) }
+            withAnimation(.easeOut(duration: 0.15)) { _ = expanded.insert(name) }
         }
         .onChange(of: expanded) { _, value in
             UserDefaults.standard.set(Array(value), forKey: Self.expandedKey)
@@ -270,5 +291,115 @@ private struct WindowRow: View {
     private var background: Color {
         if isSelected { return .accentColor }
         return hovering ? Color.primary.opacity(0.07) : .clear
+    }
+}
+
+/// The Agents reporting their Status (ADR 0004), in tmux order.
+private struct AgentsSection: View {
+    let store: WorkspaceStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Agents")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 2)
+            if store.agents.isEmpty {
+                Text("No agents")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(store.agents) { agent in
+                            AgentRow(agent: agent)
+                                .onTapGesture { store.select(agent) }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                }
+                .scrollIndicators(.never)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct AgentRow: View {
+    let agent: Agent
+
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            AgentIcon(kind: agent.kind)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(agent.windowTitle)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(agent.location)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if let status = agent.status {
+                Circle()
+                    .fill(status.color)
+                    .frame(width: 7, height: 7)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(hovering ? Color.primary.opacity(0.07) : .clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .onHover { hovering = $0 }
+        .help("\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")")
+    }
+}
+
+/// The Agent's logo from `Resources/Agents`. The black-only logos are drawn
+/// in the text color so they stay visible on dark themes.
+private struct AgentIcon: View {
+    let kind: AgentKind
+
+    var body: some View {
+        Group {
+            if let image = NSImage(named: kind.rawValue) {
+                Image(nsImage: image)
+                    .renderingMode(kind.isMonochrome ? .template : .original)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "sparkle")
+            }
+        }
+        .foregroundStyle(.primary)
+        .frame(width: 16, height: 16)
+    }
+}
+
+private extension AgentKind {
+    var isMonochrome: Bool { self == .opencode || self == .pi }
+}
+
+private extension AgentStatus {
+    var color: Color {
+        switch self {
+        case .working: return .blue
+        case .blocked: return .orange
+        case .done: return .green
+        case .failed: return .red
+        }
     }
 }
