@@ -32,6 +32,13 @@ final class WorkspaceStore {
     var sidebarVisible = UserDefaults.standard.object(forKey: "sidebarVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(sidebarVisible, forKey: "sidebarVisible") }
     }
+    /// The sidebar's two sections, shown or hidden from the View menu.
+    var sessionsVisible = UserDefaults.standard.object(forKey: "sessionsVisible") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sessionsVisible, forKey: "sessionsVisible") }
+    }
+    var agentsVisible = UserDefaults.standard.object(forKey: "agentsVisible") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(agentsVisible, forKey: "agentsVisible") }
+    }
 
     var selectedWindow: TmuxWindow? {
         guard let selectedWindowID else { return nil }

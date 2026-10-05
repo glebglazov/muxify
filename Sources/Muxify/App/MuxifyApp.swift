@@ -23,6 +23,8 @@ struct MuxifyApp: App {
             CommandGroup(replacing: .sidebar) {
                 Button(store.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { store.toggleSidebar() }
                     .keyboardShortcut("s", modifiers: .command)
+                Toggle("Show Sessions", isOn: $store.sessionsVisible)
+                Toggle("Show Agents", isOn: $store.agentsVisible)
             }
             // Browser shortcuts act only when focus is outside the terminal;
             // in the terminal your Ghostty/tmux bindings handle the keys.

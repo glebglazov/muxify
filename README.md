@@ -83,6 +83,10 @@ is defined in
   selects the Agent's Pane. The Extensions live in [extensions/](extensions);
   the contract is
   [ADR 0004](docs/adr/0004-agents-report-status-through-pane-options.md).
+  View → Show Sessions and Show Agents hide either section (the New Window/New
+  Session footer goes with Sessions); the other then fills the sidebar, and with
+  both hidden the sidebar stays open but empty. With both shown, drag the
+  divider between them to resize; the split is remembered.
 - **Browser.** Each Window has its own Browser in a panel on the right: a tab
   strip, back/forward/reload, an omnibox (URLs, bare hosts like `localhost:3000`,
   or search terms) and the page (WKWebView). Whether it's open, its Tabs and the

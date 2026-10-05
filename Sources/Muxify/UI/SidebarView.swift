@@ -1,23 +1,78 @@
 import AppKit
 import SwiftUI
 
-/// Two sections stacked vertically: Sessions on top, Agents below.
+/// Two sections stacked vertically: Sessions on top, Agents below. Each can be
+/// hidden from the View menu; with both shown, a divider between them sets
+/// their split. With neither, the sidebar stays open but empty.
 struct SidebarView: View {
     let store: WorkspaceStore
 
     /// The share of the sidebar's height the Agents section gets.
-    private static let agentsFraction: CGFloat = 0.35
+    @AppStorage("sidebarAgentsFraction") private var agentsFraction: Double = 0.35
 
     var body: some View {
-        GeometryReader { proxy in
-            VStack(spacing: 0) {
-                SessionsSection(store: store)
-                    .frame(maxHeight: .infinity)
-                Divider()
-                AgentsSection(store: store)
-                    .frame(height: (proxy.size.height * Self.agentsFraction).rounded())
+        if store.sessionsVisible && store.agentsVisible {
+            GeometryReader { proxy in
+                let total = proxy.size.height
+                VStack(spacing: 0) {
+                    SessionsSection(store: store)
+                        .frame(maxHeight: .infinity)
+                    SectionResizeHandle(fraction: $agentsFraction, total: total)
+                    AgentsSection(store: store)
+                        .frame(height: SectionResizeHandle.agentsHeight(agentsFraction, total: total))
+                }
             }
+        } else if store.sessionsVisible {
+            SessionsSection(store: store)
+        } else if store.agentsVisible {
+            AgentsSection(store: store)
+        } else {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+/// The divider between Sessions and Agents; drag it to move the split.
+private struct SectionResizeHandle: View {
+    @Binding var fraction: Double
+    /// The sidebar's height.
+    let total: CGFloat
+
+    /// Neither section gets smaller than this.
+    static let minHeight: CGFloat = 90
+
+    @State private var startHeight: CGFloat?
+
+    /// The Agents section's height for `fraction`, keeping both sections usable.
+    static func agentsHeight(_ fraction: Double, total: CGFloat) -> CGFloat {
+        let high = max(minHeight, total - minHeight)
+        return min(max((total * fraction).rounded(), minHeight), high)
+    }
+
+    var body: some View {
+        Divider()
+            .overlay {
+                Color.clear
+                    .frame(height: 9)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                guard total > 0 else { return }
+                                let start = startHeight ?? Self.agentsHeight(fraction, total: total)
+                                if startHeight == nil { startHeight = start }
+                                // Dragging up grows Agents.
+                                let height = Self.agentsHeight(Double((start - value.translation.height) / total), total: total)
+                                fraction = Double(height / total)
+                            }
+                            .onEnded { _ in startHeight = nil }
+                    )
+            }
+            .zIndex(1)
     }
 }
 
