@@ -20,6 +20,11 @@ targets:
         buildPhase: resources
       - path: Resources/Agents
         buildPhase: resources
+      # A folder reference keeps the layout, so the bundled install.sh finds
+      # the Extension files next to it (Contents/Resources/extensions/...).
+      - path: extensions
+        type: folder
+        buildPhase: resources
     info:
       path: Resources/Info.plist
       properties:
