@@ -103,7 +103,28 @@ install_opencode() {
 	echo "opencode: $result"
 }
 
-for agent in claude opencode; do
+# Pi: a single TypeScript file, which Pi loads from its extensions folder by
+# itself, so no config file is edited.
+install_pi() {
+	pi_dir=$HOME/.pi/agent
+	if [ ! -d "$pi_dir" ]; then
+		echo "pi: not found"
+		return 0
+	fi
+
+	pi_extension=$pi_dir/extensions/muxify-status.ts
+	if [ -e "$pi_extension" ] || [ -L "$pi_extension" ]; then result=updated; else result=installed; fi
+	# Remove first, so a symlink in its place is replaced, not written through.
+	if ! { mkdir -p "$pi_dir/extensions" &&
+		rm -f "$pi_extension" &&
+		cp "$here/pi/muxify-status.ts" "$pi_extension"; }; then
+		echo "pi: failed (could not copy the extension)"
+		return 1
+	fi
+	echo "pi: $result"
+}
+
+for agent in claude opencode pi; do
 	"install_$agent" || failed=1
 done
 exit "$failed"

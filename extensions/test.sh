@@ -7,8 +7,9 @@
 # line to a log, and TMUX_PANE is a fake Pane id, so each case feeds an
 # Extension an Agent event and asserts the tmux calls it made. Installer cases
 # run against a temporary HOME; the real HOME is never touched. Stops at the
-# first mismatch, naming the case, and exits non-zero. Needs jq, and node for
-# the OpenCode plugin, which a small Node script drives with a fake api.
+# first mismatch, naming the case, and exits non-zero. Needs jq, and node 24
+# for the OpenCode plugin and the Pi extension, which small Node scripts drive
+# with a fake api and a fake pi (Node runs the Pi .ts file by stripping types).
 #
 # Each Agent adds a <agent>_hook_cases and an <agent>_install_cases function
 # and lists them at the bottom.
@@ -562,6 +563,252 @@ opencode_install_cases() {
 	pass
 }
 
+# --- Pi ---------------------------------------------------------------------
+
+pi_extension=$ext/pi/muxify-status.ts
+pi_driver=$work/pi-driver.mjs
+pi_agent='set -p -t %99 @muxify_agent pi'
+pi_unset='set -p -u -t %99 @muxify_agent ; set -p -u -t %99 @muxify_agent_status'
+
+# A fake Pi: loads the extension (Node strips its types), calls the default
+# export with a fake pi that records the handlers registered with pi.on, and
+# fires the steps given as arguments, in order, with a fake ctx (TUI mode,
+# idle unless told otherwise):
+#   <event>[:<arg>]   fires that Pi event; agent_end:<r1>,<r2>… carries a user
+#                     message and one assistant message per stopReason;
+#                     session_shutdown:<reason> carries that reason
+#   mode:<mode>       ctx.mode from now on (tui, rpc, json, print)
+#   busy | idle       what ctx.isIdle() answers from now on
+# The process then exits normally.
+cat >"$pi_driver" <<'JS'
+import { pathToFileURL } from "node:url";
+
+const [file, ...steps] = process.argv.slice(2);
+const { default: extension } = await import(pathToFileURL(file).href);
+if (typeof extension !== "function") {
+	console.error("default export is not a function (pi)");
+	process.exit(2);
+}
+
+// Every event Pi 0.85 lets an extension subscribe to.
+const events = new Set([
+	"project_trust", "resources_discover", "session_start", "session_info_changed",
+	"session_before_switch", "session_before_fork", "session_before_compact",
+	"session_compact", "session_compact_failed", "session_shutdown",
+	"session_before_tree", "session_tree", "context", "before_provider_request",
+	"before_provider_headers", "after_provider_response", "before_agent_start",
+	"agent_start", "agent_end", "agent_settled", "ui_prompt_start", "ui_prompt_end",
+	"turn_start", "turn_end", "message_start", "message_update", "message_end",
+	"tool_execution_start", "tool_execution_update", "tool_execution_end",
+	"model_select", "thinking_level_select", "tool_call", "tool_result", "user_bash",
+	"input",
+]);
+const handlers = new Map();
+const pi = {
+	on(event, handler) {
+		if (!events.has(event) || typeof handler !== "function") {
+			console.error(`pi.on(${JSON.stringify(event)}, ${typeof handler}) is not a Pi event handler`);
+			process.exit(2);
+		}
+		handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+	},
+};
+
+let mode = "tui";
+let idle = true;
+const ctx = {
+	get mode() {
+		return mode;
+	},
+	get hasUI() {
+		return mode === "tui" || mode === "rpc";
+	},
+	cwd: process.cwd(),
+	isIdle: () => idle,
+};
+
+function payload(type, arg) {
+	switch (type) {
+		case "session_start":
+			return { type, reason: "startup" };
+		case "agent_end": {
+			const messages = [{ role: "user", content: "hi", timestamp: 0 }];
+			for (const stopReason of arg ? arg.split(",") : []) {
+				if (messages.length > 1) {
+					messages.push({ role: "toolResult", toolCallId: "t", toolName: "bash", content: [], isError: false, timestamp: 0 });
+				}
+				messages.push({ role: "assistant", content: [], stopReason, timestamp: 0 });
+			}
+			return { type, messages };
+		}
+		case "ui_prompt_start":
+		case "ui_prompt_end":
+			return { type, reason: "ui_prompt", kind: "confirm", title: "Proceed?" };
+		case "session_shutdown":
+			return { type, reason: arg };
+		default:
+			return { type };
+	}
+}
+
+await extension(pi);
+for (const step of steps) {
+	const [type, arg] = step.split(":");
+	if (type === "mode") mode = arg;
+	else if (type === "busy") idle = false;
+	else if (type === "idle") idle = true;
+	else for (const handler of handlers.get(type) ?? []) await handler(payload(type, arg), ctx);
+}
+JS
+
+# pi_write <what>: the tmux call for <what>: "agent" names the Agent only,
+# "unset" unsets both options, "none" unsets the Status and keeps the Agent,
+# anything else publishes that Status.
+pi_write() {
+	case $1 in
+	agent) printf '%s\n' "$pi_agent" ;;
+	unset) printf '%s\n' "$pi_unset" ;;
+	none) printf '%s\n' "$pi_agent ; set -p -u -t %99 @muxify_agent_status" ;;
+	*) printf '%s\n' "$pi_agent ; set -p -t %99 @muxify_agent_status $1" ;;
+	esac
+}
+
+# run_pi <extension> [step...]: the fake Pi must exit 0 and print nothing.
+run_pi() {
+	pi_out=$(node --disable-warning=ExperimentalWarning "$pi_driver" "$@" 2>&1)
+	pi_rc=$?
+	[ "$pi_rc" -eq 0 ] || fail "exited $pi_rc:" "$pi_out"
+	[ -z "$pi_out" ] || fail "printed: $pi_out"
+}
+
+# pi_case <name> <steps> <writes>: runs the space-separated steps and expects
+# exactly the space-separated writes (see pi_write), in order.
+pi_case() {
+	begin "pi: $1"
+	# shellcheck disable=SC2086 # steps are split on purpose
+	run_pi "$pi_extension" $2
+	pi_writes=$3
+	set --
+	for write in $pi_writes; do
+		set -- "$@" "$(pi_write "$write")"
+	done
+	expect_tmux "$@"
+}
+
+pi_hook_cases() {
+	start="session_start agent_start"
+
+	pi_case "session_start names the Agent only" "session_start" "agent"
+	pi_case "agent_start -> working" "$start" "agent working"
+	pi_case "a dialog -> blocked, closing it -> working" \
+		"$start ui_prompt_start ui_prompt_end" "agent working blocked working"
+	pi_case "agent_end with error + settled -> failed" \
+		"$start agent_end:error agent_settled" "agent working failed"
+	pi_case "agent_end aborted (Esc) + settled -> done" \
+		"$start agent_end:aborted agent_settled" "agent working done"
+	pi_case "agent_end with stop + settled -> done" \
+		"$start agent_end:stop agent_settled" "agent working done"
+	pi_case "the last assistant message's stopReason counts" \
+		"$start agent_end:toolUse,error agent_settled" "agent working failed"
+	pi_case "a run without an assistant message settles done" \
+		"$start agent_end agent_settled" "agent working done"
+	pi_case "a retried run is judged by its last agent_end" \
+		"$start agent_end:error agent_start agent_end:stop agent_settled" "agent working done"
+	pi_case "settled while not idle writes nothing" \
+		"$start agent_end:error busy agent_settled" "agent working"
+	pi_case "a repeated agent_start is written once" "$start agent_start" "agent working"
+	pi_case "a new run after failed -> working" \
+		"$start agent_end:error agent_settled agent_start" "agent working failed working"
+	pi_case "a dialog before any run -> blocked, then no Status" \
+		"session_start ui_prompt_start ui_prompt_end" "agent blocked none"
+	pi_case "a run settling under a dialog shows once it closes" \
+		"$start ui_prompt_start agent_end:error agent_settled ui_prompt_end" "agent working blocked failed"
+	pi_case "quit unsets both" "$start session_shutdown:quit" "agent working unset"
+	pi_case "events after quit write nothing" \
+		"$start session_shutdown:quit agent_start ui_prompt_start session_shutdown:quit" "agent working unset"
+	for reason in reload new resume fork; do
+		pi_case "session_shutdown for $reason writes nothing" \
+			"$start session_shutdown:$reason" "agent working"
+	done
+	for mode in json print rpc; do
+		pi_case "$mode mode writes nothing" \
+			"mode:$mode $start ui_prompt_start ui_prompt_end agent_end:error agent_settled session_shutdown:quit" ""
+	done
+
+	begin "pi: TMUX_PANE unset writes nothing"
+	(
+		unset TMUX_PANE
+		run_pi "$pi_extension" $start ui_prompt_start session_shutdown:quit
+	) || exit 1
+	expect_tmux
+
+	begin "pi: empty TMUX_PANE writes nothing"
+	TMUX_PANE= run_pi "$pi_extension" $start agent_end:stop agent_settled
+	TMUX_PANE=%99
+	expect_tmux
+
+	begin "pi: a failing tmux is ignored"
+	FAKE_TMUX_FAIL=1 run_pi "$pi_extension" $start agent_end:error agent_settled session_shutdown:quit
+	unset FAKE_TMUX_FAIL
+	expect_tmux "$(pi_write agent)" "$(pi_write working)" "$(pi_write failed)" "$(pi_write unset)"
+}
+
+pi_install_cases() {
+	begin "pi install: first run says installed"
+	new_home
+	mkdir -p "$HOME/.pi/agent"
+	printf '%s\n' '{ "defaultModel": "opus" }' >"$HOME/.pi/agent/settings.json"
+	cp "$HOME/.pi/agent/settings.json" "$work/pi-settings.json"
+	run_install
+	expect_install_line pi "pi: installed"
+	[ "$install_rc" -eq 0 ] || fail "installer exited $install_rc:" "$install_out"
+	pass
+
+	begin "pi install: creates extensions/ and copies the file, not a symlink"
+	pi_installed=$HOME/.pi/agent/extensions/muxify-status.ts
+	[ -f "$pi_installed" ] && [ ! -L "$pi_installed" ] || fail "missing or a symlink: $pi_installed"
+	expect_same_file "$pi_extension" "$pi_installed"
+	pass
+
+	begin "pi install: nothing else is touched"
+	[ "$(cd "$HOME/.pi/agent" && find . -type f | sort)" = "$(printf '%s\n' ./extensions/muxify-status.ts ./settings.json)" ] ||
+		fail "unexpected files:" "$(cd "$HOME/.pi/agent" && find . -type f)"
+	expect_same_file "$work/pi-settings.json" "$HOME/.pi/agent/settings.json"
+	pass
+
+	begin "pi install: the installed extension reports"
+	run_pi "$pi_installed" session_start agent_start
+	expect_tmux "$(pi_write agent)" "$(pi_write working)"
+
+	begin "pi install: second run says updated, replaces the file, keeps other extensions"
+	echo '// stale' >"$pi_installed"
+	echo '// other' >"$HOME/.pi/agent/extensions/other.ts"
+	run_install
+	expect_install_line pi "pi: updated"
+	expect_same_file "$pi_extension" "$pi_installed"
+	[ "$(cat "$HOME/.pi/agent/extensions/other.ts")" = '// other' ] || fail "other.ts changed"
+	pass
+
+	begin "pi install: a symlink in its place becomes a copy, its target untouched"
+	echo '// target' >"$work/pi-target.ts"
+	rm "$pi_installed"
+	ln -s "$work/pi-target.ts" "$pi_installed"
+	run_install
+	expect_install_line pi "pi: updated"
+	[ -f "$pi_installed" ] && [ ! -L "$pi_installed" ] || fail "still a symlink: $pi_installed"
+	expect_same_file "$pi_extension" "$pi_installed"
+	[ "$(cat "$work/pi-target.ts")" = '// target' ] || fail "the symlink's target changed"
+	pass
+
+	begin "pi install: no .pi/agent prints not found and creates nothing"
+	new_home
+	mkdir "$HOME/.pi"
+	run_install
+	expect_install_line pi "pi: not found"
+	[ "$(find "$HOME" -mindepth 1)" = "$HOME/.pi" ] || fail "created:" "$(find "$HOME" -mindepth 1)"
+	pass
+}
+
 # --- Run --------------------------------------------------------------------
 
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq not found" >&2; exit 1; }
@@ -571,5 +818,7 @@ claude_hook_cases
 claude_install_cases
 opencode_hook_cases
 opencode_install_cases
+pi_hook_cases
+pi_install_cases
 
 echo "ok: $passed checks passed"
