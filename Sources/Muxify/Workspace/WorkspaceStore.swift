@@ -371,8 +371,9 @@ final class WorkspaceStore {
         browser(for: id).open(url)
     }
 
-    /// Programs inside a Window open Tabs with `tmux set -w @muxify_open <url>`
-    /// (several URLs may be space-separated); we open them and clear the option.
+    /// Programs inside a Window open Tabs with
+    /// `tmux set -w -t "$TMUX_PANE" @muxify_open <url>` (several URLs may be
+    /// space-separated); we open them and clear the option.
     private func consumeOpenRequests() {
         for window in windows where !window.openRequests.isEmpty && !consumingOpen.contains(window.id) {
             consumingOpen.insert(window.id)

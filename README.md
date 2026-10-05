@@ -113,10 +113,13 @@ Ghostty/tmux bindings keep their meaning.
 Programs running inside a Window can open Tabs in that Window's Browser. If you
 are looking at another Window, the Tab opens quietly and you aren't moved.
 
+Always pass `-t "$TMUX_PANE"`. Without it, a caller that has no tty (an agent's
+shell tool, a background job) gets the session's current Window, not its own.
+
 ```sh
-tmux set -w @muxify_open localhost:3000          # from inside the Window
-tmux set -w @muxify_open "localhost:3000 localhost:6006"   # several at once
-open "muxify://open?url=localhost:3000&window=$(tmux display -p '#{window_id}')"
+tmux set -w -t "$TMUX_PANE" @muxify_open localhost:3000          # from inside the Window
+tmux set -w -t "$TMUX_PANE" @muxify_open "localhost:3000 localhost:6006"   # several at once
+open "muxify://open?url=localhost:3000&window=$(tmux display -p -t "$TMUX_PANE" '#{window_id}')"
 open "muxify://select?window=@12"
 open "muxify://toggle-browser"
 ```
