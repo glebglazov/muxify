@@ -410,13 +410,18 @@ final class WorkspaceStore {
 
     /// Shortcuts the menu can't express. ⌘W closes a Tab when the Browser has
     /// focus and never the app window (which would quit Muxify); ⌃Tab and
-    /// ⌃⇧Tab switch Tabs. Terminal focus is left to Ghostty/tmux bindings.
+    /// ⌃⇧Tab switch Tabs; ⌃⌘S, the macOS sidebar standard, also toggles the
+    /// sidebar. Terminal focus is left to Ghostty/tmux bindings.
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window === self.terminalHost.window else { return event }
             let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
             let key = event.charactersIgnoringModifiers?.lowercased()
 
+            if flags == [.control, .command], key == "s" {
+                self.toggleSidebar()
+                return nil
+            }
             if flags == .command, key == "w" {
                 if self.isBrowserFocused { self.browserCommand { $0.closeActiveTab() } }
                 return nil

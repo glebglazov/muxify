@@ -97,11 +97,11 @@ Ghostty/tmux bindings keep their meaning.
 
 | Shortcut | Anywhere |
 | --- | --- |
-| ⇧⌘B | Show/hide this Window's Browser |
+| ⌘B | Show/hide this Window's Browser |
 | ⌘1–9 | Select tmux Window 1–9 of the current Session |
 | ⌘\` | Focus terminal |
 | ⌘N | New tmux Session |
-| ⌃⌘S | Toggle sidebar |
+| ⌘S (or ⌃⌘S) | Toggle sidebar |
 
 ⌘W never closes the app window. Ghostty actions are mapped to tmux:
 - `new_tab` → new window

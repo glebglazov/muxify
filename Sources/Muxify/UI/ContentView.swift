@@ -56,13 +56,13 @@ private struct HeaderBar: View {
             Spacer()
             TitlebarButton(
                 systemName: "sidebar.left",
-                help: store.sidebarVisible ? "Hide Sidebar (⌃⌘S)" : "Show Sidebar (⌃⌘S)",
+                help: store.sidebarVisible ? "Hide Sidebar (⌘S)" : "Show Sidebar (⌘S)",
                 isOn: store.sidebarVisible,
                 action: store.toggleSidebar
             )
             TitlebarButton(
                 systemName: "sidebar.right",
-                help: browserOpen ? "Hide Browser (⇧⌘B)" : "Show Browser (⇧⌘B)",
+                help: browserOpen ? "Hide Browser (⌘B)" : "Show Browser (⌘B)",
                 isOn: browserOpen,
                 action: store.toggleBrowser
             )

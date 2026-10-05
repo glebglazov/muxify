@@ -22,7 +22,7 @@ struct MuxifyApp: App {
         .commands {
             CommandGroup(replacing: .sidebar) {
                 Button(store.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { store.toggleSidebar() }
-                    .keyboardShortcut("s", modifiers: [.control, .command])
+                    .keyboardShortcut("s", modifiers: .command)
             }
             // Browser shortcuts act only when focus is outside the terminal;
             // in the terminal your Ghostty/tmux bindings handle the keys.
@@ -35,7 +35,7 @@ struct MuxifyApp: App {
             }
             CommandMenu("Browser") {
                 Button(store.currentBrowser?.isOpen == true ? "Hide Browser" : "Show Browser") { store.toggleBrowser() }
-                    .keyboardShortcut("b", modifiers: [.command, .shift])
+                    .keyboardShortcut("b", modifiers: .command)
                 Button("Open Location…") { store.browserCommand { _ in store.focusAddressBar() } }
                     .keyboardShortcut("l", modifiers: .command)
                 Divider()
