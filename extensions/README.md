@@ -4,9 +4,10 @@ An Extension is the small piece installed into a coding Agent's own hook or
 plugin system that tells Muxify which Agent runs in a Pane and what it is
 doing. There is one folder per Agent:
 
-| Folder    | Agent       | Extension                         |
-| --------- | ----------- | --------------------------------- |
-| `claude/` | Claude Code | `muxify-status.sh`, a hook script |
+| Folder      | Agent       | Extension                                   |
+| ----------- | ----------- | ------------------------------------------- |
+| `claude/`   | Claude Code | `muxify-status.sh`, a hook script           |
+| `opencode/` | OpenCode 2  | `muxify-status/`, a TUI plugin directory    |
 
 ## What an Extension does
 
@@ -37,8 +38,9 @@ a plain shell is hidden, which covers options left behind by a crash.
 Choose **Muxify ▸ Install Extensions**. It runs `install.sh` from the copy of
 this folder bundled inside the app, which, for every Agent whose config
 directory exists under your home directory, installs the Extension (or updates
-it if it is already there) and prints one line per Agent: `claude: installed`,
-`claude: updated` or `claude: not found` (or `claude: failed (<reason>)`).
+it if it is already there) and prints one line per Agent, such as
+`claude: installed`, `opencode: updated` or `opencode: not found` (or
+`claude: failed (<reason>)`).
 Running it again changes nothing but the Extension files themselves, so it is
 also how you update.
 
@@ -56,6 +58,11 @@ For Claude Code (detected by `~/.claude`), the installer:
   and leaves both files alone when nothing is missing;
 - needs `jq`; without it, it prints `claude: failed (jq not found)` and changes
   nothing.
+
+For OpenCode 2 (detected by `~/.config/opencode`), the installer replaces
+`~/.config/opencode/plugins/muxify-status/` with a copy of
+`opencode/muxify-status/`. OpenCode discovers the plugin there by itself, so no
+config file is edited. Restart running OpenCode TUIs to load it.
 
 To try the installer without touching your real setup, point it at a scratch
 home: `HOME=$(mktemp -d) sh extensions/install.sh`.
@@ -83,19 +90,60 @@ Known gap: Claude Code fires no hook when you press Esc to interrupt a turn or
 deny a permission prompt, so the Status keeps its last value (working or
 blocked) until the next event, such as your next prompt.
 
+## OpenCode 2
+
+`opencode/muxify-status/tui.js` is an OpenCode 2 TUI plugin (an ES module
+exporting `{ id: "muxify.agent-status", setup(api) }`). Each OpenCode TUI loads
+its own copy, so it reports on the Pane that TUI runs in. It listens to every
+event with `api.data.listen` and writes synchronously, so the writes follow
+event order.
+
+All TUIs share one OpenCode server and see the events of every session on it,
+so the plugin counts only events from the session open in its own TUI
+(`api.ui.router.current()`) and that session's subagents: an event counts when
+walking `parentID` up from its session reaches the same root session as the
+open one. Events from other sessions, or while no session is open, write
+nothing.
+
+| Event                                                   | Status                          |
+| ------------------------------------------------------- | ------------------------------- |
+| plugin setup (TUI start)                                | sets `@muxify_agent` only       |
+| `session.execution.started` (root session)              | working                         |
+| `session.execution.succeeded` (root session)            | done                            |
+| `session.execution.interrupted` (root session, e.g. Esc) | done                            |
+| `session.execution.failed` (root session)               | failed                          |
+| `permission.asked`, `form.created` (any session in the tree) | blocked until answered     |
+| `permission.replied`, `form.replied`, `form.cancelled`  | back to the last execution Status |
+| cleanup (plugin unloaded) or process exit               | unsets both options             |
+
+While any permission or form in the tree is pending the Status is blocked;
+once none is, it is the root session's last execution Status (unset if no
+execution has been seen yet). Subagent sessions' own executions are ignored. A
+Status is written only when it changes.
+
+Known gap: the plugin reads which session is open only when an event arrives,
+so after you switch to another session inside one TUI the Status still shows
+the previous session's until the new session's next event (for example its
+next execution starting). Requests that were pending in the previous session
+are forgotten on the switch.
+
 ## Tests
 
 ```sh
 sh extensions/test.sh
 ```
 
-The script needs only `jq`; no Agent has to be installed. It puts a fake `tmux`
-first on `PATH` that logs each invocation's arguments, sets `TMUX_PANE` to a
-fake Pane id (`%99`), feeds each Extension sample events and checks the logged
-tmux calls. It then runs `install.sh` against temporary home directories (with
-foreign hooks to preserve, without `settings.json`, without the Agent's config
-directory, without `jq`) and checks the copied files, the added hook entries,
-the `.bak` copy and that a second run leaves `settings.json` byte-identical. The
+The script needs only `jq` and `node`; no Agent has to be installed. It puts a
+fake `tmux` first on `PATH` that logs each invocation's arguments, sets
+`TMUX_PANE` to a fake Pane id (`%99`), feeds each Extension sample events and
+checks the logged tmux calls. Shell hooks get the event JSON on stdin; the
+OpenCode plugin is loaded by a small Node script that calls `setup` with a fake
+`api` (a session tree with a subagent, an unrelated session, a router showing
+the root session) and emits events through the captured `listen` callback. It
+then runs `install.sh` against temporary home directories (with foreign hooks
+to preserve, without `settings.json`, without the Agent's config directory,
+without `jq`) and checks the copied files, the added hook entries, the `.bak`
+copy and that a second run leaves `settings.json` byte-identical. The
 real home directory is never touched. It stops at the first mismatch, printing
 the failing case, and exits non-zero; on success it prints
 `ok: <n> checks passed`.

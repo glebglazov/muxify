@@ -7,7 +7,8 @@
 # line to a log, and TMUX_PANE is a fake Pane id, so each case feeds an
 # Extension an Agent event and asserts the tmux calls it made. Installer cases
 # run against a temporary HOME; the real HOME is never touched. Stops at the
-# first mismatch, naming the case, and exits non-zero. Needs jq.
+# first mismatch, naming the case, and exits non-zero. Needs jq, and node for
+# the OpenCode plugin, which a small Node script drives with a fake api.
 #
 # Each Agent adds a <agent>_hook_cases and an <agent>_install_cases function
 # and lists them at the bottom.
@@ -309,11 +310,266 @@ JSON
 	pass
 }
 
+# --- OpenCode 2 -------------------------------------------------------------
+
+opencode_plugin=$ext/opencode/muxify-status/tui.js
+opencode_driver=$work/opencode-driver.mjs
+opencode_agent='set -p -t %99 @muxify_agent opencode'
+opencode_unset='set -p -u -t %99 @muxify_agent ; set -p -u -t %99 @muxify_agent_status'
+
+# A fake OpenCode 2 TUI: loads the plugin, calls setup with a fake api and
+# feeds it the steps given as arguments, in order. The server holds two session
+# trees: root > child > grandchild, open in this TUI, and other > other-child.
+#   <event type>:<session>[:<id>]  an event from that session; <id> is the
+#                                   request, form or (session.created) parent id
+#   route:<session> | route:home    what the TUI shows from now on
+#   cleanup                         calls the cleanup setup returned
+# Events are delivered even after cleanup, like a late one would be. The
+# process then exits normally.
+cat >"$opencode_driver" <<'JS'
+import { pathToFileURL } from "node:url";
+
+const [plugin, ...steps] = process.argv.slice(2);
+const { default: extension } = await import(pathToFileURL(plugin).href);
+if (extension?.id !== "muxify.agent-status" || typeof extension.setup !== "function") {
+	console.error("default export is not { id: \"muxify.agent-status\", setup }");
+	process.exit(2);
+}
+
+const sessions = new Map([
+	["root", { id: "root" }],
+	["child", { id: "child", parentID: "root" }],
+	["grandchild", { id: "grandchild", parentID: "child" }],
+	["other", { id: "other" }],
+	["other-child", { id: "other-child", parentID: "other" }],
+]);
+let route = { type: "session", sessionID: "root" };
+let listener;
+let subscribed = false;
+
+const api = {
+	data: {
+		listen(handler) {
+			listener = handler;
+			subscribed = true;
+			return () => {
+				subscribed = false;
+			};
+		},
+		session: { get: (id) => sessions.get(id) },
+	},
+	ui: { router: { current: () => route } },
+};
+
+function payload(type, sessionID, id) {
+	switch (type) {
+		case "permission.asked":
+			return { id, sessionID, action: "bash", resources: ["ls"] };
+		case "permission.replied":
+			return { sessionID, requestID: id, reply: "once" };
+		case "form.created":
+			return { form: { id, sessionID, fields: [] } };
+		case "form.replied":
+			return { id, sessionID, answer: {} };
+		case "session.created":
+			return { sessionID, parentID: id, projectID: "p", slug: sessionID };
+		case "session.execution.interrupted":
+			return { sessionID, reason: "user" };
+		case "session.execution.failed":
+			return { sessionID, error: { type: "unknown", message: "boom" } };
+		default:
+			return { sessionID, id };
+	}
+}
+
+const cleanup = extension.setup(api);
+for (const step of steps) {
+	const [type, session, id] = step.split(":");
+	if (type === "route") {
+		route = session === "home" ? { type: "home" } : { type: "session", sessionID: session };
+	} else if (type === "cleanup") {
+		await cleanup?.();
+		if (subscribed) {
+			console.error("cleanup left the event listener subscribed");
+			process.exit(2);
+		}
+	} else {
+		listener?.({ details: { type, data: payload(type, session, id) } });
+	}
+}
+JS
+
+# opencode_status <status>: the tmux call that publishes <status>; "none"
+# unsets the Status and keeps the Agent.
+opencode_status() {
+	if [ "$1" = none ]; then
+		printf '%s\n' "set -p -t %99 @muxify_agent opencode ; set -p -u -t %99 @muxify_agent_status"
+	else
+		printf '%s\n' "set -p -t %99 @muxify_agent opencode ; set -p -t %99 @muxify_agent_status $1"
+	fi
+}
+
+# run_opencode <plugin> [step...]: the fake TUI must exit 0 and print nothing.
+run_opencode() {
+	opencode_out=$(node "$opencode_driver" "$@" 2>&1)
+	opencode_rc=$?
+	[ "$opencode_rc" -eq 0 ] || fail "exited $opencode_rc:" "$opencode_out"
+	[ -z "$opencode_out" ] || fail "printed: $opencode_out"
+}
+
+# opencode_case <name> <steps> <statuses>: runs the space-separated steps and
+# expects setup to name the Agent, then one write per status, then the unset
+# of both options when the process exits.
+opencode_case() {
+	begin "opencode: $1"
+	# shellcheck disable=SC2086 # steps are split on purpose
+	run_opencode "$opencode_plugin" $2
+	opencode_statuses=$3
+	set -- "$opencode_agent"
+	for status in $opencode_statuses; do
+		set -- "$@" "$(opencode_status "$status")"
+	done
+	expect_tmux "$@" "$opencode_unset"
+}
+
+opencode_hook_cases() {
+	started=session.execution.started:root
+	succeeded=session.execution.succeeded:root
+	interrupted=session.execution.interrupted:root
+	failed=session.execution.failed:root
+
+	opencode_case "setup names the Agent only; exit unsets both" "" ""
+	opencode_case "started -> working" "$started" "working"
+	opencode_case "succeeded -> done" "$started $succeeded" "working done"
+	opencode_case "interrupted (Esc) -> done" "$started $interrupted" "working done"
+	opencode_case "failed -> failed" "$started $failed" "working failed"
+	opencode_case "a new execution after done -> working" "$started $succeeded $started" "working done working"
+	opencode_case "a repeated Status is written once" "$started $started" "working"
+
+	opencode_case "permission asked -> blocked, replied -> working, succeeded -> done" \
+		"$started permission.asked:root:p1 permission.replied:root:p1 $succeeded" \
+		"working blocked working done"
+	opencode_case "form created -> blocked, replied -> working" \
+		"$started form.created:root:f1 form.replied:root:f1" "working blocked working"
+	opencode_case "form cancelled -> working" \
+		"$started form.created:root:f1 form.cancelled:root:f1" "working blocked working"
+	opencode_case "stays blocked while any permission or form is pending" \
+		"$started permission.asked:root:p1 form.created:root:f1 permission.replied:root:p1 form.replied:root:f1" \
+		"working blocked working"
+	opencode_case "an execution ending under a pending blocker shows once it is answered" \
+		"$started permission.asked:root:p1 $failed permission.replied:root:p1" "working blocked failed"
+	opencode_case "a reply to an unknown request changes nothing" \
+		"$started permission.replied:root:x form.cancelled:root:x form.replied:root:x" "working"
+	opencode_case "a blocker answered before any execution leaves no Status" \
+		"permission.asked:root:p1 permission.replied:root:p1" "blocked none"
+
+	opencode_case "a child session's permission blocks" \
+		"$started permission.asked:child:p1 permission.replied:child:p1" "working blocked working"
+	opencode_case "a grandchild session's form blocks" \
+		"$started form.created:grandchild:f1 form.cancelled:grandchild:f1" "working blocked working"
+	opencode_case "subagent executions don't drive the Status" \
+		"$started session.execution.succeeded:child session.execution.failed:grandchild $succeeded session.execution.started:child" \
+		"working done"
+	opencode_case "a subagent announced by session.created is followed" \
+		"$started session.created:late:child permission.asked:late:p1" "working blocked"
+	opencode_case "an unrelated session's events write nothing" \
+		"session.execution.started:other permission.asked:other:p1 form.created:other-child:f1 session.execution.failed:other session.execution.succeeded:other-child" \
+		""
+	opencode_case "an unrelated blocker doesn't block the open session" \
+		"$started permission.asked:other-child:p9 $succeeded" "working done"
+	opencode_case "an unknown session's events write nothing" \
+		"session.execution.started:ghost permission.asked:ghost:p1" ""
+	opencode_case "nothing counts while no session is open" \
+		"route:home $started permission.asked:root:p1" ""
+	opencode_case "with a subagent session open, its root's events count" \
+		"route:child $started permission.asked:grandchild:p1" "working blocked"
+	opencode_case "switching sessions: the new one drives the Status from its next event" \
+		"$started permission.asked:root:p1 route:other $succeeded session.execution.failed:other" \
+		"working blocked failed"
+	opencode_case "switching sessions drops the old session's blockers" \
+		"$started permission.asked:root:p1 route:other session.execution.started:other" \
+		"working blocked working"
+
+	begin "opencode: cleanup unsets both once and stops listening"
+	run_opencode "$opencode_plugin" "$started" cleanup "$succeeded" permission.asked:root:p1
+	expect_tmux "$opencode_agent" "$(opencode_status working)" "$opencode_unset"
+
+	begin "opencode: TMUX_PANE unset writes nothing"
+	(
+		unset TMUX_PANE
+		run_opencode "$opencode_plugin" "$started" permission.asked:root:p1 cleanup
+	) || exit 1
+	expect_tmux
+
+	begin "opencode: empty TMUX_PANE writes nothing"
+	TMUX_PANE= run_opencode "$opencode_plugin" "$started" "$succeeded"
+	TMUX_PANE=%99
+	expect_tmux
+
+	begin "opencode: a failing tmux is ignored"
+	FAKE_TMUX_FAIL=1 run_opencode "$opencode_plugin" "$started" "$failed" cleanup
+	unset FAKE_TMUX_FAIL
+	expect_tmux "$opencode_agent" "$(opencode_status working)" "$(opencode_status failed)" "$opencode_unset"
+}
+
+opencode_install_cases() {
+	begin "opencode install: first run says installed"
+	new_home
+	mkdir -p "$HOME/.config/opencode"
+	printf '%s\n' '{ "plugin": ["./other.js"] }' >"$HOME/.config/opencode/tui.jsonc"
+	printf '%s\n' '{ "model": "openai/gpt-5" }' >"$HOME/.config/opencode/opencode.json"
+	cp -R "$HOME/.config/opencode" "$work/opencode-original"
+	run_install
+	expect_install_line opencode "opencode: installed"
+	[ "$install_rc" -eq 0 ] || fail "installer exited $install_rc:" "$install_out"
+	pass
+
+	begin "opencode install: copies the plugin directory, not a symlink"
+	plugin_dir=$HOME/.config/opencode/plugins/muxify-status
+	[ -d "$plugin_dir" ] && [ ! -L "$plugin_dir" ] || fail "missing or a symlink: $plugin_dir"
+	[ ! -L "$plugin_dir/tui.js" ] || fail "a symlink: $plugin_dir/tui.js"
+	diff -r "$ext/opencode/muxify-status" "$plugin_dir" >/dev/null ||
+		fail "differs from the source:" "$(diff -r "$ext/opencode/muxify-status" "$plugin_dir")"
+	pass
+
+	begin "opencode install: no config file is touched"
+	[ "$(cd "$HOME/.config/opencode" && find . -type f | sort)" = "$(printf '%s\n' ./opencode.json ./plugins/muxify-status/tui.js ./tui.jsonc)" ] ||
+		fail "unexpected files:" "$(cd "$HOME/.config/opencode" && find . -type f)"
+	expect_same_file "$work/opencode-original/tui.jsonc" "$HOME/.config/opencode/tui.jsonc"
+	expect_same_file "$work/opencode-original/opencode.json" "$HOME/.config/opencode/opencode.json"
+	pass
+
+	begin "opencode install: the installed plugin reports"
+	run_opencode "$plugin_dir/tui.js" session.execution.started:root
+	expect_tmux "$opencode_agent" "$(opencode_status working)" "$opencode_unset"
+
+	begin "opencode install: second run says updated and replaces the plugin"
+	echo '// stale' >"$plugin_dir/tui.js"
+	echo '// dropped' >"$plugin_dir/old.js"
+	run_install
+	expect_install_line opencode "opencode: updated"
+	diff -r "$ext/opencode/muxify-status" "$plugin_dir" >/dev/null ||
+		fail "differs from the source:" "$(diff -r "$ext/opencode/muxify-status" "$plugin_dir")"
+	expect_same_file "$work/opencode-original/tui.jsonc" "$HOME/.config/opencode/tui.jsonc"
+	pass
+
+	begin "opencode install: no .config/opencode prints not found and creates nothing"
+	new_home
+	mkdir "$HOME/.config"
+	run_install
+	expect_install_line opencode "opencode: not found"
+	[ "$(find "$HOME" -mindepth 1)" = "$HOME/.config" ] || fail "created:" "$(find "$HOME" -mindepth 1)"
+	pass
+}
+
 # --- Run --------------------------------------------------------------------
 
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq not found" >&2; exit 1; }
+command -v node >/dev/null 2>&1 || { echo "FAIL: node not found" >&2; exit 1; }
 
 claude_hook_cases
 claude_install_cases
+opencode_hook_cases
+opencode_install_cases
 
 echo "ok: $passed checks passed"

@@ -82,7 +82,28 @@ install_claude() {
 	echo "claude: $result"
 }
 
-for agent in claude; do
+# OpenCode 2: a TUI plugin directory, which OpenCode discovers in its plugins
+# folder by itself, so no config file is edited.
+install_opencode() {
+	opencode_dir=$HOME/.config/opencode
+	if [ ! -d "$opencode_dir" ]; then
+		echo "opencode: not found"
+		return 0
+	fi
+
+	opencode_plugin=$opencode_dir/plugins/muxify-status
+	if [ -e "$opencode_plugin" ] || [ -L "$opencode_plugin" ]; then result=updated; else result=installed; fi
+	# Replace the whole directory, so files dropped from the plugin don't linger.
+	if ! { mkdir -p "$opencode_dir/plugins" &&
+		rm -rf "$opencode_plugin" &&
+		cp -R "$here/opencode/muxify-status" "$opencode_plugin"; }; then
+		echo "opencode: failed (could not copy the plugin)"
+		return 1
+	fi
+	echo "opencode: $result"
+}
+
+for agent in claude opencode; do
 	"install_$agent" || failed=1
 done
 exit "$failed"
