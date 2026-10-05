@@ -7,6 +7,7 @@ doing. There is one folder per Agent:
 | Folder      | Agent       | Extension                                   |
 | ----------- | ----------- | ------------------------------------------- |
 | `claude/`   | Claude Code | `muxify-status.sh`, a hook script           |
+| `codex/`    | Codex CLI   | `muxify-status.sh`, a hook script           |
 | `opencode/` | OpenCode 2  | `muxify-status/`, a TUI plugin directory    |
 | `pi/`       | Pi          | `muxify-status.ts`, an extension file       |
 
@@ -41,7 +42,9 @@ this folder bundled inside the app, which, for every Agent whose config
 directory exists under your home directory, installs the Extension (or updates
 it if it is already there) and prints one line per Agent, such as
 `claude: installed`, `opencode: updated` or `pi: not found` (or
-`claude: failed (<reason>)`).
+`claude: failed (<reason>)`). After a `codex: installed` or `codex: updated`
+line it adds two indented reminders: trust the hooks once via `/hooks` in
+Codex, and launch Codex with `codex --no-daemon` (see [Codex](#codex)).
 Running it again changes nothing but the Extension files themselves, so it is
 also how you update.
 
@@ -59,6 +62,21 @@ For Claude Code (detected by `~/.claude`), the installer:
   and leaves both files alone when nothing is missing;
 - needs `jq`; without it, it prints `claude: failed (jq not found)` and changes
   nothing.
+
+For Codex (detected by `~/.codex`), the installer:
+
+- copies `codex/muxify-status.sh` to `~/.codex/muxify-status.sh` (a copy, not
+  a symlink; a symlink already there is replaced);
+- adds one hook entry per event in the [Codex](#codex) table to
+  `~/.codex/hooks.json` (creating it if missing), each
+  `{"hooks": [{"type": "command", "command": "sh \"$HOME/.codex/muxify-status.sh\"", "timeout": 5}]}`:
+  no matcher, so it runs for every tool, and synchronous. Codex runs hook
+  commands through your login shell (fish here), so the command is a plain
+  line that fish, zsh and bash all read the same way;
+- follows the same rules as for Claude Code: `hooks.json.bak` before changing
+  it, an entry only when that event has no hook with the identical command yet,
+  other entries (herdr, lavish …) and keys left alone, nothing written when
+  nothing is missing, and `codex: failed (jq not found)` without `jq`.
 
 For OpenCode 2 (detected by `~/.config/opencode`), the installer replaces
 `~/.config/opencode/plugins/muxify-status/` with a copy of
@@ -96,6 +114,64 @@ nothing and always exits 0.
 Known gap: Claude Code fires no hook when you press Esc to interrupt a turn or
 deny a permission prompt, so the Status keeps its last value (working or
 blocked) until the next event, such as your next prompt.
+
+## Codex
+
+`codex/muxify-status.sh` is a POSIX `sh` script that handles every hook event
+of Codex CLI (written against Codex 0.157). Codex passes the event as JSON on
+stdin; the script reads `hook_event_name` (and `tool_name`) with `jq`, ignores
+payloads carrying a non-empty `agent_id` (Codex adds it only to tool, prompt
+and permission events sent by a subagent; `Stop`, `Interrupt` and `SessionEnd`
+never fire for subagents), prints nothing and always exits 0.
+
+| Hook event                                  | Status                          |
+| ------------------------------------------- | ------------------------------- |
+| `SessionStart` (at the first prompt)        | sets `@muxify_agent` only       |
+| `UserPromptSubmit`, `PostToolUse`           | working                         |
+| `PreToolUse`, `tool_name` `request_user_input` | blocked                      |
+| `PreToolUse`, any other tool                | working                         |
+| `PermissionRequest`                         | blocked                         |
+| `Stop`                                      | done                            |
+| `Interrupt` (Esc)                           | done                            |
+| `SessionEnd`                                | unsets both options             |
+| anything else                               | nothing                         |
+
+**Launch Codex with `--no-daemon`.** By default Codex runs conversations in a
+shared background daemon (`codex app-server --managed-daemon`), and the hooks
+run inside that daemon with the environment of whichever Pane happened to start
+it, so their `TMUX_PANE` would point at the wrong Pane. The script therefore
+looks at its ancestor processes (a handful of levels, up to pid 1) and writes
+nothing when one of them has `--managed-daemon` in its arguments: under the
+daemon, Codex shows no Agent at all rather than a wrong one. With
+`--no-daemon` each Codex runs in its own process in its own Pane and its hooks
+report there. In fish, add to `~/.config/fish/config.fish`:
+
+```fish
+alias codex 'command codex --no-daemon'
+```
+
+or, as a function file `~/.config/fish/functions/codex.fish`:
+
+```fish
+function codex --wraps codex
+    command codex --no-daemon $argv
+end
+```
+
+**Trust the hooks once.** Codex does not run hooks from `hooks.json` until
+you have reviewed and trusted them: after installing, open Codex, run `/hooks`
+and trust the Muxify entries.
+
+Known gaps:
+
+- No failed: Codex fires no hook when a turn ends with an error, so the Status
+  stays working until the next event.
+- Blocked lasts until an approved command finishes: Codex fires nothing when
+  you answer a permission prompt, so the Status goes from blocked back to
+  working only at that tool's `PostToolUse`.
+- The Agent appears only at its first prompt: Codex fires `SessionStart` when
+  the first prompt is sent, not at launch, so a freshly started Codex has no
+  row until then.
 
 ## OpenCode 2
 
@@ -181,6 +257,12 @@ The script needs only `jq` and `node` (24 or later); no Agent has to be installe
 fake `tmux` first on `PATH` that logs each invocation's arguments, sets
 `TMUX_PANE` to a fake Pane id (`%99`), feeds each Extension sample events and
 checks the logged tmux calls. Shell hooks get the event JSON on stdin; the
+Codex daemon guard is checked by running the hook from a `sh -c` whose
+arguments end in `app-server --listen unix:// --managed-daemon` (as its parent,
+and two levels up), which must write nothing, and from one without the marker,
+which must still report. Because the guard looks at every ancestor, the suite
+fails early if one of its own ancestors mentions `--managed-daemon` (as when it
+runs inside Codex's daemon). The
 OpenCode plugin is loaded by a small Node script that calls `setup` with a fake
 `api` (a session tree with a subagent, an unrelated session, a router showing
 the root session) and emits events through the captured `listen` callback. The
@@ -188,9 +270,11 @@ Pi extension is loaded the same way (Node 24 strips its types), its default
 export is called with a fake `pi` that records the `pi.on` handlers, and the
 events are fired with a fake `ctx` whose `mode` and `isIdle()` each case sets.
 It then runs `install.sh` against temporary home directories (with foreign hooks
-to preserve, without `settings.json`, without the Agent's config directory,
-without `jq`) and checks the copied files, the added hook entries, the `.bak`
-copy and that a second run leaves `settings.json` byte-identical. The
+to preserve, such as herdr's and lavish's Codex `SessionStart` hooks, without
+`settings.json` or `hooks.json`, without the Agent's config directory, without
+`jq`) and checks the copied files, the added hook entries, the `.bak` copy, the
+Codex reminders and that a second run leaves `settings.json` and `hooks.json`
+byte-identical. The
 real home directory is never touched. It stops at the first mismatch, printing
 the failing case, and exits non-zero; on success it prints
 `ok: <n> checks passed`.

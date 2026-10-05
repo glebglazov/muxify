@@ -311,6 +311,289 @@ JSON
 	pass
 }
 
+# --- Codex CLI --------------------------------------------------------------
+
+codex_hook=$ext/codex/muxify-status.sh
+codex_agent='set -p -t %99 @muxify_agent codex'
+codex_unset='set -p -u -t %99 @muxify_agent ; set -p -u -t %99 @muxify_agent_status'
+
+codex_status() {
+	printf '%s\n' "set -p -t %99 @muxify_agent codex ; set -p -t %99 @muxify_agent_status $1"
+}
+
+# codex_event <event> [extra JSON fields]: a Codex hook payload.
+codex_event() {
+	printf '%s\n' "{\"session_id\":\"s1\",\"turn_id\":\"t1\",\"hook_event_name\":\"$1\"${2:+,$2}}"
+}
+
+# codex_case <event> <status> [extra JSON fields]
+codex_case() {
+	begin "codex: $1${3:+ ($3)} -> $2"
+	run_hook "$codex_hook" "$(codex_event "$1" "${3:-}")"
+	expect_tmux "$(codex_status "$2")"
+}
+
+# run_hook_under <json> <arg...>: like run_hook, but the hook runs as a child
+# of a shell whose arguments end in <arg...>, as when Codex's daemon runs it
+# through the user's login shell. The trailing exit keeps the shell from
+# exec'ing the hook in its own place.
+run_hook_under() {
+	hook_json=$1
+	shift
+	hook_out=$(printf '%s' "$hook_json" | sh -c 'sh "$0"; exit' "$codex_hook" "$@" 2>&1)
+	hook_rc=$?
+	[ "$hook_rc" -eq 0 ] || fail "exited $hook_rc"
+	[ -z "$hook_out" ] || fail "printed: $hook_out"
+}
+
+codex_hook_cases() {
+	# The daemon guard checks every ancestor of the hook, and those include this
+	# suite's own ancestors, so none of them may carry the daemon marker (they
+	# do when the suite runs inside Codex's shared daemon).
+	begin "codex: the suite does not run under a process mentioning the daemon marker"
+	pid=$$
+	while [ "${pid:-1}" -gt 1 ]; do
+		info=$(ps -ww -o ppid= -o args= -p "$pid" 2>/dev/null) || break
+		case $info in *--managed-daemon*) fail "process $pid's arguments contain the marker; run the suite elsewhere:" "$info" ;; esac
+		set -- $info
+		pid=$1
+	done
+	pass
+
+	begin "codex: SessionStart names the Agent only"
+	run_hook "$codex_hook" "$(codex_event SessionStart '"source":"startup","model":"gpt-5.5"')"
+	expect_tmux "$codex_agent"
+
+	codex_case UserPromptSubmit working '"prompt":"hi"'
+	codex_case PreToolUse working '"tool_name":"shell","tool_input":{"command":["ls"]}'
+	codex_case PreToolUse working '"tool_name":"apply_patch"'
+	codex_case PreToolUse blocked '"tool_name":"request_user_input"'
+	codex_case PostToolUse working '"tool_name":"shell","tool_response":"ok"'
+	codex_case PostToolUse working '"tool_name":"request_user_input"'
+	codex_case PermissionRequest blocked '"tool_name":"shell"'
+	codex_case Stop done '"stop_hook_active":false'
+	codex_case Interrupt done
+
+	begin "codex: SessionEnd unsets both options"
+	run_hook "$codex_hook" "$(codex_event SessionEnd '"reason":"exit"')"
+	expect_tmux "$codex_unset"
+
+	for event in UserPromptSubmit PreToolUse PostToolUse PermissionRequest; do
+		begin "codex: subagent $event writes nothing"
+		run_hook "$codex_hook" "$(codex_event "$event" '"agent_id":"a1","tool_name":"request_user_input"')"
+		expect_tmux
+	done
+
+	begin "codex: a null agent_id counts as the main conversation"
+	run_hook "$codex_hook" "$(codex_event PermissionRequest '"agent_id":null,"tool_name":"shell"')"
+	expect_tmux "$(codex_status blocked)"
+
+	for event in Notification SubagentStop PreCompact Bogus; do
+		begin "codex: unknown event $event writes nothing"
+		run_hook "$codex_hook" "$(codex_event "$event")"
+		expect_tmux
+	done
+
+	begin "codex: payload without hook_event_name writes nothing"
+	run_hook "$codex_hook" '{"session_id":"s1"}'
+	expect_tmux
+
+	begin "codex: invalid JSON writes nothing"
+	run_hook "$codex_hook" 'not json'
+	expect_tmux
+
+	begin "codex: TMUX_PANE unset writes nothing"
+	(
+		unset TMUX_PANE
+		run_hook "$codex_hook" "$(codex_event UserPromptSubmit)"
+	) || exit 1
+	expect_tmux
+
+	begin "codex: empty TMUX_PANE writes nothing"
+	TMUX_PANE= run_hook "$codex_hook" "$(codex_event Stop)"
+	TMUX_PANE=%99
+	expect_tmux
+
+	begin "codex: a failing tmux still exits 0 silently"
+	FAKE_TMUX_FAIL=1 run_hook "$codex_hook" "$(codex_event Stop)"
+	unset FAKE_TMUX_FAIL
+	expect_tmux "$(codex_status done)"
+
+	begin "codex: run by a parent that is not the daemon, it still reports"
+	run_hook_under "$(codex_event UserPromptSubmit)" app-server --listen unix://
+	expect_tmux "$(codex_status working)"
+
+	begin "codex: run by the managed daemon, it writes nothing"
+	for event in SessionStart UserPromptSubmit PermissionRequest Stop SessionEnd; do
+		run_hook_under "$(codex_event "$event")" app-server --listen unix:// --managed-daemon
+	done
+	expect_tmux
+
+	begin "codex: the daemon two levels up (through a login shell) still writes nothing"
+	hook_out=$(codex_event Stop | sh -c 'sh -c "sh \"\$0\"; exit" "$0"; exit' "$codex_hook" app-server --managed-daemon 2>&1)
+	[ $? -eq 0 ] && [ -z "$hook_out" ] || fail "exited non-zero or printed: $hook_out"
+	expect_tmux
+
+	# Codex writes the payload while the hook runs; a hook leaving early must
+	# not make that write fail on a closed pipe.
+	begin "codex: the daemon guard reads a large payload to the end"
+	big=$(head -c 200000 /dev/zero | tr '\0' x)
+	rm -f "$work/writer-rc"
+	{
+		codex_event PostToolUse "\"tool_response\":\"$big\""
+		echo $? >"$work/writer-rc"
+	} | sh -c 'sh "$0"; exit' "$codex_hook" --managed-daemon
+	[ "$(cat "$work/writer-rc" 2>/dev/null)" = 0 ] || fail "writing the payload failed: the hook closed stdin early"
+	expect_tmux
+}
+
+codex_command='sh "$HOME/.codex/muxify-status.sh"'
+codex_events='SessionStart UserPromptSubmit PreToolUse PermissionRequest PostToolUse Stop Interrupt SessionEnd'
+codex_trust_reminder='  Trust the new hooks once: run /hooks in Codex and approve them.'
+codex_daemon_reminder="  Launch Codex with codex --no-daemon (fish: alias codex 'command codex --no-daemon'), or it can't report its Status."
+
+# expect_codex_reminders: the installer printed both Codex reminders, right
+# after the codex: line.
+expect_codex_reminders() {
+	printf '%s\n' "$install_out" | grep -A2 '^codex: ' | sed 1d >"$work/reminders"
+	printf '%s\n' "$codex_trust_reminder" "$codex_daemon_reminder" >"$work/reminders.expected"
+	cmp -s "$work/reminders.expected" "$work/reminders" ||
+		fail "expected the Codex reminders after the codex: line, got:" "$install_out"
+}
+
+codex_install_cases() {
+	# A hooks.json like the user's, with herdr and lavish SessionStart hooks.
+	new_home
+	mkdir "$HOME/.codex"
+	codex_hooks=$HOME/.codex/hooks.json
+	cat >"$codex_hooks" <<'JSON'
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "command": "lavish-axi", "timeout": 10, "type": "command" }
+        ],
+        "matcher": ""
+      },
+      {
+        "hooks": [
+          { "command": "bash '/Users/someone/.codex/herdr-agent-state.sh' session", "timeout": 10, "type": "command" }
+        ]
+      }
+    ]
+  },
+  "extra": true
+}
+JSON
+	cp "$codex_hooks" "$work/codex-original.json"
+	echo 'model = "gpt-5.5"' >"$HOME/.codex/config.toml"
+
+	begin "codex install: first run says installed and prints both reminders"
+	run_install
+	expect_install_line codex "codex: installed"
+	[ "$install_rc" -eq 0 ] || fail "installer exited $install_rc:" "$install_out"
+	expect_codex_reminders
+	pass
+
+	begin "codex install: copies the hook script, executable, not a symlink"
+	codex_script=$HOME/.codex/muxify-status.sh
+	[ -f "$codex_script" ] && [ ! -L "$codex_script" ] || fail "missing or a symlink: $codex_script"
+	[ -x "$codex_script" ] || fail "not executable: $codex_script"
+	expect_same_file "$codex_hook" "$codex_script"
+	pass
+
+	begin "codex install: backs hooks.json up to hooks.json.bak"
+	expect_same_file "$work/codex-original.json" "$codex_hooks.bak"
+	pass
+
+	begin "codex install: adds one synchronous entry without matcher per event"
+	for event in $codex_events; do
+		jq -e --arg e "$event" --arg cmd "$codex_command" '
+			[.hooks[$e][] | select(any(.hooks[]; .command == $cmd))]
+			| length == 1
+			and (.[0] == {hooks: [{type: "command", command: $cmd, timeout: 5}]})' \
+			"$codex_hooks" >/dev/null || fail "no single Muxify entry for $event:" "$(cat "$codex_hooks")"
+	done
+	expect_json "$codex_hooks" '(.hooks | keys | length) == 8'
+	pass
+
+	begin "codex install: the foreign SessionStart hooks and other keys are untouched"
+	jq -e --slurpfile old "$work/codex-original.json" '
+		$old[0] as $o
+		| .hooks.SessionStart[0:2] == $o.hooks.SessionStart
+		and (.hooks.SessionStart | length) == 3
+		and (del(.hooks) == ($o | del(.hooks)))' "$codex_hooks" >/dev/null ||
+		fail "foreign entries or keys changed:" "$(cat "$codex_hooks")"
+	[ "$(cat "$HOME/.codex/config.toml")" = 'model = "gpt-5.5"' ] || fail "config.toml changed"
+	pass
+
+	begin "codex install: the registered command runs the installed hook"
+	: >"$TMUX_LOG"
+	codex_event PermissionRequest | sh -c "$codex_command"
+	expect_tmux "$(codex_status blocked)"
+
+	begin "codex install: second run says updated, reminds again and leaves hooks.json byte-identical"
+	cp "$codex_hooks" "$work/codex-after-first.json"
+	run_install
+	expect_install_line codex "codex: updated"
+	expect_codex_reminders
+	expect_same_file "$work/codex-after-first.json" "$codex_hooks"
+	expect_same_file "$work/codex-original.json" "$codex_hooks.bak"
+	pass
+
+	begin "codex install: an updated hook script is copied again, a symlink replaced"
+	echo '# stale' >"$work/codex-target.sh"
+	rm "$codex_script"
+	ln -s "$work/codex-target.sh" "$codex_script"
+	run_install
+	expect_install_line codex "codex: updated"
+	[ -f "$codex_script" ] && [ ! -L "$codex_script" ] || fail "still a symlink: $codex_script"
+	expect_same_file "$codex_hook" "$codex_script"
+	[ "$(cat "$work/codex-target.sh")" = '# stale' ] || fail "the symlink's target changed"
+	pass
+
+	begin "codex install: without jq prints failed, no reminders, and changes nothing"
+	new_home
+	mkdir "$HOME/.codex"
+	mkdir -p "$work/nojq-bin"
+	[ -e "$work/nojq-bin/dirname" ] || ln -s "$(command -v dirname)" "$work/nojq-bin/dirname"
+	echo '{"hooks":{}}' >"$HOME/.codex/hooks.json"
+	install_out=$(PATH=$work/nojq-bin /bin/sh "$ext/install.sh" 2>&1)
+	expect_install_line codex "codex: failed (jq not found)"
+	! printf '%s\n' "$install_out" | grep -q -e '/hooks' -e '--no-daemon' || fail "reminders printed:" "$install_out"
+	[ "$(find "$HOME" -mindepth 1 | sort)" = "$(printf '%s\n' "$HOME/.codex" "$HOME/.codex/hooks.json")" ] ||
+		fail "changed:" "$(find "$HOME" -mindepth 1)"
+	pass
+
+	begin "codex install: no .codex directory prints not found, no reminders, and creates nothing"
+	new_home
+	run_install
+	expect_install_line codex "codex: not found"
+	! printf '%s\n' "$install_out" | grep -q -e '/hooks' -e '--no-daemon' || fail "reminders printed:" "$install_out"
+	[ -z "$(find "$HOME" -mindepth 1)" ] || fail "created:" "$(find "$HOME" -mindepth 1)"
+	pass
+
+	begin "codex install: missing hooks.json is created without a backup"
+	new_home
+	mkdir "$HOME/.codex"
+	run_install
+	expect_install_line codex "codex: installed"
+	codex_hooks=$HOME/.codex/hooks.json
+	expect_json "$codex_hooks" '(.hooks | keys | length) == 8 and (del(.hooks) == {})'
+	[ ! -e "$codex_hooks.bak" ] || fail "unexpected backup: $codex_hooks.bak"
+	pass
+
+	begin "codex install: a hooks.json that already has every entry is not rewritten"
+	cp "$codex_hooks" "$work/codex-complete.json"
+	rm "$HOME/.codex/muxify-status.sh"
+	run_install
+	expect_install_line codex "codex: installed"
+	expect_same_file "$work/codex-complete.json" "$codex_hooks"
+	[ ! -e "$codex_hooks.bak" ] || fail "unexpected backup: $codex_hooks.bak"
+	pass
+}
+
 # --- OpenCode 2 -------------------------------------------------------------
 
 opencode_plugin=$ext/opencode/muxify-status/tui.js
@@ -816,6 +1099,8 @@ command -v node >/dev/null 2>&1 || { echo "FAIL: node not found" >&2; exit 1; }
 
 claude_hook_cases
 claude_install_cases
+codex_hook_cases
+codex_install_cases
 opencode_hook_cases
 opencode_install_cases
 pi_hook_cases

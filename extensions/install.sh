@@ -10,7 +10,8 @@
 #
 # Prints exactly one line per Agent:
 #   <agent>: installed | updated | not found | failed (<reason>)
-# and exits non-zero when any Agent failed.
+# followed, for Codex once installed or updated, by indented reminder lines;
+# exits non-zero when any Agent failed.
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
 failed=0
@@ -82,6 +83,46 @@ install_claude() {
 	echo "claude: $result"
 }
 
+# Codex CLI: one hook script for every event, registered in hooks.json.
+install_codex() {
+	codex_dir=$HOME/.codex
+	if [ ! -d "$codex_dir" ]; then
+		echo "codex: not found"
+		return 0
+	fi
+	if ! command -v jq >/dev/null 2>&1; then
+		echo "codex: failed (jq not found)"
+		return 1
+	fi
+
+	codex_script=$codex_dir/muxify-status.sh
+	# Codex runs hook commands through the user's login shell (fish here), so
+	# the command is a plain line every shell reads the same way; that shell
+	# expands $HOME.
+	codex_command='sh "$HOME/.codex/muxify-status.sh"'
+	# No matcher (every tool), synchronous so events stay in order.
+	codex_entries=$(jq -n --arg cmd "$codex_command" '
+		reduce ("SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest",
+			"PostToolUse", "Stop", "Interrupt", "SessionEnd") as $event ({};
+			.[$event] = {hooks: [{type: "command", command: $cmd, timeout: 5}]})')
+
+	if [ -e "$codex_script" ] || [ -L "$codex_script" ]; then result=updated; else result=installed; fi
+	# Remove first, so a symlink in its place is replaced, not written through.
+	if ! { rm -f "$codex_script" &&
+		cp "$here/codex/muxify-status.sh" "$codex_script" &&
+		chmod 755 "$codex_script"; }; then
+		echo "codex: failed (could not copy the hook script)"
+		return 1
+	fi
+	if ! add_hook_entries "$codex_dir/hooks.json" "$codex_entries"; then
+		echo "codex: failed (could not update hooks.json)"
+		return 1
+	fi
+	echo "codex: $result"
+	echo "  Trust the new hooks once: run /hooks in Codex and approve them."
+	echo "  Launch Codex with codex --no-daemon (fish: alias codex 'command codex --no-daemon'), or it can't report its Status."
+}
+
 # OpenCode 2: a TUI plugin directory, which OpenCode discovers in its plugins
 # folder by itself, so no config file is edited.
 install_opencode() {
@@ -124,7 +165,7 @@ install_pi() {
 	echo "pi: $result"
 }
 
-for agent in claude opencode pi; do
+for agent in claude codex opencode pi; do
 	"install_$agent" || failed=1
 done
 exit "$failed"
