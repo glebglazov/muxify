@@ -49,6 +49,7 @@ final class WorkspaceStore {
     }
 
     @ObservationIgnored let terminalHost = TerminalHostView()
+    @ObservationIgnored private let events = TmuxEvents()
     @ObservationIgnored private var browsers: [String: Browser] = [:]
     @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
     /// Windows whose `@muxify_open` we consumed and are clearing.
@@ -60,6 +61,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var isRefreshing = false
+    /// Something changed while a snapshot was in flight; take another one.
+    @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var started = false
 
     init() {
@@ -83,6 +86,7 @@ final class WorkspaceStore {
             return
         }
         installKeyMonitor()
+        events.onEvent = { [weak self] in self?.handle($0) }
         refresh(attachIfNeeded: true)
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -92,7 +96,10 @@ final class WorkspaceStore {
     // MARK: - Polling
 
     func refresh(attachIfNeeded: Bool = false) {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            refreshAgain = true
+            return
+        }
         isRefreshing = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let snapshot = Tmux.snapshot()
@@ -100,8 +107,23 @@ final class WorkspaceStore {
                 guard let self else { return }
                 self.isRefreshing = false
                 self.apply(snapshot, attachIfNeeded: attachIfNeeded)
+                if self.refreshAgain {
+                    self.refreshAgain = false
+                    self.refresh()
+                }
             }
         }
+    }
+
+    /// tmux told us something changed. A Window switch in the Session we are
+    /// showing moves the selection right away; the snapshot fills in the rest.
+    private func handle(_ event: TmuxEvents.Event) {
+        if case .sessionWindowChanged(let sessionID, let windowID) = event,
+           pendingSelection == nil, selectedWindow?.sessionID == sessionID,
+           windows.contains(where: { $0.id == windowID }) {
+            selectedWindowID = windowID
+        }
+        refresh()
     }
 
     private func apply(_ snapshot: TmuxSnapshot, attachIfNeeded: Bool) {
@@ -116,6 +138,12 @@ final class WorkspaceStore {
             followClient(snapshot.clients)
         }
         consumeOpenRequests()
+
+        // (Re)start listening once there is a Session to attach to.
+        if snapshot.serverRunning, !events.isRunning,
+           let sessionID = selectedWindow?.sessionID ?? windows.first?.sessionID {
+            events.start(sessionID: sessionID)
+        }
 
         if snapshot.serverRunning {
             let live = Set(windows.map(\.id))

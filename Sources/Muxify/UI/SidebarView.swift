@@ -173,9 +173,9 @@ private struct SessionHeader: View {
                 .foregroundStyle(.secondary)
                 .help("New window in \(session.name)")
             } else {
-                if !isExpanded, session.windows.contains(where: { $0.hasBell || $0.hasActivity }) {
+                if !isExpanded, session.windows.contains(where: \.hasBell) {
                     Circle()
-                        .fill(session.windows.contains(where: \.hasBell) ? Color.orange : Color.accentColor)
+                        .fill(Color.orange)
                         .frame(width: 5, height: 5)
                 }
                 Text("\(session.windows.count)")
@@ -219,9 +219,9 @@ private struct WindowRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
-                if window.hasBell || window.hasActivity {
+                if window.hasBell {
                     Circle()
-                        .fill(isSelected ? Color.white : (window.hasBell ? Color.orange : Color.accentColor))
+                        .fill(isSelected ? Color.white : Color.orange)
                         .frame(width: 5, height: 5)
                 }
                 if tabCount > 0 {

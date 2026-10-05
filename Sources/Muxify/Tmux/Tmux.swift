@@ -14,7 +14,6 @@ struct TmuxWindow: Identifiable, Hashable {
     let isActive: Bool
     let paneCount: Int
     let hasBell: Bool
-    let hasActivity: Bool
     let sessionActivity: Int
     var branch: String?
     /// The Window's Browser as last written to its tmux options.
@@ -161,8 +160,7 @@ enum Tmux {
         let windowFormat = [
             "W", "#{window_id}", "#{session_id}", "#{session_name}", "#{window_index}",
             "#{window_name}", "#{pane_title}", "#{pane_current_path}", "#{pane_current_command}",
-            "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{window_activity_flag}",
-            "#{session_activity}",
+            "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{session_activity}",
             "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(browserOpenOption)}", "#{\(openOption)}",
             "#{\(lastWindowOption)}",
         ].joined(separator: s)
@@ -180,18 +178,18 @@ enum Tmux {
         var lastWindowID: String?
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let f = line.components(separatedBy: s)
-            if f.first == "W", f.count >= 19 {
+            if f.first == "W", f.count >= 18 {
                 windows.append(TmuxWindow(
                     id: f[1], sessionID: f[2], sessionName: f[3], index: Int(f[4]) ?? 0,
                     name: f[5], paneTitle: f[6], path: f[7], command: f[8],
                     isActive: f[9] == "1", paneCount: Int(f[10]) ?? 1,
-                    hasBell: f[11] == "1", hasActivity: f[12] == "1",
-                    sessionActivity: Int(f[13]) ?? 0,
+                    hasBell: f[11] == "1",
+                    sessionActivity: Int(f[12]) ?? 0,
                     branch: GitInfo.branch(at: f[7]),
-                    storedBrowser: StoredBrowser(tabs: f[14], activeTab: f[15], open: f[16]),
-                    openRequests: f[17].split(separator: " ").map(String.init)
+                    storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], open: f[15]),
+                    openRequests: f[16].split(separator: " ").map(String.init)
                 ))
-                if !f[18].isEmpty { lastWindowID = f[18] }
+                if !f[17].isEmpty { lastWindowID = f[17] }
             } else if f.first == "C", f.count >= 4 {
                 clients.append(TmuxClient(tty: f[1], sessionID: f[2], windowID: f[3]))
             }

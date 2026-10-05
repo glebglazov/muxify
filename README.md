@@ -50,8 +50,10 @@ The vocabulary (Session, Window, Pane, Browser, Tab) is defined in
   prefix bindings. `Ghostty/TerminalSurfaceView.swift` forwards keyboard/IME,
   mouse, scroll, size, scale and focus to libghostty, following Ghostty's own
   macOS `SurfaceView`.
-- **Sidebar.** The sidebar reads `tmux list-windows -a` + `list-clients` once a
-  second and lists every Session in tmux order. Sessions are collapsible
+- **Sidebar.** The sidebar lists every Session in tmux order, from `tmux
+  list-windows -a` + `list-clients`. A read-only tmux control-mode client
+  (`tmux -C`) reports Window switches, new and closed Windows and renames as they
+  happen. Titles, paths and bells are polled once a second. Sessions are collapsible
   groups; the current one opens automatically, and which ones are open is
   remembered. Each Window row shows:
   - a title: the pane title (fish sets it to `~/w/project`), falling back to the
@@ -59,7 +61,7 @@ The vocabulary (Session, Window, Pane, Browser, Tab) is defined in
   - the git branch, read from `.git/HEAD`
   - a globe with the Tab count, if the Window's Browser has Tabs
   - the pane count
-  - bell/activity dots
+  - a dot if a Pane rang the bell
 
   Hovering a row shows its path. Clicking a row runs `switch-client -c <our tty>
   -t <window>`. Because Muxify attaches directly, other terminals on the same
@@ -122,8 +124,8 @@ open "muxify://toggle-browser"
 
 ## Proof-of-concept limits
 
-- The sidebar polls tmux every second, so `@muxify_open` can take up to a second.
-  Using tmux control mode (`-C`) would make updates push-based.
+- Pane titles, paths, bells and `@muxify_open` are polled once a second, so they
+  can take up to a second to show up.
 - The Browser is WebKit, not Chromium (ADR 0002): no Chrome extensions, and no
   CDP for agents.
 - There is no terminal search UI, and no inspector or quick-look.
