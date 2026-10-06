@@ -67,6 +67,9 @@ final class WorkspaceStore {
     @ObservationIgnored private var clientTTY: String?
     /// A click we sent to tmux that the next snapshots may not reflect yet.
     @ObservationIgnored private var pendingSelection: (windowID: String, deadline: Date)?
+    /// A Session asked for by name (`muxify session open`) that the snapshot
+    /// may not list yet: Muxify is just launching, or it was just created.
+    @ObservationIgnored private var pendingSession: (name: String, deadline: Date)?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var isRefreshing = false
@@ -153,9 +156,11 @@ final class WorkspaceStore {
         if attachIfNeeded, surface == nil {
             rememberedWindowID = snapshot.lastWindowID
             let last = snapshot.lastWindowID.flatMap { id in snapshot.windows.first { $0.id == id } }
-            attach(to: (last ?? Self.initialWindow(in: snapshot.windows)).map(Target.init))
+            let requested = takePendingSession(in: snapshot.windows)
+            attach(to: (requested ?? last ?? Self.initialWindow(in: snapshot.windows)).map(Target.init))
         } else {
             followClient(snapshot.clients)
+            if surface != nil, let window = takePendingSession(in: windows) { select(window) }
         }
         consumeOpenRequests()
         updateUnread(snapshot.panes)
@@ -250,6 +255,24 @@ final class WorkspaceStore {
 
     func select(_ window: TmuxWindow) {
         switchClient(to: Target(window))
+    }
+
+    /// Shows the Session's current Window (`muxify session open <name>`).
+    func selectSession(named name: String) {
+        pendingSession = (name, Date().addingTimeInterval(5))
+        // Before the terminal exists, the first snapshot attaches to it.
+        guard started, surface != nil else { return }
+        if let window = takePendingSession(in: windows) { select(window) } else { refresh() }
+    }
+
+    /// The requested Session's current Window once a snapshot lists it. The
+    /// request is dropped when found, or after a few seconds.
+    private func takePendingSession(in windows: [TmuxWindow]) -> TmuxWindow? {
+        guard let pending = pendingSession else { return nil }
+        let window = windows.first { $0.sessionName == pending.name && $0.isActive }
+            ?? windows.first { $0.sessionName == pending.name }
+        if window != nil || Date() > pending.deadline { pendingSession = nil }
+        return window
     }
 
     /// Switches to the Agent's Window with its Pane active. The Pane is
@@ -502,7 +525,11 @@ extension WorkspaceStore {
 
         switch url.host {
         case "select":
-            if let id = value("window"), let window = windows.first(where: { $0.id == id }) { select(window) }
+            if let id = value("window") {
+                if let window = windows.first(where: { $0.id == id }) { select(window) }
+            } else if let name = value("session") {
+                selectSession(named: name)
+            }
         case "open":
             guard let input = value("url"), let target = Omnibox.url(for: input) else { return }
             openInBrowser(target, windowID: value("window"))

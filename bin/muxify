@@ -2,19 +2,27 @@
 # Muxify command line tool.
 #
 #   muxify browser open [--window <id>] <url>...
+#   muxify session open <session name>
 #
-# Opens each URL as a Tab in the Browser of the tmux Window this runs in. It
-# targets $TMUX_PANE, not the session's current Window, so callers without a
-# tty (agents, background jobs) still hit their own Window. Muxify picks the
-# request up from the Window's @muxify_open option within a second (ADR 0003).
+# browser open: opens each URL as a Tab in the Browser of the tmux Window this
+# runs in. It targets $TMUX_PANE, not the session's current Window, so callers
+# without a tty (agents, background jobs) still hit their own Window. Muxify
+# picks the request up from the Window's @muxify_open option within a second
+# (ADR 0003).
+#
+# session open: brings Muxify to the front (launching it if needed) showing
+# that tmux Session's current Window. Works from anywhere, inside tmux or not.
 set -eu
 
 usage() {
     cat >&2 <<'EOF'
 usage: muxify browser open [--window <id>] <url>...
+       muxify session open <session name>
 
-Opens each URL as a Tab in this tmux Window's Browser.
-  --window <id>   open in another Window instead, e.g. --window @12
+browser open   Opens each URL as a Tab in this tmux Window's Browser.
+                 --window <id>   open in another Window instead, e.g. --window @12
+session open   Shows the tmux Session in Muxify. The name may contain spaces,
+               quoted or not: muxify session open my project
 EOF
     exit "${1:-2}"
 }
@@ -65,7 +73,32 @@ browser_open() {
     tmux set-option -wa -t "$window" @muxify_open "$urls"
 }
 
+# Percent-encodes every byte, which any URL parser decodes back.
+urlencode() {
+    printf '%s' "$1" | od -An -tx1 -v | tr -d ' \n' | sed 's/../%&/g'
+}
+
+session_open() {
+    case "${1:-}" in
+        -h|--help) usage 0 ;;
+        --) shift ;;
+    esac
+    [ $# -gt 0 ] || usage
+    # The words make up one name, so it needs no quoting.
+    name="$*"
+    tmux has-session -t "=$name" 2>/dev/null || die "no tmux session '$name'"
+    open "muxify://select?session=$(urlencode "$name")"
+}
+
 case "${1:-}" in
+    session)
+        shift
+        case "${1:-}" in
+            open) shift; session_open "$@" ;;
+            -h|--help) usage 0 ;;
+            *) usage ;;
+        esac
+        ;;
     browser)
         shift
         case "${1:-}" in

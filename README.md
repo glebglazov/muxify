@@ -154,6 +154,14 @@ It finds its Window from `$TMUX_PANE`, so it also works from callers that have
 no tty (an agent's shell tool, a background job). Outside tmux it asks for
 `--window`.
 
+From anywhere, in tmux or not (a launcher like Raycast, a script), bring Muxify
+to the front showing a Session's current Window, launching Muxify if needed.
+The name may contain spaces, quoted or not:
+
+```sh
+muxify session open "my project"
+```
+
 Without the tool, set the option yourself. Always pass `-t "$TMUX_PANE"`:
 without it, a caller that has no tty gets the session's current Window, not its
 own.
@@ -163,6 +171,7 @@ tmux set -w -t "$TMUX_PANE" @muxify_open localhost:3000          # from inside t
 tmux set -w -t "$TMUX_PANE" @muxify_open "localhost:3000 localhost:6006"   # several at once
 open "muxify://open?url=localhost:3000&window=$(tmux display -p -t "$TMUX_PANE" '#{window_id}')"
 open "muxify://select?window=@12"
+open "muxify://select?session=my%20project"
 open "muxify://toggle-browser"
 ```
 
