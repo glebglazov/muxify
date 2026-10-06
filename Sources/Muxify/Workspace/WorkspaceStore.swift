@@ -82,6 +82,8 @@ final class WorkspaceStore {
         // on the tmux Windows (ADR 0003).
         UserDefaults.standard.removeObject(forKey: "browserURLs")
         UserDefaults.standard.removeObject(forKey: "browserVisible")
+        // Replaced by browserShare, so the Browser scales with the window.
+        UserDefaults.standard.removeObject(forKey: "browserWidth")
     }
 
     func start() {

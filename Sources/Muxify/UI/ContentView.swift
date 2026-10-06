@@ -3,13 +3,17 @@ import SwiftUI
 struct ContentView: View {
     let store: WorkspaceStore
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
-    /// One width for every Window's Browser.
-    @AppStorage("browserWidth") private var browserWidth: Double = 640
+    /// The Browser's share of the room beside the sidebar, the same for every
+    /// Window's Browser. A share rather than a width, so resizing the window
+    /// keeps terminal and Browser in proportion.
+    @AppStorage("browserShare") private var browserShare: Double = 0.45
 
     var body: some View {
         GeometryReader { proxy in
             let sidebar = store.sidebarVisible ? clamp(sidebarWidth, 180, 420) : 0
-            let browserMax = max(320, proxy.size.width - sidebar - 360)
+            let room = proxy.size.width - sidebar
+            let browserMax = max(320, room - 360)
+            let browserWidth = clamp(browserShare * room, 320, browserMax)
             // Panels appear and disappear without animation, so switching
             // between Windows with and without a Browser is instant.
             HStack(spacing: 0) {
@@ -17,14 +21,16 @@ struct ContentView: View {
                     SidebarView(store: store)
                         .frame(width: sidebar)
                         .chrome(theme: store.theme, material: .sidebar)
-                    PanelResizeHandle(width: $sidebarWidth, range: 180...420, edge: .leading)
+                    PanelResizeHandle(width: sidebar, range: 180...420, edge: .leading) { sidebarWidth = $0 }
                 }
                 TerminalArea(store: store)
                 if let browser = store.currentBrowser, browser.isOpen {
-                    PanelResizeHandle(width: $browserWidth, range: 320...browserMax, edge: .trailing)
+                    PanelResizeHandle(width: browserWidth, range: 320...browserMax, edge: .trailing) {
+                        browserShare = $0 / room
+                    }
                     BrowserPanel(browser: browser)
                         .id(browser.windowID)
-                        .frame(width: clamp(browserWidth, 320, browserMax))
+                        .frame(width: browserWidth)
                 }
             }
         }
@@ -200,12 +206,15 @@ struct WindowDragArea: View {
     }
 }
 
-/// The divider between terminal and Browser; drag it to resize the Browser.
+/// The divider beside a panel; drag it to resize the panel.
 private struct PanelResizeHandle: View {
-    @Binding var width: Double
+    /// The panel's width as laid out.
+    let width: Double
     let range: ClosedRange<Double>
     /// Which side of the handle the resized panel is on.
     let edge: HorizontalEdge
+    /// Receives the dragged width, kept within `range`.
+    let resize: (Double) -> Void
 
     @State private var startWidth: Double?
 
@@ -214,22 +223,16 @@ private struct PanelResizeHandle: View {
             .fill(Color(nsColor: .separatorColor))
             .frame(width: 1)
             .overlay {
-                Color.clear
-                    .frame(width: 9)
-                    .contentShape(Rectangle())
-                    .onHover { inside in
-                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { value in
-                                let start = startWidth ?? width
-                                if startWidth == nil { startWidth = start }
-                                let delta = edge == .leading ? value.translation.width : -value.translation.width
-                                width = min(max(start + delta, range.lowerBound), range.upperBound)
-                            }
-                            .onEnded { _ in startWidth = nil }
-                    )
+                PanelDivider(
+                    onDrag: { translation in
+                        let start = startWidth ?? width
+                        if startWidth == nil { startWidth = start }
+                        let delta = edge == .leading ? translation : -translation
+                        resize(min(max(start + delta, range.lowerBound), range.upperBound))
+                    },
+                    onDragEnded: { startWidth = nil }
+                )
+                .frame(width: 1 + 2 * PanelDividerView.reach)
             }
             .zIndex(1)
     }
