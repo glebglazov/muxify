@@ -62,6 +62,7 @@ struct MuxifyApp: App {
                 Button("Reload Ghostty Config") { GhosttyRuntime.shared.reloadConfig() }
                     .keyboardShortcut(",", modifiers: [.command, .shift])
                 Button("Install Extensions") { ExtensionInstaller.run() }
+                Button("Install Command Line Tool") { CommandLineToolInstaller.run() }
             }
         }
     }

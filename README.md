@@ -141,8 +141,22 @@ Ghostty/tmux bindings keep their meaning.
 Programs running inside a Window can open Tabs in that Window's Browser. If you
 are looking at another Window, the Tab opens quietly and you aren't moved.
 
-Always pass `-t "$TMUX_PANE"`. Without it, a caller that has no tty (an agent's
-shell tool, a background job) gets the session's current Window, not its own.
+Install the `muxify` command with **Muxify ▸ Install Command Line Tool** (it
+links into `~/.local/bin`), then run it in any Pane:
+
+```sh
+muxify browser open localhost:3000                 # this Pane's Window
+muxify browser open localhost:3000 localhost:6006  # several Tabs
+muxify browser open --window @12 localhost:3000    # another Window
+```
+
+It finds its Window from `$TMUX_PANE`, so it also works from callers that have
+no tty (an agent's shell tool, a background job). Outside tmux it asks for
+`--window`.
+
+Without the tool, set the option yourself. Always pass `-t "$TMUX_PANE"`:
+without it, a caller that has no tty gets the session's current Window, not its
+own.
 
 ```sh
 tmux set -w -t "$TMUX_PANE" @muxify_open localhost:3000          # from inside the Window
