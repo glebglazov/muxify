@@ -51,7 +51,8 @@ struct Agent: Identifiable, Hashable {
     }
 
     /// One Agent per Pane that runs one: the unread Agents first, then the
-    /// read ones, each in tmux order (Session, Window, Pane).
+    /// working ones, then the rest you have seen, each in tmux order
+    /// (Session, Window, Pane).
     static func list(panes: [TmuxPane], windows: [TmuxWindow]) -> [Agent] {
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let agents = panes.compactMap { pane -> Agent? in
@@ -71,6 +72,8 @@ struct Agent: Identifiable, Hashable {
                 windowTitle: window.displayTitle
             )
         }
-        return agents.filter(\.unread) + agents.filter { !$0.unread }
+        return agents.filter(\.unread)
+            + agents.filter { !$0.unread && $0.status == .working }
+            + agents.filter { !$0.unread && $0.status != .working }
     }
 }

@@ -87,9 +87,9 @@ is defined in
   Window is selected and Muxify is in front); looking at it makes it read.
   Muxify keeps this on the Pane as `@muxify_agent_unread`, so it survives a
   relaunch. A read Agent that is done, or hasn't run a turn yet, has no dot.
-  Unread Agents are listed first, then the read ones, each in tmux order. A
-  Pane that is back at a plain shell is hidden, in case a crashed Agent left
-  its options behind. Clicking a row switches to the Window and
+  Unread Agents are listed first, then working ones, then the rest, each in
+  tmux order. A Pane that is back at a plain shell is hidden, in case a
+  crashed Agent left its options behind. Clicking a row switches to the Window and
   selects the Agent's Pane. The Extensions live in [extensions/](extensions);
   the contract is
   [ADR 0004](docs/adr/0004-agents-report-status-through-pane-options.md).
