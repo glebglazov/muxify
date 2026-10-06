@@ -34,8 +34,8 @@ Muxify reads both options in its once-a-second tmux poll and lists the Agent in
 the sidebar's Agents section. An Agent whose Pane is back at a plain shell is
 hidden, which covers options left behind by a crash. Muxify itself sets a third
 option, `@muxify_agent_unread`, when the Agent reaches done, failed or blocked
-while you aren't looking at its Window (see the main README); Extensions never
-touch it.
+while you aren't looking at its Window (see Unread in
+[CONTEXT.md](../CONTEXT.md)); Extensions never touch it.
 
 ## Install
 
