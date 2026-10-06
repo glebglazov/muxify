@@ -18,16 +18,19 @@ is in [CONTEXT.md](CONTEXT.md), the design decisions in [docs/adr](docs/adr).
 
 ## Build
 
-Requires macOS 14+ on Apple silicon, Xcode, `xcodegen` (`brew install
-xcodegen`), `tmux`, Ghostty.app (its terminfo and themes are bundled into the
-app) and a `GhosttyKit.xcframework`.
+Requires macOS 14+ on Apple silicon, Xcode, Homebrew, `tmux` and Ghostty.app
+(its terminfo and themes are bundled into the app).
 
 ```sh
 make run    # vendors libghostty, generates the Xcode project, builds and opens the app
 ```
 
-`scripts/setup-ghostty.sh` looks for a local Ghostty build in `~/projects/`. To
-use another one:
+`make setup`, which every other target runs first, prepares a fresh machine: it
+installs `xcodegen` with Homebrew if it is missing, then runs
+`scripts/setup-ghostty.sh` if no libghostty is vendored yet. The script looks for
+a local Ghostty build in `~/projects/`; if there is none, it clones Ghostty at the
+pinned commit and builds it with zig, installing Zig and Xcode's Metal Toolchain
+when they are missing. To use another build:
 
 ```sh
 GHOSTTYKIT=/path/to/GhosttyKit.xcframework ./scripts/setup-ghostty.sh
@@ -37,10 +40,10 @@ GHOSTTY_SRC=~/src/ghostty ./scripts/setup-ghostty.sh    # builds it with zig
 ## Install
 
 ```sh
-cp -R build/Build/Products/Debug/Muxify.app /Applications/
+make install    # a Release build, into /Applications (or INSTALL_DIR)
 ```
 
-Then open that copy and, from the **Muxify** menu:
+Then open the installed app and, from the **Muxify** menu:
 
 - **Install Command Line Tool** links `muxify` into `~/.local/bin`. Programs in
   a Pane use it to open Tabs in their Window's Browser (`muxify browser open
