@@ -21,21 +21,35 @@ opens as a panel on the right.
 make run          # vendors libghostty, generates the Xcode project, builds, opens the app
 ```
 
-Requirements: Xcode, `xcodegen` (`brew install xcodegen`), and `tmux`. Ghostty.app
+Requirements: Xcode, Homebrew, and `tmux`. Ghostty.app
 must be installed: its terminfo and themes are copied into the app bundle at build
 time.
 
 The libghostty static library comes from a `GhosttyKit.xcframework`. By default
 `scripts/setup-ghostty.sh` picks up the local build in
-`~/projects/ghostty-remux-upstream-rebuild`. To use a different one:
+`~/projects/ghostty-remux-upstream-rebuild` or `~/projects/ghostty`. If neither
+exists, it clones upstream Ghostty into `~/projects/ghostty` at the commit pinned
+in the script, and builds it with zig. To use a different one:
 
 ```sh
 GHOSTTYKIT=/path/to/GhosttyKit.xcframework ./scripts/setup-ghostty.sh
-# or build from a ghostty checkout (needs zig):
+# or build from a ghostty checkout:
 GHOSTTY_SRC=~/src/ghostty ./scripts/setup-ghostty.sh
 ```
 
 You can also open `Muxify.xcodeproj` in Xcode after `make project`.
+
+`make setup`, which every other target runs first, prepares a fresh machine: it
+installs `xcodegen` with Homebrew if it is missing, then runs
+`scripts/setup-ghostty.sh` if no libghostty is vendored yet. When the script builds
+Ghostty, it installs the Zig release that Ghostty asks for from Homebrew, and
+Xcode's Metal Toolchain if it is missing.
+
+To install a Release build into `/Applications` (or `INSTALL_DIR`):
+
+```sh
+make install
+```
 
 ## How it works
 
