@@ -13,6 +13,7 @@ protocol GhosttyRuntimeDelegate: AnyObject {
     func ghosttyGotoTab(_ tab: Int32)
     func ghosttySurfaceClosed(_ view: TerminalSurfaceView)
     func ghosttyThemeChanged(_ theme: TerminalTheme)
+    func ghosttyReloadConfig()
 }
 
 /// The colors of the active Ghostty theme, for tinting Muxify's own chrome.
@@ -62,13 +63,13 @@ final class GhosttyRuntime {
     private init() {}
 
     /// Must run before any surface is created.
-    func start() {
+    func start(ghosttyConfigFile: String?) {
         guard app == nil else { return }
         if ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) != GHOSTTY_SUCCESS {
             NSLog("muxify: ghostty_init failed")
             return
         }
-        config = Self.loadConfig()
+        config = Self.loadConfig(ghosttyConfigFile: ghosttyConfigFile)
 
         var runtime = ghostty_runtime_config_s(
             userdata: Unmanaged.passUnretained(self).toOpaque(),
@@ -101,10 +102,6 @@ final class GhosttyRuntime {
         // light), so apply it once explicitly to get a CONFIG_CHANGE.
         setColorScheme(dark: NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
         if let app, let config { ghostty_app_update_config(app, config) }
-        configStamp = Self.configFilesStamp()
-        configWatcher = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
-            GhosttyRuntime.shared.reloadIfConfigFilesChanged()
-        }
 
         let center = NotificationCenter.default
         center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
@@ -132,9 +129,8 @@ final class GhosttyRuntime {
 
     /// Re-reads the config files. libghostty answers with CONFIG_CHANGE,
     /// which carries the resolved theme colors.
-    func reloadConfig() {
-        guard let app, let fresh = Self.loadConfig() else { return }
-        configStamp = Self.configFilesStamp()
+    func reloadConfig(ghosttyConfigFile: String?) {
+        guard let app, let fresh = Self.loadConfig(ghosttyConfigFile: ghosttyConfigFile) else { return }
         ghostty_app_update_config(app, fresh)
         // Free the old config only after libghostty has switched to the new one.
         if let old = config { ghostty_config_free(old) }
@@ -152,38 +148,6 @@ final class GhosttyRuntime {
         }
     }
 
-    // MARK: - Following the config files
-
-    // Ghostty itself reloads only on request; Muxify borrows Ghostty's config,
-    // so it follows edits (often made for standalone Ghostty) by itself.
-    private var configStamp = ""
-    private var configWatcher: Timer?
-
-    private func reloadIfConfigFilesChanged() {
-        let stamp = Self.configFilesStamp()
-        guard stamp != configStamp else { return }
-        reloadConfig()
-    }
-
-    /// Modification times of every file the config can come from, including
-    /// custom themes.
-    private static func configFilesStamp() -> String {
-        let fm = FileManager.default
-        let home = NSHomeDirectory()
-        let xdg = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"] ?? "\(home)/.config"
-        let dirs = ["\(xdg)/ghostty", "\(home)/Library/Application Support/com.mitchellh.ghostty"]
-        var files: [String] = []
-        for dir in dirs {
-            files += ["\(dir)/config", "\(dir)/config.ghostty"]
-            let themes = "\(dir)/themes"
-            files += ((try? fm.contentsOfDirectory(atPath: themes)) ?? []).map { "\(themes)/\($0)" }
-        }
-        return files.sorted().map { path in
-            let date = (try? fm.attributesOfItem(atPath: path)[.modificationDate]) as? Date
-            return "\(path)@\(date?.timeIntervalSince1970 ?? 0)"
-        }.joined(separator: "|")
-    }
-
     /// Only from CONFIG_CHANGE: a freshly loaded config has the built-in
     /// default colors until libghostty applies the light/dark state to it.
     private func updateTheme(from config: ghostty_config_t) {
@@ -193,10 +157,12 @@ final class GhosttyRuntime {
     }
 
     /// The user's normal Ghostty config (~/.config/ghostty/config etc.), so
-    /// fonts, themes and keybinds match their standalone Ghostty.
-    private static func loadConfig() -> ghostty_config_t? {
+    /// fonts, themes and keybinds match their standalone Ghostty, with the
+    /// file the Config names on top, as `ghostty --config-file=` does.
+    private static func loadConfig(ghosttyConfigFile: String?) -> ghostty_config_t? {
         guard let config = ghostty_config_new() else { return nil }
         ghostty_config_load_default_files(config)
+        if let ghosttyConfigFile { ghostty_config_load_file(config, ghosttyConfigFile) }
         ghostty_config_load_recursive_files(config)
         ghostty_config_finalize(config)
         for i in 0..<ghostty_config_diagnostics_count(config) {
@@ -253,7 +219,7 @@ final class GhosttyRuntime {
             if action.action.reload_config.soft {
                 softReload(target: target)
             } else {
-                reloadConfig()
+                delegate?.ghosttyReloadConfig()
             }
         case GHOSTTY_ACTION_RING_BELL:
             // tmux rings the bell for activity in other Windows (monitor-activity),

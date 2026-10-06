@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     let store: WorkspaceStore
+    let configStore: ConfigStore
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
     /// The Browser's share of the room beside the sidebar, the same for every
     /// Window's Browser. A share rather than a width, so resizing the window
@@ -34,11 +35,16 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay(alignment: .top) {
+            if !configStore.problems.isEmpty, !configStore.problemsDismissed {
+                ConfigProblemsBanner(configStore: configStore, theme: store.theme)
+            }
+        }
         .padding(.top, TitlebarMetrics.height)
         // An overlay, so it is above everything for clicks: scroll views below
         // (sidebar list, tab strip) reach up under the title bar area and would
         // otherwise swallow clicks on the toggles.
-        .overlay(alignment: .top) { HeaderBar(store: store) }
+        .overlay(alignment: .top) { HeaderBar(store: store, keybinds: configStore.config.keybinds) }
         .ignoresSafeArea()
         // Names the window for the Window menu and Mission Control.
         .navigationTitle(store.selectedWindow?.sessionName ?? "Muxify")
@@ -55,6 +61,7 @@ struct ContentView: View {
 /// drag handle, and the two panel toggles on the right.
 private struct HeaderBar: View {
     let store: WorkspaceStore
+    let keybinds: Keybinds
 
     var body: some View {
         let browserOpen = store.currentBrowser?.isOpen ?? false
@@ -62,13 +69,13 @@ private struct HeaderBar: View {
             Spacer()
             TitlebarButton(
                 systemName: "sidebar.left",
-                help: store.sidebarVisible ? "Hide Sidebar (⌘S)" : "Show Sidebar (⌘S)",
+                help: help(store.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", .toggleSidebar),
                 isOn: store.sidebarVisible,
                 action: store.toggleSidebar
             )
             TitlebarButton(
                 systemName: "sidebar.right",
-                help: browserOpen ? "Hide Browser (⌘B)" : "Show Browser (⌘B)",
+                help: help(browserOpen ? "Hide Browser" : "Show Browser", .toggleBrowser),
                 isOn: browserOpen,
                 action: store.toggleBrowser
             )
@@ -83,6 +90,59 @@ private struct HeaderBar: View {
                 .frame(height: 1)
         }
         .chrome(theme: store.theme, material: .titlebar)
+    }
+
+    private func help(_ title: String, _ action: ConfigAction) -> String {
+        keybinds.firstTrigger(for: action).map { "\(title) (\($0.symbol))" } ?? title
+    }
+}
+
+/// Lists the Config values Muxify skipped, or the syntax error that keeps
+/// the last good Config, until the user closes it or the Config reloads.
+private struct ConfigProblemsBanner: View {
+    let configStore: ConfigStore
+    let theme: TerminalTheme?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Problems in the Muxify Config")
+                    .font(.callout.weight(.semibold))
+                ForEach(Array(configStore.problems.enumerated()), id: \.offset) { _, problem in
+                    Text("\((problem.path as NSString).abbreviatingWithTildeInPath):\(problem.line): \(problem.message)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Button("Open Config") { configStore.openInEditor() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+            Spacer(minLength: 0)
+            Button {
+                configStore.problemsDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
+        }
+        .padding(10)
+        .frame(maxWidth: 560)
+        .chrome(theme: theme, material: .popover)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color(nsColor: theme?.separator ?? .separatorColor))
+        )
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+        .padding(10)
     }
 }
 

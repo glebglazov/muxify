@@ -58,6 +58,7 @@ final class WorkspaceStore {
     }
 
     @ObservationIgnored let terminalHost = TerminalHostView()
+    @ObservationIgnored private let configStore: ConfigStore
     @ObservationIgnored private let events = TmuxEvents()
     @ObservationIgnored private var browsers: [String: Browser] = [:]
     @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
@@ -80,7 +81,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var activationObserver: Any?
     @ObservationIgnored private var started = false
 
-    init() {
+    init(configStore: ConfigStore) {
+        self.configStore = configStore
         // Browser state used to be kept here, keyed by window id; it now lives
         // on the tmux Windows (ADR 0003).
         UserDefaults.standard.removeObject(forKey: "browserURLs")
@@ -484,20 +486,28 @@ final class WorkspaceStore {
 
     // MARK: - Keyboard
 
-    /// Shortcuts the menu can't express. ⌘W closes a Tab when the Browser has
-    /// focus and never the app window (which would quit Muxify); ⌃Tab and
-    /// ⌃⇧Tab switch Tabs; ⌃⌘S, the macOS sidebar standard, also toggles the
-    /// sidebar. Terminal focus is left to Ghostty/tmux bindings.
+    private func perform(_ action: ConfigAction) {
+        switch action {
+        case .toggleSidebar: toggleSidebar()
+        case .toggleBrowser: toggleBrowser()
+        }
+    }
+
+    /// The Config's keybinds, which act before the terminal and the menu see
+    /// the key, so they win over Ghostty keybinds. Then shortcuts the menu
+    /// can't express: ⌘W closes a Tab when the Browser has focus and never
+    /// the app window (which would quit Muxify); ⌃Tab and ⌃⇧Tab switch Tabs.
+    /// Other keys in the terminal are left to Ghostty/tmux bindings.
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window === self.terminalHost.window else { return event }
+            if let trigger = KeyTrigger(event), let action = self.configStore.config.keybinds.action(for: trigger) {
+                self.perform(action)
+                return nil
+            }
             let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
             let key = event.charactersIgnoringModifiers?.lowercased()
 
-            if flags == [.control, .command], key == "s" {
-                self.toggleSidebar()
-                return nil
-            }
             if flags == .command, key == "w" {
                 if self.isBrowserFocused { self.browserCommand { $0.closeActiveTab() } }
                 return nil
@@ -555,6 +565,10 @@ extension WorkspaceStore: GhosttyRuntimeDelegate {
 
     func ghosttyThemeChanged(_ theme: TerminalTheme) {
         self.theme = theme
+    }
+
+    func ghosttyReloadConfig() {
+        configStore.reload()
     }
 
     func ghosttyNewTab() { newWindow() }
