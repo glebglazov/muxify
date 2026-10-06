@@ -10,6 +10,10 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     ARCHS: arm64
     ONLY_ACTIVE_ARCH: YES
+packages:
+  Yams:
+    url: https://github.com/jpsim/Yams
+    from: 6.2.2
 targets:
   Muxify:
     type: application
@@ -63,7 +67,27 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         DEAD_CODE_STRIPPING: YES
         GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - package: Yams
+    scheme:
+      testTargets: [MuxifyTests]
     postBuildScripts:
       - name: Bundle Ghostty resources
         script: "\"$PROJECT_DIR/scripts/bundle-ghostty-resources.sh\""
         basedOnDependencyAnalysis: false
+  # Tests the Config parser, compiled straight into the test bundle, so the
+  # tests run without launching Muxify (which would attach to tmux).
+  MuxifyTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Sources/Muxify/Config
+        excludes: [ConfigStore.swift]
+      - path: Tests/MuxifyTests
+    dependencies:
+      - package: Yams
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual

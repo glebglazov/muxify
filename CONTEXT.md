@@ -45,3 +45,19 @@ _Avoid_: unseen, new, notification
 **Extension**:
 The file or plugin folder installed into an Agent's own plugin or hook system that reports the Agent and its Status to Muxify.
 _Avoid_: integration, hook (when you mean the whole file), plugin (when you mean ours)
+
+### Layout
+
+**Sidebar**:
+The panel on the left of the Muxify window that lists Sessions, Windows and Agents.
+_Avoid_: left sidebar, left panel
+
+### Configuration
+
+**Config**:
+The Muxify config file: settings, in YAML sections, that control how Muxify itself behaves. It never holds what is open or shown now.
+_Avoid_: settings, preferences, Muxify settings
+
+**Ghostty config**:
+The Ghostty config files that control the terminal: its fonts, theme and terminal keybinds.
+_Avoid_: terminal config

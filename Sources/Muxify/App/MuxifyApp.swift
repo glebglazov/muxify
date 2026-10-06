@@ -4,25 +4,32 @@ import SwiftUI
 @main
 struct MuxifyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var configStore: ConfigStore
     @State private var store: WorkspaceStore
 
     init() {
         AppEnvironment.prepare()
-        GhosttyRuntime.shared.start()
-        _store = State(initialValue: WorkspaceStore())
+        let configStore = ConfigStore()
+        configStore.start()
+        _configStore = State(initialValue: configStore)
+        _store = State(initialValue: WorkspaceStore(configStore: configStore))
     }
+
+    private var keybinds: Keybinds { configStore.config.keybinds }
 
     var body: some Scene {
         Window("Muxify", id: "main") {
-            ContentView(store: store)
+            ContentView(store: store, configStore: configStore)
                 .frame(minWidth: 820, minHeight: 480)
         }
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .sidebar) {
+                // The key monitor acts on the trigger before the menu sees
+                // it; the shortcut is here to be shown.
                 Button(store.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { store.toggleSidebar() }
-                    .keyboardShortcut("s", modifiers: .command)
+                    .keyboardShortcut(keybinds.firstTrigger(for: .toggleSidebar)?.shortcut)
                 Toggle("Show Sessions", isOn: $store.sessionsVisible)
                 Toggle("Show Agents", isOn: $store.agentsVisible)
             }
@@ -37,7 +44,7 @@ struct MuxifyApp: App {
             }
             CommandMenu("Browser") {
                 Button(store.currentBrowser?.isOpen == true ? "Hide Browser" : "Show Browser") { store.toggleBrowser() }
-                    .keyboardShortcut("b", modifiers: .command)
+                    .keyboardShortcut(keybinds.firstTrigger(for: .toggleBrowser)?.shortcut)
                 Button("Open Location…") { store.browserCommand { _ in store.focusAddressBar() } }
                     .keyboardShortcut("l", modifiers: .command)
                 Divider()
@@ -59,7 +66,8 @@ struct MuxifyApp: App {
                     .keyboardShortcut("`", modifiers: .command)
             }
             CommandGroup(after: .appSettings) {
-                Button("Reload Ghostty Config") { GhosttyRuntime.shared.reloadConfig() }
+                Button("Open Config") { configStore.openInEditor() }
+                Button("Reload Config") { configStore.reload() }
                     .keyboardShortcut(",", modifiers: [.command, .shift])
                 Button("Install Extensions") { ExtensionInstaller.run() }
                 Button("Install Command Line Tool") { CommandLineToolInstaller.run() }

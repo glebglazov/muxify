@@ -2,7 +2,7 @@ APP := build/Build/Products/Debug/Muxify.app
 RELEASE_APP := build/Build/Products/Release/Muxify.app
 INSTALL_DIR ?= /Applications
 
-.PHONY: all setup tools project build run install clean
+.PHONY: all setup tools project build test run install clean
 
 all: build
 
@@ -20,6 +20,10 @@ project: setup
 build: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug \
 		-derivedDataPath build -quiet build
+
+test: project
+	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug \
+		-derivedDataPath build test
 
 run: build
 	open $(APP)
