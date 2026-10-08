@@ -560,6 +560,24 @@ final class ConfigTests: XCTestCase {
         XCTAssertThrowsError(try KeyTrigger("meta+s"))
     }
 
+    func testTriggersNameTheKeyThatTypesTheCharacterWithCommandOnTheLayout() throws {
+        let russian = try XCTUnwrap(KeyboardLayout(inputSourceID: "com.apple.keylayout.Russian"))
+        let abc = try XCTUnwrap(KeyboardLayout(inputSourceID: "com.apple.keylayout.ABC"))
+        let keyP: UInt16 = 0x23, keyS: UInt16 = 0x01, key1: UInt16 = 0x12
+        func pressed(_ flags: NSEvent.ModifierFlags, _ keyCode: UInt16, _ layout: KeyboardLayout) throws -> KeyTrigger {
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                                      windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+                                                      isARepeat: false, keyCode: keyCode))
+            return try XCTUnwrap(KeyTrigger(event, layout: layout))
+        }
+        XCTAssertEqual(try pressed(.command, keyP, russian), trigger("cmd+p"), "the key labelled P types з, and ⌘ types p")
+        XCTAssertEqual(try pressed([.command, .shift], keyP, russian), trigger("cmd+shift+p"))
+        XCTAssertEqual(try pressed([.control, .command], keyS, russian), trigger("ctrl+cmd+s"))
+        XCTAssertEqual(try pressed([.command, .shift], key1, russian), trigger("cmd+shift+1"), "⇧ types !, which is not the key's name")
+        XCTAssertEqual(try pressed(.command, keyP, abc), trigger("cmd+p"))
+        XCTAssertEqual(try pressed([.command, .shift], key1, abc), trigger("cmd+shift+1"))
+    }
+
     func testTheTemplateIsAValidConfigThatChangesNothing() throws {
         let config = try load(Config.template)
         XCTAssertEqual(config.keybinds, Keybinds.defaults)

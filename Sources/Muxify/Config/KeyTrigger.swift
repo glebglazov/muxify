@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 /// A key with its modifiers, written as in Ghostty: `ctrl+cmd+s`,
@@ -12,10 +13,11 @@ struct KeyTrigger: Hashable {
         static let command = Modifiers(rawValue: 1 << 3)
     }
 
-    // Printable keys are matched by the character they type with no
-    // modifiers on the current layout, not by their position, so a trigger
-    // follows the layout the same way the menu's shortcuts do. Keys that
-    // type no character are matched by position.
+    // Printable keys are matched by the character they type with only ⌘ held
+    // on the current layout, not by their position, so a trigger follows the
+    // layout the same way the menu's shortcuts do, and on a non-Latin layout
+    // such as Russian `cmd+p` is still the key labelled P. Keys that type no
+    // character are matched by position.
     enum Key: Hashable {
         case character(Character)
         case special(SpecialKey)
@@ -61,7 +63,7 @@ struct KeyTrigger: Hashable {
 
     /// The trigger a key press stands for, or nil for a key Muxify cannot
     /// name.
-    init?(_ event: NSEvent) {
+    init?(_ event: NSEvent, layout: KeyboardLayout? = .current) {
         let flags = event.modifierFlags
         var modifiers: Modifiers = []
         if flags.contains(.control) { modifiers.insert(.control) }
@@ -71,7 +73,7 @@ struct KeyTrigger: Hashable {
         self.modifiers = modifiers
         if let special = SpecialKey.allCases.first(where: { $0.keyCodes.contains(event.keyCode) }) {
             key = .special(special)
-        } else if let character = event.characters(byApplyingModifiers: [])?.lowercased().first {
+        } else if let character = layout?.commandCharacter(keyCode: event.keyCode) {
             key = .character(character)
         } else {
             return nil
@@ -79,7 +81,7 @@ struct KeyTrigger: Hashable {
     }
 
     var shortcut: KeyboardShortcut {
-        var eventModifiers: EventModifiers = []
+        var eventModifiers: SwiftUI.EventModifiers = []
         if modifiers.contains(.control) { eventModifiers.insert(.control) }
         if modifiers.contains(.option) { eventModifiers.insert(.option) }
         if modifiers.contains(.shift) { eventModifiers.insert(.shift) }
@@ -119,6 +121,48 @@ struct KeyTrigger: Hashable {
         for letter in "abcdefghijklmnopqrstuvwxyz" { names["key_\(letter)"] = letter }
         return names
     }()
+}
+
+/// The characters a keyboard layout types, read from its key table.
+struct KeyboardLayout {
+    private let table: Data
+
+    /// The layout the user types with now. An input method such as Japanese
+    /// resolves to the key layout under it.
+    static var current: KeyboardLayout? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue() else { return nil }
+        return KeyboardLayout(source)
+    }
+
+    /// The installed layout with this id, such as `com.apple.keylayout.Russian`.
+    init?(inputSourceID: String) {
+        let filter = [kTISPropertyInputSourceID as String: inputSourceID] as CFDictionary
+        guard let sources = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource],
+              let source = sources.first else { return nil }
+        self.init(source)
+    }
+
+    private init?(_ source: TISInputSource) {
+        guard let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        table = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+    }
+
+    /// The character the key types with only ⌘ held, lowercased. Shift is
+    /// left off so `cmd+shift+1` stays "1" and not "!"; Control is left off
+    /// because with it the key types no character.
+    func commandCharacter(keyCode: UInt16) -> Character? {
+        var deadKeys: UInt32 = 0
+        var length = 0
+        var units = [UniChar](repeating: 0, count: 4)
+        let status = table.withUnsafeBytes { bytes -> OSStatus in
+            guard let layout = bytes.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return OSStatus(paramErr) }
+            return UCKeyTranslate(layout, keyCode, UInt16(kUCKeyActionDown), UInt32(cmdKey >> 8) & 0xFF,
+                                  UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                                  &deadKeys, units.count, &length, &units)
+        }
+        guard status == noErr else { return nil }
+        return String(utf16CodeUnits: units, count: length).lowercased().first
+    }
 }
 
 private extension KeyTrigger.SpecialKey {
