@@ -110,7 +110,8 @@ final class AppWindows {
                 MainActor.assumeIsolated { self?.close(id) }
             },
         ]
-        if window.isKeyWindow { focus(id) }
+        // An app launched in the background gets no key window, and its menus need one to act on.
+        if window.isKeyWindow || focusedID == nil { focus(id) }
     }
 
     func updateEnvironment(for id: UUID) {
