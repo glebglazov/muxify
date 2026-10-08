@@ -266,7 +266,7 @@ struct WindowRow: View {
             Spacer(minLength: 4)
             if window.hasBell {
                 Circle()
-                    .fill(isSelected ? Color.white : Color.orange)
+                    .fill(Color.orange)
                     .frame(width: 5, height: 5)
             }
             if tabCount > 0 {
@@ -289,7 +289,7 @@ struct WindowRow: View {
                 .foregroundStyle(secondaryStyle)
             }
         }
-        .foregroundStyle(isSelected ? Color.white : Color.primary)
+        .foregroundStyle(Color.primary)
         .padding(.leading, 20)
         .padding(.trailing, 6)
         .padding(.vertical, 4)
@@ -297,20 +297,26 @@ struct WindowRow: View {
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(background)
+                .animation(.easeOut(duration: SelectedRow.fade), value: isSelected)
         )
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
         .help("\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
     }
 
-    private var secondaryStyle: Color {
-        isSelected ? Color.white.opacity(0.85) : Color.secondary
-    }
+    private var secondaryStyle: Color { .secondary }
 
     private var background: Color {
-        if isSelected { return .accentColor }
+        if isSelected { return SelectedRow.fill }
         return hovering ? Color.primary.opacity(0.07) : .clear
     }
+}
+
+/// How the Sidebar marks the selected Window row: a soft accent tint that fades in, so moving
+/// between Windows does not flash a block of full colour from row to row.
+private enum SelectedRow {
+    static let fill = Color.accentColor.opacity(0.22)
+    static let fade = 0.14
 }
 
 /// The Agents reporting their Status (ADR 0004), in tmux order.
