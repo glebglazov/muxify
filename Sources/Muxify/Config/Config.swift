@@ -36,8 +36,13 @@ struct Config: Equatable {
     var remoteEnvironments: [RemoteEnvironment] = []
     var problems: [ConfigProblem] = []
 
-    static var defaultPath: String {
-        let xdg = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"] ?? "\(NSHomeDirectory())/.config"
+    /// MUXIFY_CONFIG when it is set and not empty, so each launch can choose its Config; else the XDG path.
+    static func defaultPath(environment: [String: String] = ProcessInfo.processInfo.environment,
+                            home: String = NSHomeDirectory()) -> String {
+        if let path = environment["MUXIFY_CONFIG"], !path.isEmpty {
+            return path.hasPrefix("~/") ? home + path.dropFirst() : path
+        }
+        let xdg = environment["XDG_CONFIG_HOME"] ?? "\(home)/.config"
         return "\(xdg)/muxify/config.yaml"
     }
 

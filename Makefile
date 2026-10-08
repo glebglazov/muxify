@@ -40,8 +40,9 @@ test: project
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v
 
+# CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build
-	open $(APP)
+	$(if $(CONFIG),open -n --env "MUXIFY_CONFIG=$(if $(filter ~%,$(CONFIG)),$(CONFIG),$(abspath $(CONFIG)))" $(APP),open $(APP))
 
 release:
 	BUILD_NUMBER="$(or $(BUILD_NUMBER),1)" ./scripts/package-release.sh "$(TAG)"

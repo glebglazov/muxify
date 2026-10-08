@@ -19,7 +19,7 @@ final class ConfigStore {
     @ObservationIgnored private var filesStamp = ""
     @ObservationIgnored private var watcher: Timer?
 
-    init(path: String = Config.defaultPath) {
+    init(path: String = Config.defaultPath()) {
         self.path = path
         load()
     }

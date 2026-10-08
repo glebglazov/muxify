@@ -15,6 +15,15 @@ final class ConfigTests: XCTestCase {
         try! KeyTrigger(string)
     }
 
+    func testMuxifyConfigChoosesTheConfigFileElseTheXDGPath() {
+        func path(_ environment: [String: String]) -> String { Config.defaultPath(environment: environment, home: "/Users/me") }
+        XCTAssertEqual(path([:]), "/Users/me/.config/muxify/config.yaml")
+        XCTAssertEqual(path(["XDG_CONFIG_HOME": "/xdg"]), "/xdg/muxify/config.yaml")
+        XCTAssertEqual(path(["XDG_CONFIG_HOME": "/xdg", "MUXIFY_CONFIG": "/tmp/testing.yaml"]), "/tmp/testing.yaml")
+        XCTAssertEqual(path(["MUXIFY_CONFIG": "~/personal.yaml"]), "/Users/me/personal.yaml")
+        XCTAssertEqual(path(["XDG_CONFIG_HOME": "/xdg", "MUXIFY_CONFIG": ""]), "/xdg/muxify/config.yaml", "an empty value is unset")
+    }
+
     func testMissingOrEmptyFileGivesTheDefaults() throws {
         for config in [try load([:]), try load(""), try load("# nothing here\n\n")] {
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s")), .toggleSidebar)

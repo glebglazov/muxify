@@ -3,6 +3,27 @@
 Muxify reads `~/.config/muxify/config.yaml` (or
 `$XDG_CONFIG_HOME/muxify/config.yaml`). Use **Muxify → Open Config** to edit it.
 
+## Choose the Config for one launch
+
+Set `MUXIFY_CONFIG` to the path of a Config file to use it in place of the XDG
+path. A path that starts with `~/` starts in the home directory. An empty value
+is the same as no value. Open Config, the Config problems banner and the reload
+on change all use this file. For example, keep one Config with every feature on
+for testing, and a personal Config with `sidebar: {sessions: false}`.
+
+The app reads the variable when it starts, so start a new copy of the app with
+it:
+
+```sh
+open -n --env MUXIFY_CONFIG="$HOME/.config/muxify/personal.yaml" /Applications/Muxify.app
+```
+
+To build and start the Debug app with a Config, use `make run`:
+
+```sh
+make run CONFIG=path/to/config.yaml
+```
+
 ## Remote Environments
 
 Manage tmux on Linux or macOS over SSH. The remote needs **tmux 3.2+**, not
