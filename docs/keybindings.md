@@ -55,7 +55,10 @@ keybindings:
 Triggers use Ghostty-style names: `cmd`, `ctrl`, `alt` (Option), and `shift`,
 followed by a character or a named key such as `left`, `right`, `tab`, or
 `left_bracket`. An action accepts one trigger or a list, such as
-`select_window_2: [cmd+2, ctrl+cmd+2]`.
+`select_window_2: [cmd+2, ctrl+cmd+2]`. A character names the key that types
+it with ⌘ held on the current keyboard layout, as menu shortcuts do. So on a
+non-Latin layout such as Russian, `cmd+p` is still the key labelled P, and
+`cmd+shift+1` is the 1 key, not `!`.
 
 Actions not listed keep their defaults. Naming an action replaces its defaults;
 `[]` disables it (for example, `select_window_9: []`). A trigger explicitly
