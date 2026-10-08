@@ -924,6 +924,8 @@ final class WorkspaceStore {
         }
     }
 
+    private static let closeTab = KeyTrigger(modifiers: .command, key: .character("w"))
+
     func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         guard !isShuttingDown, let window = terminalHost.window, event.window === window else { return event }
         if let trigger = KeyTrigger(event) {
@@ -939,14 +941,12 @@ final class WorkspaceStore {
                 return nil
             }
             if keybinds.suppressesDefaultAppWindowShortcut(trigger) { return nil }
+            if trigger == Self.closeTab {
+                if isBrowserFocused { browserCommand { $0.closeActiveTab() } }
+                return nil
+            }
         }
         let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        let key = event.charactersIgnoringModifiers?.lowercased()
-
-        if flags == .command, key == "w" {
-            if isBrowserFocused { browserCommand { $0.closeActiveTab() } }
-            return nil
-        }
         if event.keyCode == 0x30, flags == .control || flags == [.control, .shift], isBrowserFocused {
             currentBrowser?.selectTab(offset: flags.contains(.shift) ? -1 : 1)
             return nil
