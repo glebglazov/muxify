@@ -1,4 +1,5 @@
 import XCTest
+@testable import MuxifyCore
 
 final class ExtensionCommandTests: XCTestCase {
     func testInstalledSymlinkFindsBundledPayloadsAndInstallationIsIdempotent() throws {

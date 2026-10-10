@@ -8,6 +8,9 @@ struct MuxifyApp: App {
 
     init() {
         CommandLineToolForwarding.forwardIfNeeded()
+        #if DEBUG
+        TestDriver.startIfRequested()
+        #endif
         AppEnvironment.prepare()
         let configStore = ConfigStore()
         configStore.start()
@@ -29,6 +32,9 @@ struct MuxifyApp: App {
         }
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.hiddenTitleBar)
+        // AppDelegate sends each muxify:// URL to the App Window of its Environment. Without this, SwiftUI
+        // also opens a new App Window for the URL.
+        .handlesExternalEvents(matching: [])
         .commands { MuxifyCommands(windows: windows) }
     }
 }

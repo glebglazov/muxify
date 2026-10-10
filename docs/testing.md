@@ -3,6 +3,10 @@
 Run the normal suite with `make test`. Live SSH tests are skipped unless you
 provide a destination with working key authentication and a verified host key.
 
+`swift test --package-path Packages/MuxifyCore` runs only the tests of the
+MuxifyCore package: Topic records and plans, Worktrees, the Config and tmux
+parsing. It needs neither Xcode nor libghostty.
+
 ## Live SSH test
 
 For an OrbStack Ubuntu VM (use its actual Linux username):
@@ -27,7 +31,7 @@ fresh connection with state preserved, and background SSH shutdown that leaves
 tmux Sessions and a sibling SSH connection running. Unit tests check cleanup
 thread/order and deferred quit replies.
 App Window tests check Environment deduplication, focused/originating-window
-routing, live ⌘N and Focus Terminal overrides, native window-cycle shortcut
+routing, live ⌘N and Move Keyboard to Terminal overrides, native window-cycle shortcut
 pass-through and isolated Browser views in hidden disposable native windows,
 without starting Ghostty or connecting to tmux.
 It creates and removes its own isolated remote tmux server; existing Sessions,

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+@testable import MuxifyCore
 
 final class SidebarTypographyTests: XCTestCase {
     func testDefaultSystemFontsExactlyMatchExistingRoles() {

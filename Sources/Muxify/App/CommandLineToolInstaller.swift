@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyCore
 
 /// Muxify ▸ Install Command Line Tool: links the `muxify` executable bundled at
 /// `Contents/Resources/bin/muxify` into `~/.local/bin`, so any Pane can run

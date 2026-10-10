@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import UniformTypeIdentifiers
+import MuxifyCore
 
 /// The live Config. It loads the Ghostty config the Config names into
 /// libghostty, and when the Config or any Ghostty config file changes it
@@ -19,7 +20,7 @@ final class ConfigStore {
     @ObservationIgnored private var filesStamp = ""
     @ObservationIgnored private var watcher: Timer?
 
-    init(path: String = Config.defaultPath()) {
+    init(path: String = MuxifyPaths().configFile.path) {
         self.path = path
         load()
     }
@@ -39,6 +40,13 @@ final class ConfigStore {
         problemsDismissed = false
         GhosttyRuntime.shared.reloadConfig(ghosttyConfigFile: config.ghosttyConfigFile)
         filesStamp = stampFiles()
+    }
+
+    /// Takes the Projects found for `source`'s `projects`, unless that section changed while they were found.
+    func updateProjects(_ projects: [Project], foundFor source: Config) {
+        guard config.projectRoots == source.projectRoots, config.projectAliases == source.projectAliases,
+              config.projects != projects else { return }
+        loaded.update(projects: projects)
     }
 
     /// Opens the Config in the app registered for YAML, or the plain-text

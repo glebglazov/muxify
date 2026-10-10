@@ -84,6 +84,10 @@ _Avoid_: instance, Window (without "App", when you mean the native window)
 The panel on the left of the Muxify window that lists Sessions, Windows and Agents.
 _Avoid_: left sidebar, left panel
 
+**Focus**:
+Showing one of a Window's Terminal and Browser alone, with the Sidebar hidden, until Focus ends; it never changes the toggles. Where keyboard input goes is "the keyboard" (the keyboard is in the Terminal), never "focus".
+_Avoid_: maximize, zoom (tmux zooms a Pane), solo
+
 **Sidebar typography**:
 The typography of text in the Sidebar's Sessions and Agents sections, independent of the Terminal's typography and the App Window header.
 _Avoid_: UI font, terminal font (when you mean Sidebar text)

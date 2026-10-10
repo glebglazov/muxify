@@ -33,15 +33,15 @@ muxify session open "my project"
 
 ⌘B toggles the Browser; ⌘N opens another Local App Window.
 
-## Sessions and worktrees
+## Projects and Worktrees
 
-A Session groups tmux Windows, usually for one project or worktree. Open
-**Go to…** (⇧⌘P by default) to switch Sessions or start one in a folder.
+A Session groups tmux Windows, usually for one Project or Worktree. Open
+**Go to…** (⇧⌘P by default) to go to a Topic, switch Sessions or start one in a Project.
 
-Configure [`sessions.paths`](docs/configuration.md#session-paths) to include your
-main repositories. When a palette with Sessions opens, Muxify asks Git for their
-worktrees, wherever they live. Choosing a folder reuses its Session or creates one;
-worktree Sessions are named `project [worktree-folder]`.
+Configure [`projects.paths`](docs/configuration.md#projects) with the folders
+that hold your repositories. A repository is one Project, and Muxify asks Git
+for its Worktrees, wherever they live. Choosing a Project reuses its Session or
+creates one; a Worktree's Session is named `project/worktree-folder`.
 
 ## Simulator Server
 

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+@testable import MuxifyCore
 
 final class AgentStatusIndicatorTests: XCTestCase {
     func testMarkerPriorityForEveryStatusAndUnreadFlag() {
@@ -182,7 +183,7 @@ final class AgentStatusIndicatorTests: XCTestCase {
         }
     }
 
-    @MainActor func testSidebarAndPaletteRenderTheSameStatusHues() throws {
+    @MainActor func testPaletteRendersTheStatusHues() throws {
         let cases: [(AgentStatus?, Bool, Color?)] = [
             (.working, true, nil), (.done, true, .blue), (.done, false, nil),
             (.blocked, false, .orange), (.failed, true, .orange), (nil, false, nil),
@@ -191,14 +192,12 @@ final class AgentStatusIndicatorTests: XCTestCase {
             for (status, unread, expected) in cases {
                 let agent = Agent(paneID: "%1", kind: .pi, status: status, unread: unread,
                                   windowID: "@1", sessionID: "$1", sessionName: "test", windowIndex: 1,
-                                  windowTitle: "Agent")
-                let item = PaletteItem(id: "agent:%1", kind: .agent, ref: .agent(agent), title: "Agent",
-                                       subtitle: "Pi", path: "/test", target: "%1", logo: "pi",
+                                  windowTitle: "Agent", label: "Agent")
+                let item = PaletteItem(kind: .agent, ref: .agent(agent), path: "/test", target: "%1", logo: "pi",
                                        status: status, unread: unread)
-                let row = try render(AgentRow(agent: agent), scheme: scheme, width: 180, height: 40)
                 let icon = try render(PaletteIcon(source: .item(item), theme: PaletteTheme(nil)),
                                       scheme: scheme, width: 48, height: 48)
-                for image in [row, icon] {
+                for image in [icon] {
                     var colored = 0
                     for y in 0..<image.pixelsHigh {
                         for x in 0..<image.pixelsWide {

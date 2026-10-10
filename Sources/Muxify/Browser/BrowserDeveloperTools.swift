@@ -1,4 +1,5 @@
 import Foundation
+import MuxifyCore
 
 /// WebKit exposes remote inspection publicly, but its in-app inspector and
 /// Inspect Element preference are private. Keep those calls here and check

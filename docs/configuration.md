@@ -54,6 +54,73 @@ The Browser stays local: use reachable URLs, such as Tailscale URLs. There is
 no port forwarding or remote dev-server discovery; Reveal in Finder is disabled.
 Install [Agent Extensions](../extensions/README.md#install) manually on the remote.
 
+## Projects
+
+Projects are the folders where you open Sessions. The New Topic and Add Project
+lists and the Command Palette offer them:
+
+```yaml
+projects:
+  paths:
+    - path: ~/Dev/*/*
+      display_depth: 2
+    - path: ~/projects
+      depth: 1
+    - path: ~/.dotfiles
+  aliases:
+    - ~/Dev/mixed/obsidian_vaults/glebglazov: My Obsidian
+```
+
+`path` is absolute, starts with `~/`, or starts at the directory of the Config.
+It may be a glob, and each folder it matches is a root. `depth` defaults to 0,
+the root itself; 1 lists its subfolders, and 2 also their subfolders. Hidden
+folders are skipped, and so are folders this machine doesn't have, so one
+Config can serve several Macs. When two entries find the same folder, the first
+names it. Muxify looks for the folders each time a list or palette opens, so a
+new folder joins without a Config edit.
+
+A repository is one Project, plain or bare. Its Worktrees are rows of it, found
+with `git worktree list`, wherever they are. Muxify does not look for Projects
+inside a repository.
+
+A Project's name is its last `display_depth` folder names (1 by default), so
+`~/Dev/tripledot/game` with `display_depth: 2` is `tripledot/game`. Topic
+records and Session names use it, so it does not change when other folders come
+and go. In a Session name, `.` and `:` become `_` and spaces go. A Session in a
+Worktree is named `<project>/<folder>`. Muxify finds a Project's Session by the
+folder it started in, not by its name.
+
+An alias shows in place of the name in the lists and the Sidebar's Session
+labels. A Worktree row shows `<alias>/<folder>`. The key is the path of a
+Project, written as in `paths`. An alias can have spaces. It changes only what
+Muxify shows: tmux Sessions and Topic records keep the name, so adding or
+changing an alias does not rename a Session. Typing the alias or the name finds
+the Project. An alias for a path that is not a Project does nothing.
+
+An entry that cannot apply appears in the Config problems banner. So does the
+old `projects:` list, `projects_aliases` and `sessions.paths`, with the key that
+replaces them. Muxify does not read them.
+
+## Order of a Topic's Sessions
+
+```yaml
+topics:
+  session_order: oldest_first
+```
+
+A Topic card, the Command Palette and the Topic record list a Topic's Sessions by when
+tmux created them: `oldest_first`, the default, or `newest_first`. Sessions
+created in the same second follow their tmux Session ID.
+
+Move a Session with a long press on its line in an open Topic card, or with
+Move Up and Move Down in the line's context menu. The Topic then keeps your
+order, in its record, and a new Session goes to the end that `session_order`
+gives new Sessions: the bottom for `oldest_first`, the top for `newest_first`.
+A change of `session_order` does not change an order you gave. Sort Sessions by
+Creation in the context menu goes back to the creation order. No Topic and the
+Sessions mode keep the tmux order. Any other value uses the default and appears
+in the Config problems banner.
+
 ## Header height
 
 ```yaml
@@ -65,6 +132,19 @@ The height is in macOS points, defaults to 30, and must be a finite number of
 at least 24 so the buttons fit. Changes apply live. Removing the setting restores
 the default; invalid values use the default and appear in the Config problems
 banner. A YAML syntax error keeps the last good Config.
+
+## Pulse
+
+```yaml
+ui:
+  pulse: false
+```
+
+A working Agent's marks pulse: they fade in and out, without moving, in the
+Sidebar's card spines and Pane rows and the Agents section.
+`pulse: false` keeps every one of them still. The default is `true`. Reduce
+Motion in the macOS accessibility settings also keeps them still. A value that
+is not a boolean uses the default and appears in the Config problems banner.
 
 ## Sidebar typography
 
@@ -99,90 +179,82 @@ problem and uses `system`. A YAML syntax error keeps the entire last good Config
 
 ## Command Palettes
 
-A Command Palette searches Sessions, Windows and Agents and acts on the
-highlighted result. Each palette has a name, a keybinding that works anywhere
+A Command Palette searches Topics, Sessions, Windows, Agents and Commands.
+It acts on the highlighted result or runs the highlighted Command. Each palette has a name, a keybinding that works anywhere
 in Muxify, and the sources selected when it opens:
 
 ```yaml
 command_palettes:
-  - name: Sessions
+  - name: Commands
+    keybinding: cmd+shift+p
+    sources: [commands]
+  - name: Go to…
     keybinding: cmd+p
-    sources: [sessions, windows]
+    sources: [topics, sessions]
   - name: Agents
     keybinding: cmd+shift+o
     sources: [agents]
 ```
 
-Without `command_palettes` there is one palette, **Go to…**, on ⇧⌘P with every
-source; `command_palettes: []` removes it. Names must be unique, and `sources`
-lists `sessions` (running Sessions and the [Session Paths](#session-paths)
-without one), `windows` or `agents`. They aren't a hard limit: every palette
-has a chip for each source, its own first and on, and ⌘1–⌘3 or a click turn
-any chip on or off. The last chip that is on stays on. A palette's `keybinding` takes one trigger
-or a list and follows the [keybindings](keybindings.md) rules: it is removed
-from other actions' defaults, and when two claim the same trigger the first in
-the file keeps it. Each palette is also in the View menu.
+Without `command_palettes`, Muxify has two palettes. **Commands** opens on
+⇧⌘P with only `commands`. **Go to…** opens on ⌘P with `topics` and `sessions`.
+`command_palettes: []` removes both. Names must be unique. `sources` accepts:
 
-Its own keybinding closes a palette; another palette's keybinding switches to
-that one and keeps what you typed. With nothing typed, a palette lists:
+- `topics`: the open Topics, Pinned first, then the Snoozed and Settled ones.
+  Only a Local App Window with Topics on has them.
+- `sessions`: one row for each [Project](#projects) and Worktree, which holds
+  the running Sessions that start in it, then one row for each Session outside
+  every Project. ↩ on a Project row goes to its Session visited last, or starts
+  one. ⌘↩ (New Session) always starts another one, named with `-2`, `-3`, and
+  so on. Typing a Session's name finds its Project row. In Topics mode a Project
+  row holds only No Topic Sessions; a Topic's Sessions are reached through its
+  Topic row.
+- `windows`, shown with nothing typed only when theirs is the only chip on.
+- `agents`: those that need you (blocked, failed or unread), then working ones,
+  then the rest.
+- `commands`: Commands such as New Topic, New Muxify Window, Reload Config
+  and Browser commands. A Command acts on no result.
 
-- **Sessions**, most recently active first and the current one last, then the
-  Session Paths that have no Session.
-- **Agents** that need you (blocked, failed or unread), then working ones, then
-  the rest.
-- **Windows** only once you type, or when theirs is the only chip on.
+They aren't a hard limit: every palette has a chip for each source, its own
+first and on, and ⌘1–⌘5 or a click turn any chip on or off. The last chip that
+is on stays on. A palette's `keybinding` takes one trigger or a list and
+follows the [keybindings](keybindings.md) rules: it is removed from other
+actions' defaults, and when two claim the same trigger the first in the file
+keeps it. Each palette is also in the View menu. Its own keybinding closes a
+palette; another palette's keybinding switches to that one and keeps what you
+typed.
 
-Typing ranks everything in one list. A Window with an Agent is left out while
-the Agents chip is on. ⎋ closes the actions menu, then clears the search and
-puts the chips back, then closes the palette. The keys inside a palette are
+Results stay in sections, one or more for each source. Words match in any
+order, fzf style, on the name, a type word (`topic`, `dormant`, `snoozed`,
+`settled`, `session`, `project`, `worktree`, `window`), the details under the
+name, or a Settled Topic's outcome, and the matched letters are marked. With
+nothing typed, Pinned Topics come first, then the Active Topic or current row,
+then the most recently visited. On an equal match a running Session comes
+before a Project with no Session, then the more recently visited or active one.
+A Window with an Agent is left out while the Agents chip is on. ⎋ closes the
+palette without a change. In an Action, ⌫ in an empty field goes back one step.
+A step that kills a process needs ⌘↩ to confirm. The keys inside a palette are
 [configurable](keybindings.md#command-palette-keybindings).
 
-| Action | Session | Window | Agent | Session Path |
-| --- | --- | --- | --- | --- |
-| Jump to (↩) | Switch to it | Select it | Select its Window and Pane | Create the Session there, then switch |
-| Copy Path (⌘C) | Its start folder | The active Pane's folder | The Pane's folder | The folder |
-| Copy tmux Target (⌘⇧C) | Session name | `session:index` | Pane ID | — |
+| Action | Topic | Session | Window | Agent | Project or Worktree |
+| --- | --- | --- | --- | --- | --- |
+| Jump to (↩) | Go to its Window, or show its Reopen choice when Dormant or Settled | Switch to it | Select it | Select its Window and Pane | Create the Session there, then switch |
+| New Session (⌘↩) | — | — | — | — | Start another Session there, then switch |
+| Copy Path (⌘C) | — | Its start folder | The active Pane's folder | The Pane's folder | The folder |
+| Copy tmux Target (⌘⇧C) | — | Session name | `session:index` | Pane ID | — |
+| Paste Path (⌃Y) | — | Its start folder | The Pane's folder | The Pane's folder | The folder |
+| Snooze (⌃S) | Open the Snooze sheet, except when Settled | — | — | — | — |
 
 ⌘K opens these actions in a menu by the highlighted row.
-
-## Session Paths
-
-Folders the Command Palette offers as Sessions, for those that aren't running
-yet, replacing a sessionizer script:
-
-```yaml
-sessions:
-  paths:
-    - path: ~/projects
-      depth: 1
-    - path: ~/.dotfiles
-```
-
-`path` is absolute or starts with `~/`. `depth` defaults to 0, the folder
-itself; 1 lists its subfolders, and 2 also their subfolders. Hidden folders are
-skipped, and so are folders this machine doesn't have, so one Config can serve
-several Macs. The git worktrees of these folders are listed too, after their
-repository.
-
-Discovery uses `git -C <repository> worktree list --porcelain`, not a special
-worktrees folder. Include the main repository (directly or via `depth`); its
-worktrees can live anywhere. On a Remote Environment, discovery runs there.
-
-A Session Path matches the Session started in its folder, whatever the Session
-is called. Choosing one switches to that Session, or creates it named after
-the folder (`.` becomes `_`, spaces go) or, for a worktree,
-`<project> [<worktree>]`. If another folder's Session has that name, the parent
-folder goes in front: `work-foo`. Muxify looks for the folders each time a
-palette with `sessions` opens.
 
 ## A Remote Environment's own Config
 
 A Remote Environment's App Window uses the Config on that machine
 (`~/.config/muxify/config.yaml`, or under its `$XDG_CONFIG_HOME`) when there is
-one, as if Muxify ran there: its Session Paths, palettes, keybindings and `ui`.
+one, as if Muxify ran there: its Projects, palettes, keybindings and `ui`.
 Its `ghostty` and `remote_environments` sections are ignored, because they
 describe this Mac's app. Without a remote Config, the local Config applies, and
-its Session Paths are looked for on the remote. The menu shows the focused App
+its Projects are looked for on the remote. Topics stay on this Mac. The menu shows the focused App
 Window's keybindings.
 
 Muxify reads the remote file when it connects, on **Reload Config** (⌘⇧,), and
@@ -193,8 +265,11 @@ front of the path. **Open Config** there opens the remote file in the remote's
 
 ## Browser and keybindings
 
-The top-right header toggles the Sidebar and Browser. ⌘B toggles the current
-Window's Browser. Each Window remembers its Browser Tabs and visibility.
+The top-right header has the Focus button and toggles the Sidebar, Terminal and
+Browser. ⌘J toggles the current Window's Terminal and ⌘B its Browser; the toggle
+of the only side shown does nothing. Focus (⇧⌘↩) shows the side the keyboard is
+in alone, with the Sidebar hidden, until you press it again. Each Window
+remembers its Browser Tabs, its toggles and its Focus.
 Browser-opening requests (`muxify browser open …`, terminal Cmd-click links)
 reveal its Browser. The [Simulator](simulator.md) runs in a browser, not a native
 panel.
@@ -202,3 +277,148 @@ panel.
 Configurable [Keybindings](keybindings.md) work throughout the app, including in
 Browser pages. The guide lists all actions, defaults, built-in shortcuts and a
 complete Config example.
+
+## Sidebar
+
+`sidebar.topics` and `sidebar.sessions` enable the two Sidebar modes. Both default to `true`.
+`sidebar.panes` shows or hides Pane rows. Leave it out to use **View > Show Panes**.
+`sidebar.agents` shows or hides the Agents section. Leave it out to use **View > Show Agents**.
+A configured value disables the corresponding View menu choice.
+
+`sidebar.agents_scope` selects which Agents appear. It defaults to `active`.
+
+| Value | Agents shown |
+| --- | --- |
+| `active` | The Active Topic in Topics mode, or the selected Window's Session in Sessions mode. |
+| `window` | The selected Window, in either mode. |
+| `all` | Every Agent. |
+
+Without a selected Window, `active` and `window` show every Agent.
+The existing Snooze and Zen rules still hide quiet Agents.
+`agents` and `agents_scope` accept one value for both modes, or a mapping with `topics` and `sessions` values.
+
+```yaml
+sidebar:
+  panes: true
+  agents:
+    topics: true
+    sessions: false
+  agents_scope:
+    topics: window
+    sessions: all
+```
+
+### Formats
+
+`sidebar.formats` sets the title and Summary of Topic cards, Session cards, Window rows, Pane rows, and Agent rows.
+Each `title` or `summary` accepts a string, or a mapping with `topics` and `sessions` values.
+An empty Summary hides its line. An empty title uses the default title.
+Card Summaries appear only when the card is closed.
+Session headings within Topics, Snoozed and Settled Topic rows, and Command Palette rows keep their existing text.
+Agent hover labels use the formatted title. Other hover labels keep their existing text.
+With `agents_scope: window`, the Agents section header uses the formatted Window title.
+
+```yaml
+sidebar:
+  formats:
+    topic:
+      summary: '#{S:#{project}#{?branch, ⎇ #{branch},}#{?loop_last_flag,, · }}'
+    session:
+      summary: '#{window_count}w #{pane_count}p'
+    window:
+      title: '#{window_index}:#{window_title}'
+      summary:
+        topics: '#{?agent_kind,#{agent_kind} · #{agent_status},#{b:pane_current_path}}'
+        sessions: ''
+    pane:
+      summary: '#{pane_current_command}'
+    agent:
+      title:
+        topics: '#{?topic_title,#{topic_title},#{window_name}}'
+        sessions: '#{window_name}'
+      summary: '#{agent_kind} · #{agent_status}'
+```
+
+Title and Summary Formats produce plain text. Window `left` and `right` Formats can also produce icons.
+Muxify parses each configured Format once, when it reads the Config.
+Bad syntax or an unknown variable produces a Config problem with its line number. Only that Format uses its default.
+`#[` is reserved for future styles and is a Config problem. Use `##[` for literal text.
+
+Window `left` replaces the app icon. Window `right` replaces the Tab and Pane badges.
+Each accepts one Format string or separate `topics` and `sessions` values.
+An omitted value or `null` keeps the built-in part. An empty string, or an expansion with no output, hides the part.
+A custom right part does not change the bell indicator.
+
+```yaml
+sidebar:
+  formats:
+    window:
+      left: '#{current_app_icon}'
+      right:
+        topics: '#{symbol:globe} #{tab_count}  #{symbol:rectangle.split.2x1} #{window_panes}'
+        sessions: '🌐 #{tab_count}'
+```
+
+`#{current_app_icon}` draws the Window's app icon. This remains the row's Window icon inside a loop.
+`#{symbol:name}` draws a macOS SF Symbol, such as `globe` or `rectangle.split.2x1`.
+The symbol name must be literal and available on the Mac that reads the Config.
+An unavailable symbol produces a Config problem for that part and mode. Other valid parts still apply.
+Emoji are literal text. Spaces in a Format separate text and icons.
+
+Icons are allowed only in Window `left` and `right` output, including conditional result branches and loop bodies.
+Conditions, comparisons, truncation, and basename operations accept text only. An icon anywhere in those operands is a Config problem.
+Expanded variable values remain text, even when they contain icon syntax.
+Title and Summary Formats reject icon expressions. Sidebar typography still controls font, size, and color.
+The built-in right part shows a Tab badge only when Tabs exist. It shows a Pane badge for every Window in Topics mode, and for multiple Panes in Sessions mode.
+
+| Expression | Result |
+| --- | --- |
+| `#{name}` | A variable's value. |
+| `#{?condition,yes,no}` | `yes` when the condition is neither empty nor `0`; otherwise `no`. A bare condition is a variable name. |
+| `#{==:a,b}`, `#{!=:a,b}` | `1` or `0`. Each operand is literal text with optional nested expressions. |
+| `#{=N:name}`, `#{=-N:name}` | The first or last N characters of the variable. A nested expression can replace the variable name. |
+| `#{b:name}` | The last nonempty part of a path. A nested expression can replace the variable name. |
+| `#{S:body}`, `#{W:body}`, `#{P:body}` | Repeat the body for each contained Session, Window, or Pane. |
+| `#,`, `##`, `#}` | A literal comma, hash, or closing brace. |
+
+Expressions can nest, up to 64 levels. Both branches of a conditional must be valid.
+Inside a loop, `loop_index` starts at `0`. `loop_first_flag` and `loop_last_flag` are `1` on the first and last item.
+A nested loop uses its own index and flags. An empty loop produces no text.
+A known variable with no value in the current object produces no text.
+A loop that the current object does not contain produces no text.
+
+| Object | Variables | Loops |
+| --- | --- | --- |
+| Topic | `topic_title`, `topic_pinned_flag`, `topic_dormant_flag`, `session_count`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | S, W, P |
+| Session | `session_name`, `project`, `branch`, `branch_label`, `home_flag`, `topic_title`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | W, P |
+| Window | Its Session variables, plus `window_index`, `window_name`, `window_title`, `window_panes`, `pane_current_command`, `pane_current_path`, `tab_count`, `agent_kind`, `agent_status` | P |
+| Pane | Its Window and Session variables, plus `pane_index`, `pane_label`, `pane_title`, `pane_current_command`, `pane_current_path`, `pane_active_flag`, `agent_kind`, `agent_status`, `agent_unread_flag`, `agent_group` | None |
+| Agent | Its Pane variables, including its own Window, Session, and Topic values | None |
+
+Window Agent counts describe that Window. `agent_kind` and `agent_status` describe its first Agent in Pane order.
+Its `pane_current_command` and `pane_current_path` describe the active Pane.
+Pane values replace the inherited command, path, branch, Agent kind, and Agent Status.
+Agent counts remain those of the Window.
+Agent Formats use the Agent's own Pane, even when another Pane is selected.
+`agent_group` is the Topic row title, or `No Topic`, in Topics mode. It is the Session name in Sessions mode.
+It is empty for a Pane without an Agent, or when the Agents section is scoped to one Topic, Session, or Window.
+A custom Agent Summary appears whenever its expansion is not empty, including in a scoped section.
+Counts include Panes even when Pane rows are hidden. Flags use `1` and `0`.
+
+`project` is the Session's display Project name. `branch` comes from the HEAD at the Session or Pane path.
+Muxify reads the repository files directly and caches each file read for one refresh. It does not start git.
+`branch` is empty on a Remote Environment or a detached HEAD.
+`branch_label` is the branch text used in the Session pill. It is empty when redundant or absent.
+
+The default Formats preserve the existing text. Window and Pane Summaries are empty.
+
+| Line | Default Format |
+| --- | --- |
+| Topic title | `#{topic_title}` |
+| Topic Summary | `#{?session_count,#{S:#{project}#{?branch_label, ⎇ #{branch_label},}#{?loop_last_flag,, · }} · #{window_count} #{?#{==:#{window_count},1},Window,Windows},No Sessions}` |
+| Session title | `#{session_name}` |
+| Session Summary | `#{window_count} #{?#{==:#{window_count},1},Window,Windows}` |
+| Window title | `#{window_title}` |
+| Pane title | `#{pane_label}` |
+| Agent title | `#{pane_label}` |
+| Agent Summary | `#{agent_group}` |

@@ -1,33 +1,41 @@
 import Foundation
 import Observation
+import MuxifyCore
 
-/// A Window's Browser: its Tabs and whether it is open. Every change is
-/// reported through `onChange` so it can be written back onto the tmux
-/// Window (ADR 0003).
+/// A Window's Browser: its Tabs, and what the Window shows of its Terminal
+/// and Browser. Every change is reported through `onChange` so it can be
+/// written back onto the tmux Window (ADR 0003).
 @Observable
 final class Browser {
+    /// Where the panel puts the keyboard once it shows the active Tab.
+    enum KeyboardRequest { case addressBar, page }
+
     let windowID: String
     /// The local scanner must never use a remote Window ID against local tmux.
     let discoversLocalServers: Bool
     private(set) var tabs: [BrowserTab] = []
     private(set) var activeTabID: UUID?
-    private(set) var isOpen = false
-    /// Set to ask the panel to focus the active Tab's address field.
-    var wantsAddressFocus = false
+    /// Shows the Browser only while it has a Tab.
+    private(set) var layout: PanelLayout
+    var keyboardRequest: KeyboardRequest?
 
     @ObservationIgnored var onChange: ((Browser) -> Void)?
+    /// Called when the Terminal or the Browser appears or disappears.
+    @ObservationIgnored var onShownChange: ((Browser) -> Void)?
     @ObservationIgnored var onCopyURL: ((String) -> Void)?
 
     init(windowID: String, stored: StoredBrowser, discoversLocalServers: Bool = true) {
         self.windowID = windowID
         self.discoversLocalServers = discoversLocalServers
+        layout = stored.layout
         tabs = stored.tabURLs.map { url in
             makeTab(url == "about:blank" ? nil : URL(string: url))
         }
-        if !tabs.isEmpty {
+        if tabs.isEmpty {
+            layout.closeBrowser()
+        } else {
             activeTabID = tabs[min(max(stored.activeTab, 0), tabs.count - 1)].id
         }
-        isOpen = stored.isOpen && !tabs.isEmpty
     }
 
     var activeTab: BrowserTab? {
@@ -38,22 +46,45 @@ final class Browser {
         StoredBrowser(
             tabURLs: tabs.map { $0.hasPage ? $0.urlString : "about:blank" },
             activeTab: tabs.firstIndex { $0.id == activeTabID } ?? 0,
-            isOpen: isOpen
+            layout: layout
         )
     }
 
-    /// Opening an empty Browser gives it a blank Tab to type into.
-    func setOpen(_ open: Bool) {
-        guard open != isOpen else { return }
-        if open, tabs.isEmpty {
-            newTab()
-            return
-        }
-        isOpen = open
-        if open, activeTab?.hasPage == false { wantsAddressFocus = true }
-        // A hidden blank Tab is nothing worth keeping (or badging in the sidebar).
-        if !open { dropBlankTabs() }
+    func toggle(_ side: PanelLayout.Side) {
+        changeLayout { $0.toggle(side) }
         changed()
+    }
+
+    func toggleFocus(_ side: PanelLayout.Side, sidebarShown: Bool) {
+        changeLayout { $0.toggleFocus(side, sidebarShown: sidebarShown) }
+        changed()
+    }
+
+    func commitFocus() {
+        changeLayout { $0.commitFocus() }
+        changed()
+    }
+
+    /// Asks the panel for the keyboard: the page, or the address field of a blank Tab.
+    func requestKeyboard() {
+        keyboardRequest = activeTab?.hasPage == true ? .page : .addressBar
+    }
+
+    /// A shown Browser always has a Tab: an empty one gets a blank Tab to type
+    /// into. A hidden blank Tab is nothing worth keeping (or badging in the sidebar).
+    private func changeLayout(_ change: (inout PanelLayout) -> Void) {
+        let before = layout
+        change(&layout)
+        guard layout != before else { return }
+        if layout.shows(.browser), !before.shows(.browser) {
+            if tabs.isEmpty { appendTab(nil) }
+            if activeTab?.hasPage == false { keyboardRequest = .addressBar }
+        } else if !layout.shows(.browser), before.shows(.browser) {
+            dropBlankTabs()
+        }
+        if layout.shows(.terminal) != before.shows(.terminal) || layout.shows(.browser) != before.shows(.browser) {
+            onShownChange?(self)
+        }
     }
 
     private func dropBlankTabs() {
@@ -64,7 +95,7 @@ final class Browser {
         if activeTab == nil { activeTabID = tabs.last?.id }
     }
 
-    /// Shows `url` in a Tab and opens the Browser. Switches to a Tab that
+    /// Shows `url` in a Tab and shows the Browser. Switches to a Tab that
     /// already has the URL, reuses the active Tab if it is still blank, and
     /// otherwise adds a new Tab.
     func open(_ url: URL) {
@@ -74,20 +105,16 @@ final class Browser {
         } else if let blank = activeTab, !blank.hasPage {
             blank.load(url)
         } else {
-            let tab = makeTab(url)
-            tabs.append(tab)
-            activeTabID = tab.id
+            appendTab(url)
         }
-        isOpen = true
+        changeLayout { $0.show(.browser) }
         changed()
     }
 
     func newTab() {
-        let tab = makeTab(nil)
-        tabs.append(tab)
-        activeTabID = tab.id
-        isOpen = true
-        wantsAddressFocus = true
+        appendTab(nil)
+        keyboardRequest = .addressBar
+        changeLayout { $0.show(.browser) }
         changed()
     }
 
@@ -98,7 +125,7 @@ final class Browser {
         tabs.remove(at: index)
         if tabs.isEmpty {
             activeTabID = nil
-            isOpen = false
+            changeLayout { $0.closeBrowser() }
         } else if activeTabID == tab.id {
             activeTabID = tabs[min(index, tabs.count - 1)].id
         }
@@ -107,6 +134,25 @@ final class Browser {
 
     func closeActiveTab() {
         if let activeTab { close(activeTab) }
+    }
+
+    func moveTab(_ tab: BrowserTab, to destination: Browser) {
+        guard destination !== self,
+              let index = tabs.firstIndex(where: { $0 === tab }),
+              !destination.tabs.contains(where: { $0 === tab }) else { return }
+        tabs.remove(at: index)
+        if tabs.isEmpty {
+            activeTabID = nil
+            changeLayout { $0.closeBrowser() }
+        } else if activeTabID == tab.id {
+            activeTabID = tabs[min(index, tabs.count - 1)].id
+        }
+        destination.bind(tab)
+        destination.tabs.append(tab)
+        destination.activeTabID = tab.id
+        destination.changeLayout { $0.show(.browser) }
+        changed()
+        destination.changed()
     }
 
     func select(_ tab: BrowserTab) {
@@ -125,12 +171,22 @@ final class Browser {
         tabs.forEach { $0.close() }
     }
 
+    private func appendTab(_ url: URL?) {
+        let tab = makeTab(url)
+        tabs.append(tab)
+        activeTabID = tab.id
+    }
+
     private func makeTab(_ url: URL?) -> BrowserTab {
         let tab = BrowserTab(url: url)
+        bind(tab)
+        return tab
+    }
+
+    private func bind(_ tab: BrowserTab) {
         tab.onOpenInNewTab = { [weak self] in self?.open($0) }
         tab.onURLChange = { [weak self] in self?.changed() }
         tab.onCopyURL = { [weak self] in self?.onCopyURL?($0) }
-        return tab
     }
 
     private func changed() {

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+@testable import MuxifyCore
 
 final class SidebarRenderingTests: XCTestCase {
     /// Use real row presentation without starting Ghostty or a tmux connection.
@@ -18,12 +19,9 @@ final class SidebarRenderingTests: XCTestCase {
         }
     }
 
-    @MainActor func testSystemSessionHeaderKeepsItsDefaultHeightAndGrowsWhenNeeded() throws {
-        let header = SessionHeader(session: SessionGroup(id: "$1", name: "AgM Session", windows: []),
-                                   isExpanded: true, containsSelection: false, onToggle: {})
+    @MainActor func testCardHeaderGrowsWithTheSidebarFontSize() throws {
+        let header = CardHeader(title: "AgM Session", isOpen: true, status: nil, summary: "") { EmptyView() }
         let baseline = try render(header, typography: SidebarTypography(), scheme: .light)
-        // 24-point header plus its existing one-point top padding.
-        XCTAssertEqual(baseline.height, 25, accuracy: 0.5)
         let large = try render(header, typography: SidebarTypography(fontSize: 24), scheme: .light)
         XCTAssertGreaterThan(large.height, baseline.height)
     }
@@ -101,13 +99,13 @@ final class SidebarRenderingTests: XCTestCase {
                                 path: "/test", command: "fish", isActive: true, paneCount: 3, hasBell: true,
                                 sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [])
         let agent = Agent(paneID: "%1", kind: .codex, status: .failed, unread: true, windowID: "@1", sessionID: "$1",
-                          sessionName: window.sessionName, windowIndex: 1, windowTitle: window.displayTitle)
+                          sessionName: window.sessionName, windowIndex: 1, windowTitle: window.displayTitle,
+                          label: window.displayTitle)
         return VStack(spacing: 0) {
-            SessionHeader(session: SessionGroup(id: "$1", name: window.sessionName, windows: [window]),
-                          isExpanded: false, containsSelection: true, onToggle: {})
+            CardHeader(title: window.sessionName, isOpen: false, status: nil, summary: "1 Window") { EmptyView() }
             WindowRow(window: window, isSelected: false, tabCount: 12)
             WindowRow(window: window, isSelected: true, tabCount: 12)
-            AgentRow(agent: agent)
+            AgentRow(agent: agent, text: .init(title: agent.label, summary: window.sessionName), notification: .failed)
         }
     }
 

@@ -1,12 +1,8 @@
 import AppKit
+import MuxifyCore
 import SwiftUI
 
-/// Sidebar text keeps its existing hierarchy around a configurable base size.
-/// Symbols, logos and status dots deliberately do not use this typography.
-struct SidebarTypography: Equatable {
-    var fontSize: Double = 12
-    var fontFamily: String = "system"
-
+extension SidebarTypography {
     enum Role: CaseIterable {
         case session, title, section, location, badge
 
@@ -56,18 +52,6 @@ struct SidebarTypography: Equatable {
 
     static func lookup(family: String, weight: Int, size: CGFloat) -> NSFont? {
         NSFontManager.shared.font(withFamily: family, traits: [], weight: weight, size: size)
-    }
-
-    static var fontFamilies: [String] { NSFontManager.shared.availableFontFamilies }
-
-    /// Preserve native system-font selection instead of naming a particular
-    /// system face. The catalogue is injectable without requiring test fonts.
-    static func canonicalFamily(_ name: String,
-                                families: () -> [String] = { Self.fontFamilies }) -> String? {
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
-        if name.caseInsensitiveCompare("system") == .orderedSame { return "system" }
-        return families().first { $0.caseInsensitiveCompare(name) == .orderedSame }
     }
 }
 

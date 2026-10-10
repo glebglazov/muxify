@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCLI
+import MuxifyCore
 
 final class CLICommandTests: XCTestCase {
     func testHelpDoesNotNeedTmuxOrSimulatorConfiguration() throws {
@@ -139,6 +140,197 @@ final class CLICommandTests: XCTestCase {
             XCTFail("Expected tmux failure")
         } catch {
             XCTAssertEqual((error as? CLIError)?.exitCode, 7)
+        }
+    }
+
+    func testTopicCommandsTakeTheCallingPaneAndAtMostOneExplicitTarget() throws {
+        let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let outside = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: inside, home: "/home/me")
+        let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
+        let window = TopicTarget.window(try XCTUnwrap(WindowID(rawValue: "@12")))
+        let pane = TopicTarget.pane(try XCTUnwrap(PaneID(rawValue: "%3")))
+        func topic(_ command: TopicInvocation.Command, target: TopicTarget? = nil, caller: PaneID? = caller,
+                   output: TopicInvocation.Output = .text) -> CLICommand {
+            .topic(TopicInvocation(command: command, target: target, caller: caller, output: output, paths: paths))
+        }
+        let cases: [([String], [String: String], CLICommand)] = [
+            (["new"], inside, topic(.new(title: nil, project: nil))),
+            (["new", "Fix reward", "--project", "/work"], outside, topic(.new(title: "Fix reward", project: "/work"), caller: nil)),
+            (["new", "Fix reward", "--project", "/work"], inside, topic(.new(title: "Fix reward", project: "/work"))),
+            (["new", "--pane", "%3", "Fix"], inside, topic(.new(title: "Fix", project: nil), target: pane)),
+            (["new", "--window", "@12"], outside, topic(.new(title: nil, project: nil), target: window, caller: nil)),
+            (["add-project", "tools"], inside, topic(.addProject(directory: "tools", newWorktree: false, base: nil))),
+            (["add-project", "tools", "--topic", "Fix reward"], outside,
+             topic(.addProject(directory: "tools", newWorktree: false, base: nil), target: .topic(.named("Fix reward")), caller: nil)),
+            (["add-project", "tools", "--worktree"], inside, topic(.addProject(directory: "tools", newWorktree: true, base: nil))),
+            (["add-project", "--base", "origin/main", "tools", "--worktree"], inside,
+             topic(.addProject(directory: "tools", newWorktree: true, base: "origin/main"))),
+            (["settle", "--window", "@12"], inside, topic(.settle(removeWorktrees: false), target: window)),
+            (["settle", "--json", "--pane", "%3"], inside, topic(.settle(removeWorktrees: false), target: pane, output: .json)),
+            (["settle", "--remove-worktrees"], inside, topic(.settle(removeWorktrees: true))),
+            (["list"], outside, topic(.list, caller: nil)),
+            (["list", "--json"], inside, topic(.list, output: .json)),
+            (["show"], inside, topic(.show)),
+            (["show", "--topic", "Fix reward", "--json"], outside, topic(.show, target: .topic(.named("Fix reward")), caller: nil, output: .json)),
+            (["show", "--pane", "%3"], inside, topic(.show, target: pane)),
+            (["exec", "--", "git", "status", "--short"], inside, topic(.exec(project: nil, timeout: 60, command: ["git", "status", "--short"]))),
+            (["exec", "--topic", "Fix reward", "--project", "tools", "--timeout", "2.5", "--json", "--", "make", "--", "-j"], outside,
+             topic(.exec(project: "tools", timeout: 2.5, command: ["make", "--", "-j"]), target: .topic(.named("Fix reward")),
+                   caller: nil, output: .json)),
+            (["status"], inside, topic(.status(project: nil))),
+            (["status", "--project", "tools", "--topic", "Fix reward", "--json"], outside,
+             topic(.status(project: "tools"), target: .topic(.named("Fix reward")), caller: nil, output: .json)),
+            (["diff"], inside, topic(.diff(project: nil, stat: false))),
+            (["diff", "--stat", "--window", "@12"], inside, topic(.diff(project: nil, stat: true), target: window)),
+            (["exec", "--pane", "%3", "--", "pwd", "--json"], inside, topic(.exec(project: nil, timeout: 60, command: ["pwd", "--json"]), target: pane)),
+        ]
+        for (arguments, environment, expected) in cases {
+            XCTAssertEqual(try CLICommand(arguments: ["topic"] + arguments, environment: environment), expected, "\(arguments)")
+        }
+        XCTAssertThrowsError(try CLICommand(arguments: ["topic", "new"], environment: ["TMUX_PANE": "not-a-pane"]),
+                             "a TMUX_PANE that is not a Pane id is no caller") { error in
+            XCTAssertEqual((error as? CLIError)?.message,
+                           "TMUX_PANE not-a-pane is not a tmux Pane id; name the target with --window <id> or --pane <id>")
+            XCTAssertEqual((error as? CLIError)?.exitCode, 2)
+        }
+        for (environment, topics) in [(["XDG_STATE_HOME": "/state"], "/state/muxify/topics"),
+                                      (["HOME": "/home/me"], "/home/me/.local/state/muxify/topics")] {
+            guard case .topic(let invocation) = try CLICommand(arguments: ["topic", "list"], environment: environment) else {
+                return XCTFail("\(environment): expected topic list")
+            }
+            XCTAssertEqual(invocation.paths.topics.path, topics)
+        }
+    }
+
+    func testProjectListTakesOnlyJson() throws {
+        let environment = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: environment, home: "/home/me")
+        XCTAssertEqual(try CLICommand(arguments: ["project", "list"], environment: environment),
+                       .project(ProjectInvocation(output: .text, paths: paths)))
+        XCTAssertEqual(try CLICommand(arguments: ["project", "list", "--json"], environment: environment),
+                       .project(ProjectInvocation(output: .json, paths: paths)))
+        for arguments in [["project"], ["project", "show"], ["project", "list", "extra"], ["project", "list", "--pane", "%3"]] {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: [:]), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+            }
+        }
+    }
+
+    func testWindowMoveTakesTheTopicAndTheCallersWindowOrOneExplicitTarget() throws {
+        let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let outside = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: inside, home: "/home/me")
+        let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
+        func move(_ topic: String, target: TopicTarget? = nil, caller: PaneID? = caller,
+                  output: TopicInvocation.Output = .text) -> CLICommand {
+            .window(WindowInvocation(topic: topic, target: target, caller: caller, output: output, paths: paths))
+        }
+        let cases: [([String], [String: String], CLICommand)] = [
+            (["--topic", "Fix reward"], inside, move("Fix reward")),
+            (["--window", "@12", "--topic", "Fix"], outside, move("Fix", target: .window(try XCTUnwrap(WindowID(rawValue: "@12"))), caller: nil)),
+            (["--topic", "Fix", "--pane", "%3", "--json"], inside, move("Fix", target: .pane(try XCTUnwrap(PaneID(rawValue: "%3"))), output: .json)),
+        ]
+        for (arguments, environment, expected) in cases {
+            XCTAssertEqual(try CLICommand(arguments: ["window", "move"] + arguments, environment: environment), expected, "\(arguments)")
+        }
+        XCTAssertEqual(try CLICommand(arguments: ["window", "move", "--help"], environment: [:]), .help)
+        let errors: [([String], [String: String], String)] = [
+            (["window"], inside, CLICommand.usage), (["window", "list"], inside, CLICommand.usage),
+            (["window", "move", "Fix"], inside, CLICommand.usage), (["window", "move", "--topic"], inside, CLICommand.usage),
+            (["window", "move"], inside, "window move takes the Topic to move to: --topic <id|label>"),
+            (["window", "move", "--topic", ""], inside, "--topic takes the id or label of an open Topic"),
+            (["window", "move", "--topic", "Fix", "--window", "@1", "--pane", "%2"], inside, "give only one of --window and --pane"),
+            (["window", "move", "--topic", "Fix", "--window", "%1"], inside, "--window takes a tmux Window id, e.g. @12"),
+            (["window", "move", "--topic", "Fix"], [:], "not inside tmux; name the target with --window <id> or --pane <id>"),
+        ]
+        for (arguments, environment, message) in errors {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: environment), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+                XCTAssertEqual(error.localizedDescription, message, "\(arguments)")
+            }
+        }
+    }
+
+    func testAgentListTakesTheFiltersAndJson() throws {
+        let environment = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: environment, home: "/home/me")
+        func agent(topic: String? = nil, status: AgentStatus? = nil, unreadOnly: Bool = false,
+                   output: TopicInvocation.Output = .text) -> CLICommand {
+            .agent(AgentInvocation(topic: topic, status: status, unreadOnly: unreadOnly, output: output, paths: paths))
+        }
+        let cases: [([String], CLICommand)] = [
+            (["list"], agent()),
+            (["list", "--json"], agent(output: .json)),
+            (["list", "--topic", "Fix reward", "--status", "blocked", "--unread"],
+             agent(topic: "Fix reward", status: .blocked, unreadOnly: true)),
+        ]
+        for (arguments, expected) in cases {
+            XCTAssertEqual(try CLICommand(arguments: ["agent"] + arguments, environment: environment), expected, "\(arguments)")
+        }
+        XCTAssertEqual(try CLICommand(arguments: ["agent", "list", "--help"], environment: [:]), .help)
+        let errors: [([String], String)] = [
+            (["agent"], CLICommand.usage), (["agent", "show"], CLICommand.usage), (["agent", "list", "extra"], CLICommand.usage),
+            (["agent", "list", "--topic"], CLICommand.usage), (["agent", "list", "--pane", "%3"], CLICommand.usage),
+            (["agent", "list", "--status", "idle"], "--status takes working, blocked, done or failed"),
+            (["agent", "list", "--topic", ""], "--topic takes the id or label of an open Topic"),
+        ]
+        for (arguments, message) in errors {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: environment), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+                XCTAssertEqual(error.localizedDescription, message, "\(arguments)")
+            }
+        }
+    }
+
+    func testTopicCommandsRejectWhatTheShellToolRejected() {
+        let inside = ["TMUX_PANE": "%7"]
+        for arguments in [["topic"], ["topic", "close"], ["topic", "new", "a", "b"], ["topic", "new", " "],
+                          ["topic", "new", "--project"], ["topic", "new", "--project", "-x"], ["topic", "new", "--project", ""],
+                          ["topic", "new", "--other"], ["topic", "new", "--pane"], ["topic", "add-project"], ["topic", "add-project", "-x"],
+                          ["topic", "add-project", "a", "--project", "b"], ["topic", "add", "a"],
+                          ["topic", "add-project", "a", "--base", "main"], ["topic", "add-project", "a", "--worktree", "--base"],
+                          ["topic", "add-project", "a", "--worktree", "--base", "x", "--base", "y"],
+                          ["topic", "new", "--worktree"], ["topic", "settle", "--base", "main"],
+                          ["topic", "add-project", "a", "--remove-worktrees"], ["topic", "move", "a"],
+                          ["topic", "settle", "extra"], ["topic", "move", "a", "--window", "@12"],
+                          ["topic", "list", "extra"], ["topic", "show", "Fix"],
+                          ["topic", "exec"], ["topic", "exec", "--"], ["topic", "exec", "pwd"], ["topic", "exec", "pwd", "--", "ls"],
+                          ["topic", "exec", "--timeout", "0", "--", "pwd"], ["topic", "exec", "--timeout", "soon", "--", "pwd"],
+                          ["topic", "exec", "--timeout", "-1", "--", "pwd"], ["topic", "show", "--", "pwd"],
+                          ["topic", "show", "--timeout", "5"], ["topic", "status", "--stat"], ["topic", "status", "x"],
+                          ["topic", "diff", "x"], ["topic", "diff", "--", "pwd"], ["topic", "show", "--stat"]] {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2)
+                XCTAssertEqual(error.localizedDescription, CLICommand.usage, "\(arguments)")
+            }
+        }
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "new", "--help"], environment: [:]), .help)
+    }
+
+    func testTopicTargetOptionErrorsNameTheProblem() {
+        let inside = ["TMUX_PANE": "%7"]
+        let cases: [([String], [String: String], String)] = [
+            (["new", "--pane", "%1", "--pane", "%2"], inside, "give only one of --topic, --window and --pane"),
+            (["settle", "--topic", "Fix", "--window", "@1"], inside, "give only one of --topic, --window and --pane"),
+            (["settle", "--window", "%3"], inside, "--window takes a tmux Window id, e.g. @12"),
+            (["settle", "--pane", "@3"], inside, "--pane takes a tmux Pane id, e.g. %3"),
+            (["new", "--pane", "7"], inside, "--pane takes a tmux Pane id, e.g. %3"),
+            (["settle", "--topic", ""], inside, "--topic takes the id or label of an open Topic"),
+            (["new", "--topic", "Fix"], inside, "topic new does not take --topic; name the target with --window <id> or --pane <id>"),
+            (["list", "--pane", "%3"], inside, "topic list does not take --pane"),
+            (["new", "Fix", "--project", "/work", "--pane", "%3"], inside, "topic new with a title and --project does not take --pane"),
+            (["new"], [:], "not inside tmux; name the target with --window <id> or --pane <id>"),
+            (["new", "Fix"], [:], "not inside tmux; name the target with --window <id> or --pane <id>"),
+            (["add-project", "tools"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
+            (["settle"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
+            (["show"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
+        ]
+        for (arguments, environment, message) in cases {
+            XCTAssertThrowsError(try CLICommand(arguments: ["topic"] + arguments, environment: environment), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+                XCTAssertEqual(error.localizedDescription, message, "\(arguments)")
+            }
         }
     }
 

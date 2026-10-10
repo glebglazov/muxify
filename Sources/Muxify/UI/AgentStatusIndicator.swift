@@ -1,4 +1,5 @@
 import SwiftUI
+import MuxifyCore
 
 /// Shared presentation for the Sidebar and Command Palette. Attention takes
 /// priority over Unread; a working Agent never gets an Unread dot.
