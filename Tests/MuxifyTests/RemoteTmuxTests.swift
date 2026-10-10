@@ -1,5 +1,6 @@
 import XCTest
 import Darwin
+@testable import MuxifyCore
 
 /// Executes the real remote shell protocol against an isolated tmux socket.
 /// No network, default tmux server, user config or real HOME is touched.

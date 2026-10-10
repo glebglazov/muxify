@@ -1,35 +1,65 @@
 import SwiftUI
+import MuxifyCore
 
 struct ContentView: View {
-    let store: WorkspaceStore
+    @Bindable var store: WorkspaceStore
     let configStore: ConfigStore
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
     /// The Browser's share of the room beside the sidebar, common to all Windows.
     @AppStorage("browserShare") private var browserShare: Double = 0.45
+    /// The Terminal's width when it was last shown.
+    @State private var terminalWidth: Double?
 
     var body: some View {
         GeometryReader { proxy in
-            let sidebar = store.sidebarVisible ? clamp(sidebarWidth, 180, 420) : 0
+            let layout = store.panelLayout
+            let showsTerminal = layout.shows(.terminal)
+            let browser = layout.shows(.browser) ? store.currentBrowser : nil
+            let sidebar = store.sidebarShown ? clamp(sidebarWidth, 180, 420) : 0
             let room = proxy.size.width - sidebar
             let browserMax = max(320, room - 360)
-            let browserWidth = clamp(browserShare * room, 320, browserMax)
+            let browserWidth = showsTerminal ? clamp(browserShare * room, 320, browserMax) : room
+            let shownTerminalWidth: Double? = showsTerminal ? (browser == nil ? room : room - browserWidth - 1) : nil
             // Panels appear and disappear without animation, so switching
             // between Windows with and without a Browser is instant.
             HStack(spacing: 0) {
-                if store.sidebarVisible {
+                if store.sidebarShown {
                     SidebarView(store: store, typography: store.config.sidebarTypography)
                         .frame(width: sidebar)
                         .chrome(theme: store.theme, material: .sidebar)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("sidebar-panel")
                     PanelResizeHandle(width: sidebar, range: 180...420, edge: .leading) { sidebarWidth = $0 }
                 }
-                TerminalArea(store: store)
-                if let browser = store.currentBrowser, browser.isOpen {
-                    PanelResizeHandle(width: browserWidth, range: 320...browserMax, edge: .trailing) {
-                        browserShare = $0 / room
+                // A hidden Terminal stays behind the Browser at its last width,
+                // so tmux does not resize the client and reflow its Panes.
+                ZStack(alignment: .topLeading) {
+                    TerminalArea(store: store)
+                        .frame(width: shownTerminalWidth ?? terminalWidth ?? room)
+                        .allowsHitTesting(showsTerminal)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("terminal-panel")
+                        .accessibilityHidden(!showsTerminal)
+                    if let browser {
+                        HStack(spacing: 0) {
+                            if showsTerminal {
+                                Spacer(minLength: 0)
+                                PanelResizeHandle(width: browserWidth, range: 320...browserMax, edge: .trailing) {
+                                    browserShare = $0 / room
+                                }
+                            }
+                            BrowserPanel(browser: browser).id(browser.windowID)
+                                .frame(width: browserWidth)
+                                .background(Color(nsColor: .windowBackgroundColor))
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("browser-panel")
+                        }
                     }
-                    BrowserPanel(browser: browser).id(browser.windowID)
-                    .frame(width: browserWidth)
-                    .background(Color(nsColor: .windowBackgroundColor))
+                }
+                .frame(width: room, alignment: .topLeading)
+                .clipped()
+                .onChange(of: shownTerminalWidth, initial: true) { _, width in
+                    if let width { terminalWidth = width }
                 }
             }
         }
@@ -51,6 +81,15 @@ struct ContentView: View {
                          : store.selectedWindow?.sessionName ?? "Muxify")
         .onAppear { store.start() }
         .onChange(of: configStore.config.remoteEnvironments) { _, _ in store.reconcileEnvironments() }
+        .overlay(alignment: .bottom) {
+            if let message = store.wakeToast {
+                Text(message).padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(16).accessibilityIdentifier("wake-toast")
+            }
+        }
+        .environment(\.pulses, configStore.config.pulse)
+        .environment(\.chromeTheme, store.theme)
+
     }
 
     private var headerHeight: CGFloat { CGFloat(store.config.headerHeight) }
@@ -61,7 +100,7 @@ struct ContentView: View {
 }
 
 /// The fixed strip along the top: room for the traffic lights, the window's
-/// drag handle, Environment selector, and two panel toggles on the right.
+/// drag handle, Environment selector, Focus and the panel toggles on the right.
 private struct HeaderBar: View {
     let store: WorkspaceStore
     let keybinds: Keybinds
@@ -73,18 +112,38 @@ private struct HeaderBar: View {
             EnvironmentSelector(environments: store.remoteEnvironments, activeEnvironment: store.activeEnvironment,
                                 isConnected: store.isConnected, hasConnectionError: store.terminalMessage != nil,
                                 status: store.environmentStatus, onSelect: store.selectEnvironment)
+            let layout = store.panelLayout
+            TitlebarButton(
+                systemName: layout.focus == nil ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left",
+                help: help(layout.focus == nil ? "Focus" : "End Focus", .toggleFocus),
+                isOn: layout.focus != nil,
+                action: store.toggleFocus
+            )
+            .disabled(!store.canToggleFocus)
+            .accessibilityIdentifier("toggle-focus")
             TitlebarButton(
                 systemName: "sidebar.left",
-                help: help(store.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", .toggleSidebar),
-                isOn: store.sidebarVisible,
+                help: help(store.sidebarShown ? "Hide Sidebar" : "Show Sidebar", .toggleSidebar),
+                isOn: store.sidebarShown,
                 action: store.toggleSidebar
             )
+            .accessibilityIdentifier("toggle-sidebar")
+            TitlebarButton(
+                systemName: "terminal",
+                help: help(layout.shows(.terminal) ? "Hide Terminal" : "Show Terminal", .toggleTerminal),
+                isOn: layout.shows(.terminal),
+                action: { store.toggle(.terminal) }
+            )
+            .disabled(!store.canToggle(.terminal))
+            .accessibilityIdentifier("toggle-terminal")
             TitlebarButton(
                 systemName: "sidebar.right",
-                help: help(store.isBrowserVisible ? "Hide Browser" : "Show Browser", .toggleBrowser),
-                isOn: store.isBrowserVisible,
-                action: store.toggleBrowser
+                help: help(layout.shows(.browser) ? "Hide Browser" : "Show Browser", .toggleBrowser),
+                isOn: layout.shows(.browser),
+                action: { store.toggle(.browser) }
             )
+            .disabled(!store.canToggle(.browser))
+            .accessibilityIdentifier("toggle-browser")
         }
         .padding(.leading, TitlebarMetrics.trafficLightsWidth)
         .padding(.trailing, 8)
@@ -170,7 +229,7 @@ private struct ConfigProblemsBanner: View {
     }
 }
 
-private extension View {
+extension View {
     /// Header and sidebar take their background from the Ghostty theme, and
     /// their text follows its lightness, so a dark theme stays readable while
     /// macOS is in light mode. Without a theme they use the system materials.
@@ -193,7 +252,63 @@ private struct TerminalArea: View {
         ZStack {
             TerminalHostRepresentable(host: store.terminalHost)
             if store.surface == nil { placeholder }
+            if let topic = store.topics.emptyTopic { emptyTopic(topic) }
+            if store.topicSelection.showsEmptyNoTopic {
+                VStack(spacing: 12) {
+                    Text("No Topic").font(.title2)
+                    Text("No Sessions outside Topics").foregroundStyle(.secondary)
+                    Button("New Session") { store.newSession() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .accessibilityIdentifier("empty-no-topic")
+            }
         }
+    }
+
+    private func emptyTopic(_ topic: TopicsModel.Row) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: offersReopen(topic) ? "clock.arrow.circlepath" : "folder.badge.plus")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text(topic.title).font(.title2.weight(.semibold))
+                .accessibilityIdentifier("empty-topic-title")
+            if case .topic(let id) = topic.id {
+                switch (store.reopening(id, .reopen), store.reopening(id, .startFresh)) {
+                case (.success(let reopen)?, .success(let startFresh)?) where !reopen.sessions.isEmpty:
+                    ReopenChoiceView(store: store, topicID: id, reopen: reopen, startFresh: startFresh)
+                case (.failure(let error)?, _):
+                    Text("This Topic cannot be reopened. \(String(describing: error))")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("reopen-choice-failure")
+                default:
+                    if case .settled = topic.kind {
+                        Text("This Topic remembers no Session.").foregroundStyle(.secondary)
+                        Button("Reopen") { store.reopenTopic(id, .reopen) }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(store.changingTopic)
+                            .accessibilityIdentifier("reopen-choice-reopen")
+                    } else {
+                        Text("Open a Project to start this Topic.").foregroundStyle(.secondary)
+                        Button("Add a Project…") { store.presentAddProject(toTopic: id) }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(store.changingTopic)
+                            .accessibilityIdentifier("empty-topic-add-project")
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: store.theme?.background ?? .windowBackgroundColor))
+        .environment(\.colorScheme, store.theme.map { $0.isDark ? .dark : .light } ?? systemColorScheme)
+    }
+
+    /// A Settled Topic, or a Dormant one that remembers a Session, offers Reopen; an empty open Topic offers Add a Project.
+    private func offersReopen(_ topic: TopicsModel.Row) -> Bool {
+        if case .settled = topic.kind { return true }
+        guard case .topic(let id) = topic.id, case .success(let reopening)? = store.reopening(id, .reopen) else { return false }
+        return !reopening.sessions.isEmpty
     }
 
     private var placeholder: some View {
@@ -248,12 +363,14 @@ struct TitlebarButton: View {
     let action: () -> Void
 
     @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
+                .opacity(isEnabled ? 1 : 0.4)
                 .frame(width: 28, height: 24)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -264,6 +381,7 @@ struct TitlebarButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(help)
+        .accessibilityValue(isOn ? "on" : "off")
         .actsOnFirstClick()
     }
 }
@@ -329,7 +447,7 @@ private struct PanelResizeHandle: View {
 }
 
 /// Native translucent material (the sidebar and title bar look).
-private struct VisualEffectBackground: NSViewRepresentable {
+struct VisualEffectBackground: NSViewRepresentable {
     let material: NSVisualEffectView.Material
 
     func makeNSView(context: Context) -> NSVisualEffectView {

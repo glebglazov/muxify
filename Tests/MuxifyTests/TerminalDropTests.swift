@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+@testable import MuxifyCore
 
 final class TerminalDropTests: XCTestCase {
     private var pasteboard: NSPasteboard!

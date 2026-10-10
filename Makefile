@@ -6,7 +6,7 @@ INSTALL_DIR ?= /Applications
 MUXIFY_SIGN_IDENTITY ?= -
 MUXIFY_DEVELOPMENT_TEAM ?=
 
-.PHONY: all setup tools project build cli test test-release run install release clean
+.PHONY: all setup tools project build cli test test-release verify run install release clean
 
 all: build
 
@@ -37,12 +37,18 @@ cli:
 
 test: project
 	swift test
+	swift test --package-path Packages/MuxifyCore
 	node --test Tests/SimulatorWeb/*.test.mjs
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages test
 
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v
+
+SUITE ?= $(basename $(notdir $(wildcard scripts/verify/suites/*.py)))
+
+verify: build
+	python3 scripts/verify/run.py $(SUITE)
 
 # CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build

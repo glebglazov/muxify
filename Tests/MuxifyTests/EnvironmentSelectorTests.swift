@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+@testable import MuxifyCore
 
 final class EnvironmentSelectorTests: XCTestCase {
     /// Render the real Menu through AppKit, not just its isolated SwiftUI label:

@@ -1,0 +1,242 @@
+import SwiftUI
+import MuxifyCore
+
+/// One Topic or Session in the Sidebar. Closed, the card is flat, with only its border; open, it is raised and lists
+/// its Window and Pane rows, and its header stays at the top of the list while its rows scroll under it. A spine on the
+/// left edge shows the Status of its Agents. The card that holds the selected Window has a many-coloured border,
+/// which turns once when the selection comes to it from another card, so a closed card still shows where the user is.
+struct SidebarCard<Header: View, Content: View>: View {
+    let isOpen: Bool
+    let holdsSelection: Bool
+    let status: AgentStatus?
+    /// The coordinate space of the scroll view around the list, in which the open card's header sticks to the top.
+    var viewport: String? = nil
+    @ViewBuilder var header: () -> Header
+    @ViewBuilder var content: () -> Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chromeTheme) private var chromeTheme
+    @State private var frame: CGRect = .zero
+    @State private var headerHeight: CGFloat = 0
+    @State private var turn: Double = 0
+
+    /// How far the header moves down to stay at the top of the viewport, never past the card's last row.
+    private var stuck: CGFloat {
+        guard isOpen, viewport != nil else { return 0 }
+        return min(max(0, -frame.minY), max(0, frame.height - headerHeight - 8))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+                .background {
+                    if stuck > 0 {
+                        ZStack {
+                            Color.clear.chrome(theme: chromeTheme, material: .sidebar)
+                            Color.primary.opacity(0.08)
+                        }
+                        .overlay(alignment: .bottom) { Divider() }
+                    }
+                }
+                .offset(y: stuck)
+                // Above the rows that scroll under it. That also lists it after them among the accessibility children,
+                // so its sort priority keeps it first for VoiceOver.
+                .zIndex(1)
+                .accessibilitySortPriority(1)
+            if isOpen {
+                VStack(alignment: .leading, spacing: 1) { content() }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 3)
+                    .padding(.bottom, 5)
+            }
+        }
+        .background {
+            if isOpen {
+                shape.fill(Color.primary.opacity(0.08)).shadow(color: .black.opacity(0.28), radius: 5, y: 2)
+            }
+        }
+        .overlay(alignment: .leading) {
+            if let status {
+                RoundedRectangle(cornerRadius: 2).fill(status.color)
+                    .breathing(status == .working)
+                    .frame(width: 3)
+                    .padding(.vertical, 8)
+                    .padding(.leading, 4)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay {
+            Group {
+                if holdsSelection { BalatroBorder(angle: turn, shape: shape) } else { shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 1) }
+            }
+            .allowsHitTesting(false)
+        }
+        // A container, in which the header's sort priority applies.
+        .accessibilityElement(children: .contain)
+        .onChange(of: holdsSelection) { _, holds in
+            guard holds, !reduceMotion else { return }
+            turn = -150
+            withAnimation(.timingCurve(0.18, 0.85, 0.25, 1, duration: 0.9)) { turn = 0 }
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(viewport ?? "")) } action: { if viewport != nil { frame = $0 } }
+    }
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 9, style: .continuous) }
+}
+
+/// The border of the card that holds the selected Window: the colours of a Balatro card's edge, around the card.
+/// SwiftUI animates `angle`, so a change of it turns the colours.
+private struct BalatroBorder: View, Animatable {
+    var angle: Double
+    let shape: RoundedRectangle
+
+    var animatableData: Double {
+        get { angle }
+        set { angle = newValue }
+    }
+
+    private static let colors: [Color] = [0xfe5f55, 0xfda200, 0xffe066, 0x4bc292, 0x009dff, 0x8e5cff, 0xfe5f55].map { hex in
+        Color(red: Double(hex >> 16 & 0xff) / 255, green: Double(hex >> 8 & 0xff) / 255, blue: Double(hex & 0xff) / 255)
+    }
+
+    var body: some View {
+        shape.strokeBorder(AngularGradient(colors: Self.colors, center: .center, angle: .degrees(angle)), lineWidth: 2)
+            .saturation(1.15)
+    }
+}
+
+private struct ChromeThemeKey: EnvironmentKey {
+    static let defaultValue: TerminalTheme? = nil
+}
+
+extension EnvironmentValues {
+    /// The Ghostty theme that the header and the Sidebar take their background from, nil for the system materials.
+    var chromeTheme: TerminalTheme? {
+        get { self[ChromeThemeKey.self] }
+        set { self[ChromeThemeKey.self] = newValue }
+    }
+}
+
+/// A card's header: the title on its own line, wrapped so it always shows whole, a line of details under it, and,
+/// on a closed card, a summary of what the card holds. The card gives it the press that opens or closes it.
+struct CardHeader<Details: View>: View {
+    let title: String
+    let isOpen: Bool
+    let status: AgentStatus?
+    var isPinned = false
+    /// Words for the accessibility value after the open state, such as "Dormant".
+    var notes: [String] = []
+    let summary: String
+    /// The card shows an action in its bottom-right corner, so the summary stops before it.
+    var reservesCorner = false
+    @ViewBuilder var details: () -> Details
+    @Environment(\.sidebarTypography) private var typography
+    /// The title line's frame in the header, where a click tool such as Homerow clicks in place of the header's centre.
+    @State private var titleLine: CGRect = .zero
+
+    private static var space: String { "card-header" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(title)
+                    .font(typography.font(for: .session))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if isPinned { PinMark() }
+            }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { titleLine = $0 }
+            HStack(spacing: 5) { details() }
+            if !isOpen && !summary.isEmpty {
+                Text(summary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.top, 1)
+                    .padding(.trailing, reservesCorner ? CardCorner.width : 0)
+            }
+        }
+        .padding(.leading, 13).padding(.trailing, 10).padding(.top, 7).padding(.bottom, isOpen ? 3 : 7)
+        .coordinateSpace(.named(Self.space))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(title)
+        .accessibilityHint(isOpen ? "" : summary)
+        .accessibilityActivationPoint(CGPoint(x: titleLine.midX, y: titleLine.midY))
+        .accessibilityValue(([isOpen ? "expanded" : "collapsed"] + notes + [status?.rawValue].compactMap { $0 }).joined(separator: ", "))
+    }
+}
+
+/// The mark after a Pinned Topic's title.
+struct PinMark: View {
+    var body: some View {
+        Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+    }
+}
+
+/// The rows of one Session in an open card.
+struct CardBlock: Identifiable {
+    /// The Session ID.
+    let id: String
+    let items: [TopicsModel.SessionChildren.Item]
+}
+
+/// An open card's list: each block's heading and rows, cut at `CardRows.limit` with "N more…" below.
+/// A block whose rows are all cut loses its heading too.
+struct CardList<Heading: View, Row: View>: View {
+    let blocks: [CardBlock]
+    /// The card header's identifier; the button is `<identifier>-more`.
+    let identifier: String
+    let selectedWindowID: String?
+    let showsAll: Bool
+    let onShowAll: () -> Void
+    /// The card shows an action in its bottom-right corner, so the list ends with a footer line for it, beside
+    /// "N more…" when that shows.
+    var reservesCorner = false
+    @ViewBuilder var heading: (CardBlock) -> Heading
+    @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
+
+    var body: some View {
+        let total = blocks.reduce(0) { $0 + $1.items.count }
+        let shown = CardRows.shownCount(blocks.flatMap(\.items), selectedWindowID: selectedWindowID, showsAll: showsAll)
+        let starts = blocks.indices.map { index in blocks[..<index].reduce(0) { $0 + $1.items.count } }
+        ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
+            if starts[index] < shown {
+                if index > 0 { Divider().padding(.horizontal, 6).padding(.vertical, 3) }
+                heading(block)
+                ForEach(block.items.prefix(shown - starts[index])) { row($0) }
+            }
+        }
+        if shown < total {
+            Button(action: onShowAll) {
+                Text("\(total - shown) more…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 28)
+                    .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, reservesCorner ? CardCorner.width : 0)
+            .accessibilityIdentifier(identifier + "-more")
+        } else if reservesCorner {
+            Color.clear.frame(height: 16)
+        }
+    }
+}
+
+/// The one place a card shows its own action, such as Settle: pinned to the bottom-right corner at the same
+/// offsets whether the card is open or closed, so it never moves when the card opens.
+enum CardCorner {
+    /// The room the action takes at the end of the summary line or the footer line.
+    static let width: CGFloat = 44
+}
+
+extension View {
+    func cardCorner<Action: View>(@ViewBuilder _ action: () -> Action) -> some View {
+        overlay(alignment: .bottomTrailing) { action().padding(.trailing, 10).padding(.bottom, 6) }
+    }
+}

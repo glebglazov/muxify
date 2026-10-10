@@ -16,93 +16,49 @@ final class TmuxEvents {
     /// Called on the main thread.
     var onEvent: ((Event) -> Void)?
 
-    private var process: Process?
-    private var input: Pipe?
-    private var output: Pipe?
+    private var client: ControlClient?
+    /// Tells the current client's callbacks from those of one already replaced.
+    private var clientToken = UUID()
     private var nextStart = Date.distantPast
 
-    var isRunning: Bool { process?.isRunning == true }
+    /// Read on the main thread.
+    var isRunning: Bool { client?.isRunning == true }
 
     /// Attaches to `sessionID`. Notifications cover every Session, so which
-    /// one doesn't matter.
+    /// one doesn't matter. Call on the main thread.
     func start(sessionID: String, connection: TmuxConnection) {
         guard !isRunning, Date() >= nextStart,
               let invocation = try? connection.invocation(["-C", "attach-session", "-f", "read-only,no-output,ignore-size", "-t", sessionID])
         else { return }
         stop()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: invocation.executable)
-        process.arguments = invocation.arguments
-        // Control mode exits when its input closes, so holding the pipe keeps
-        // it running, and it goes away with us even if we crash.
-        let input = Pipe()
-        let output = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        let buffer = EventBuffer()
-        output.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else {
-                handle.readabilityHandler = nil
-                return
-            }
-            let events = buffer.receive(data)
-            DispatchQueue.main.async {
-                guard let self, let process, self.process === process else { return }
-                events.forEach { self.onEvent?($0) }
-            }
-        }
-        process.terminationHandler = { [weak self, weak process] _ in
-            DispatchQueue.main.async {
-                guard let self, let process, self.process === process else { return }
-                self.stop()
-                self.nextStart = Date().addingTimeInterval(2)
-            }
-        }
-        self.process = process
-        self.input = input
-        self.output = output
+        let token = UUID()
+        clientToken = token
         do {
-            try process.run()
+            client = try ControlClient(binary: invocation.executable, arguments: invocation.arguments, onLines: { [weak self] lines in
+                let events = lines.compactMap(Self.event(from:))
+                guard !events.isEmpty else { return }
+                DispatchQueue.main.async {
+                    guard let self, self.clientToken == token else { return }
+                    events.forEach { self.onEvent?($0) }
+                }
+            }, onExit: { [weak self] in
+                // A client that ends on its own (server gone, SSH dropped) waits before the next start.
+                guard let self, self.clientToken == token else { return }
+                self.client = nil
+                self.nextStart = Date().addingTimeInterval(2)
+            })
         } catch {
             NSLog("muxify: tmux control client failed to start: \(error)")
-            stop()
-            return
         }
     }
 
     func stop() {
-        let old = process
-        process = nil
-        output?.fileHandleForReading.readabilityHandler = nil
-        try? input?.fileHandleForWriting.close()
-        input = nil
-        output = nil
-        if let old, old.isRunning {
-            old.terminate()
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) {
-                if old.isRunning { kill(old.processIdentifier, SIGKILL) }
-            }
-        }
+        clientToken = UUID()
+        client?.stop()
+        client = nil
     }
 
-    private final class EventBuffer {
-        private let lock = NSLock()
-        private var data = Data()
-        func receive(_ incoming: Data) -> [Event] {
-            lock.lock()
-            defer { lock.unlock() }
-            data.append(incoming)
-            var events: [Event] = []
-            while let newline = data.firstIndex(of: UInt8(ascii: "\n")) {
-                let line = String(decoding: data[data.startIndex..<newline], as: UTF8.self)
-                data.removeSubrange(data.startIndex...newline)
-                if let event = TmuxEvents.event(from: line) { events.append(event) }
-            }
-            return events
-        }
-    }
+    deinit { client?.stop() }
 
     private static func event(from line: String) -> Event? {
         let words = line.split(separator: " ")
@@ -115,5 +71,71 @@ final class TmuxEvents {
         default:
             return .other
         }
+    }
+}
+
+/// A `tmux -C` client whose controlling terminal is a pty that only Muxify
+/// holds. A control client can outlive a dead parent that only closed its
+/// input; the pty hangup when Muxify ends, however it ends, stops it.
+private final class ControlClient {
+    private let pid: pid_t
+    private let reader: DispatchSourceRead
+    private let exitSource: DispatchSourceProcess
+    /// Only touched on the main thread.
+    private var exited = false
+
+    /// Starts the client; call on the main thread. `onLines` gets each chunk
+    /// of complete output lines on a background queue.
+    init(binary: String, arguments: [String], onLines: @escaping ([String]) -> Void,
+         onExit: @escaping () -> Void) throws {
+        let argv = ([binary] + arguments).map { strdup($0) } + [nil]
+        defer { argv.forEach { free($0) } }
+        var master: Int32 = -1
+        let pid = muxify_forkpty_exec(binary, argv, environ, &master)
+        guard pid > 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        self.pid = pid
+        _ = fcntl(master, F_SETFL, fcntl(master, F_GETFL) | O_NONBLOCK)
+
+        reader = DispatchSource.makeReadSource(fileDescriptor: master, queue: DispatchQueue(label: "muxify.tmux-events"))
+        var buffer = Data()
+        reader.setEventHandler { [reader] in
+            var chunk = [UInt8](repeating: 0, count: 16384)
+            let count = read(master, &chunk, chunk.count)
+            guard count > 0 else {
+                // A pty whose client has gone reads as EIO, not as end of file.
+                if count == 0 || (errno != EAGAIN && errno != EINTR) { reader.cancel() }
+                return
+            }
+            buffer.append(contentsOf: chunk[..<count])
+            var lines: [String] = []
+            while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+                var line = buffer[buffer.startIndex..<newline]
+                if line.last == UInt8(ascii: "\r") { line = line.dropLast() }
+                lines.append(String(decoding: line, as: UTF8.self))
+                buffer.removeSubrange(buffer.startIndex...newline)
+            }
+            if !lines.isEmpty { onLines(lines) }
+        }
+        reader.setCancelHandler { close(master) }
+        reader.resume()
+
+        // The exit source keeps this client alive until it has reaped tmux.
+        exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
+        exitSource.setEventHandler { [self] in reap(); onExit() }
+        exitSource.resume()
+        // A client that exited before the source was watching gets no event.
+        if waitpid(pid, nil, WNOHANG) == pid { exited = true; exitSource.cancel() }
+    }
+
+    var isRunning: Bool { !exited }
+
+    /// Closing the master hangs the client up; the exit source then reaps it.
+    func stop() { reader.cancel() }
+
+    private func reap() {
+        exitSource.cancel()
+        guard !exited else { return }
+        exited = true
+        _ = waitpid(pid, nil, 0)
     }
 }

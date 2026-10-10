@@ -1,4 +1,5 @@
 import SwiftUI
+import MuxifyCore
 
 /// App-wide menus act on the focused App Window, never on the last workspace
 /// to start a terminal or reconnect.
@@ -14,16 +15,24 @@ import SwiftUI
         return store.isRemote && !store.isConnected
     }
 
+    /// Topics live on this Mac, so only a Local App Window offers them.
+    private var topicsAvailable: Bool {
+        guard let store else { return false }
+        return !store.isRemote && !store.changingTopic
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .sidebar) {
             // The key monitor acts before the menu; the shortcut is shown here.
-            Button(store?.sidebarVisible == true ? "Hide Sidebar" : "Show Sidebar") { store?.toggleSidebar() }
+            Button(store?.sidebarShown == true ? "Hide Sidebar" : "Show Sidebar") { store?.toggleSidebar() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleSidebar)?.shortcut)
                 .disabled(store == nil)
             Toggle("Show Sessions", isOn: Binding(get: { store?.sessionsVisible ?? true }, set: { store?.sessionsVisible = $0 }))
                 .disabled(store == nil)
             Toggle("Show Agents", isOn: Binding(get: { store?.agentsVisible ?? true }, set: { store?.agentsVisible = $0 }))
-                .disabled(store == nil)
+                .disabled(store.map { config.sidebar.agents[$0.shownSidebarMode] != nil } ?? true)
+            Toggle("Show Panes", isOn: Binding(get: { store?.panesVisible ?? false }, set: { store?.panesVisible = $0 }))
+                .disabled(store == nil || config.sidebar.panes != nil)
             Divider()
             // The Command Palettes; their keybindings act in the key monitor.
             ForEach(config.commandPalettes) { palette in
@@ -36,6 +45,25 @@ import SwiftUI
             Button("New Muxify Window") { windows.newWindow() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .newAppWindow)?.shortcut)
             Divider()
+            Button("New Topic…") { store?.presentNewTopic() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .newTopic)?.shortcut)
+                .disabled(!topicsAvailable)
+            Button("New Topic from Pane") { store?.newTopicFromPane(nil) }
+                .keyboardShortcut(keybinds.firstTrigger(for: .newTopicFromPane)?.shortcut)
+                .disabled(!topicsAvailable || store?.selectedWindow == nil)
+            Button("Move Session to Topic…") { store?.presentMoveSession() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .moveSessionToTopic)?.shortcut)
+                .disabled(!topicsAvailable || store?.topics.topicsEnabled != true || store?.selectedWindow == nil)
+            Button("Add a Project to Topic…") { store?.presentAddProject() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .addProjectToTopic)?.shortcut)
+                .disabled(!topicsAvailable || store?.activeTopicID == nil)
+            Button("Settle Topic…") { store?.presentSettleTopic() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .settleTopic)?.shortcut)
+                .disabled(!topicsAvailable || store?.activeTopicID == nil)
+            Button(store?.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store?.toggleZenOfActiveTopic() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .zenMode)?.shortcut)
+                .disabled(!topicsAvailable || store?.topics.topicsEnabled != true || store?.canToggleZenOfActiveTopic != true)
+            Divider()
             Button("New Tab") { store?.browserCommand(opensBrowser: true) { $0.newTab() } }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(store == nil)
@@ -47,8 +75,18 @@ import SwiftUI
         // Browser shortcuts act outside the terminal; in the terminal the
         // user's Ghostty/tmux bindings own these keys.
         CommandMenu("Browser") {
-            Button(store?.isBrowserVisible == true ? "Hide Browser" : "Show Browser") { store?.toggleBrowser() }
+            Button(store?.panelLayout.shows(.browser) == true ? "Hide Browser" : "Show Browser") { store?.toggle(.browser) }
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleBrowser)?.shortcut)
+                .disabled(store?.canToggle(.browser) != true)
+            Button(store?.panelLayout.shows(.terminal) == true ? "Hide Terminal" : "Show Terminal") { store?.toggle(.terminal) }
+                .keyboardShortcut(keybinds.firstTrigger(for: .toggleTerminal)?.shortcut)
+                .disabled(store?.canToggle(.terminal) != true)
+            Button(store?.panelLayout.focus == nil ? "Focus" : "End Focus") { store?.toggleFocus() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .toggleFocus)?.shortcut)
+                .disabled(store?.canToggleFocus != true)
+            focusToggle("Focus Terminal", .terminal, .focusTerminal)
+            focusToggle("Focus Browser", .browser, .focusBrowser)
+            Divider()
             Button("Open Location…") { store?.browserCommand(opensBrowser: true) { _ in store?.focusAddressBar() } }
                 .keyboardShortcut("l", modifiers: .command)
             Divider()
@@ -70,11 +108,11 @@ import SwiftUI
                 .disabled(store?.currentBrowser?.activeTab?.hasPage != true)
             Button("Show Developer Tools") { store?.browserCommand { $0.activeTab?.showDeveloperTools() } }
                 .keyboardShortcut("i", modifiers: [.command, .option])
-                .disabled(store?.isBrowserVisible != true || store?.currentBrowser?.activeTab?.hasPage != true)
+                .disabled(store?.panelLayout.shows(.browser) != true || store?.currentBrowser?.activeTab?.hasPage != true)
             Divider()
-            Button("Focus Terminal") { store?.focusTerminal() }
-                .keyboardShortcut(keybinds.firstTrigger(for: .focusTerminal)?.shortcut)
-                .disabled(store == nil)
+            Button("Move Keyboard to Terminal") { store?.moveKeyboardToTerminal() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .moveKeyboardToTerminal)?.shortcut)
+                .disabled(store?.panelLayout.shows(.terminal) != true)
         }
         CommandGroup(after: .appSettings) {
             Button("Open Config") {
@@ -86,5 +124,11 @@ import SwiftUI
                 .disabled(store?.isRemote == true)
             Button("Install Command Line Tool") { CommandLineToolInstaller.run() }
         }
+    }
+
+    private func focusToggle(_ title: String, _ side: PanelLayout.Side, _ action: ConfigAction) -> some View {
+        Toggle(title, isOn: Binding(get: { store?.panelLayout.focus == side }, set: { _ in store?.toggleFocus(side) }))
+            .keyboardShortcut(keybinds.firstTrigger(for: action)?.shortcut)
+            .disabled(store?.canFocus(side) != true)
     }
 }

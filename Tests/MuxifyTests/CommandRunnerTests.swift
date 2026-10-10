@@ -1,5 +1,6 @@
 import XCTest
 import Darwin
+@testable import MuxifyCore
 
 final class CommandRunnerTests: XCTestCase {
     func testDefaultEnvironmentInheritsProcessChanges() throws {

@@ -1,0 +1,112 @@
+"""Commands start Actions on the current item and retain Back to search."""
+
+import json
+import unittest
+
+from scripts.verify.sandbox import Sandbox, wait
+
+
+class PaletteCurrentCommands(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
+        cls.addClassCleanup(s.teardown)
+        cls.project = s.root/'projects/commands'
+        cls.project.mkdir(parents=True)
+        cls.topics = s.root/'state/muxify/topics'
+        cls.topics.mkdir(parents=True, exist_ok=True)
+        (s.root/'config/muxify/config.yaml').write_text('projects:\n  paths:\n    - path: ' + str(cls.project) + '\n')
+        cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', 'base', '-c', str(cls.project), '/bin/zsh -f')
+        s.tmux('set-option', '-g', 'detach-on-destroy', 'off')
+        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])
+
+    def setUp(self):
+        if self.s.has('palette-search'):
+            self.s.act('action', 'palette-search', 'Close')
+        self.select(self.base)
+
+    def select(self, window):
+        for client in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').splitlines():
+            if client.endswith(' 0'):
+                self.s.tmux('switch-client', '-c', client.split()[0], '-t', window)
+        self.s.wait_shown(window)
+
+    def search(self, title):
+        wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
+        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands field did not show')
+        self.s.act('focus', 'palette-search')
+        self.s.act('set', 'palette-search', title)
+        self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == title,
+                         'Commands did not keep the query')
+
+    def run_command(self, title):
+        self.search(title)
+        key = 'palette-row-command-' + title
+        self.s.wait_rows(lambda rs: self.s.has(key, rs), title + ' was missing from Commands')
+        self.s.act('press', key)
+
+    def breadcrumb(self, rs):
+        row = self.s.row('palette-breadcrumb', rs)
+        return row.get('accessibilityLabel', '') + row.get('accessibilityValue', '')
+
+    def back(self, title):
+        self.s.act('action', 'palette-search', 'Back')
+        self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == title
+                         and not self.s.has('palette-breadcrumb', rs), 'Back did not restore ' + title)
+        self.s.act('action', 'palette-search', 'Close')
+
+    def topic(self, name):
+        path = self.topics/(name + '.json')
+        path.write_text(json.dumps(dict(id=name, title=name, slug=name, home_project=str(self.project))))
+        self.addCleanup(path.unlink, missing_ok=True)
+        window = self.s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', name,
+                             '-c', str(self.project), '/bin/zsh -f')
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', name)
+        self.s.tmux('set-option', '-t', name, '@muxify_topic', name)
+        self.s.wait_rows(lambda rs: self.s.has('topic-' + name, rs), 'Topic did not appear')
+        self.select(window)
+        self.addCleanup(self.select, self.base)
+        return path
+
+    def test_move_scopes_keep_back_and_cancel_without_tmux_changes(self):
+        before = self.s.tmux('list-panes', '-a', '-F', '#{session_id} #{window_id} #{pane_id}')
+        for scope in ['Pane', 'Window', 'Session']:
+            title = 'Move ' + scope
+            self.run_command(title)
+            self.s.wait_rows(lambda rs: self.breadcrumb(rs).startswith(scope + ' '), 'Wrong scope for ' + title)
+            self.back(title)
+        self.assertEqual(self.s.tmux('list-panes', '-a', '-F', '#{session_id} #{window_id} #{pane_id}'), before)
+        self.assertEqual(list(self.topics.glob('*.json')), [])
+
+    def test_topic_steps_keep_back_and_cancel_without_writes(self):
+        path = self.topic('current-commands')
+        before = path.read_text()
+        for title, step in [('Add a Project', 'Add a Project'), ('Snooze Topic', 'Snooze'),
+                            ('Settle Topic', 'Settle'), ('Zen', 'Zen')]:
+            self.run_command(title)
+            self.s.wait_rows(lambda rs: step in self.breadcrumb(rs), title + ' did not open its step')
+            self.back(title)
+        after = json.loads(path.read_text())
+        original = json.loads(before)
+        for key in ['title', 'snoozed_until', 'settled_at']:
+            self.assertEqual(after.get(key), original.get(key), key + ' changed on Cancel')
+        self.assertFalse((self.s.root/'state/muxify/zen.json').exists())
+
+    def test_commands_omit_unavailable_topic_and_tab_actions(self):
+        for title in ['Add a Project', 'Snooze Topic', 'Settle Topic', 'Zen', 'Move Pane with Active Tab']:
+            self.search(title)
+            self.assertFalse(self.s.has('palette-row-command-' + title), title + ' had no target')
+            self.s.act('action', 'palette-search', 'Close')
+
+    def test_end_zen_is_available_in_no_topic_and_closes_commands(self):
+        self.topic('zen-current-command')
+        self.run_command('Zen')
+        self.s.wait_rows(lambda rs: self.s.has('palette-row-never', rs), 'Zen presets did not show')
+        self.s.act('press', 'palette-row-never')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Zen did not close')
+        self.select(self.base)
+        self.run_command('End Zen')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'End Zen did not close Commands')
+        self.search('End Zen')
+        self.assertFalse(self.s.has('palette-row-command-End Zen'), 'Zen remained active')
+        self.s.act('action', 'palette-search', 'Close')

@@ -1,8 +1,9 @@
 import Foundation
+import MuxifyCore
 
 /// The tmux execution seam. Every operation captures this immutable target;
 /// changing the active Environment never retargets work already in flight.
-final class TmuxConnection {
+final class TmuxConnection: @unchecked Sendable {
     private let id = UUID()
     let remote: RemoteSSH?
     private let runner = CommandRunner()

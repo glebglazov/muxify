@@ -1,3 +1,4 @@
+import MuxifyCore
 /// Selection history belongs to one App Window, not tmux's server-wide last
 /// Window option. A closed previous Window falls back to Sidebar order.
 struct WindowRecovery {

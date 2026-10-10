@@ -1,4 +1,5 @@
 import XCTest
+@testable import MuxifyCore
 
 final class RemoteSSHTests: XCTestCase {
     private func remote(in directory: TestDirectory) throws -> RemoteSSH {

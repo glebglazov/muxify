@@ -12,9 +12,13 @@ through Extensions installed into each Agent's own hook or plugin system.
 
 See [CONTEXT.md](../CONTEXT.md) for vocabulary and [ADRs](adr) for design decisions.
 
+The Topic records and plans, the Config and the tmux runner are in the
+`MuxifyCore` package in `Packages/MuxifyCore`. The app and the command line tool
+both link it, so both read and change Topics with the same code.
+
 ### Agent indicators
 
-The Sidebar and Command Palette use the same Agent indicators: separate gray
+The Command Palette's Agent indicators are separate gray
 square pixels on a three-by-three square perimeter, 10×10 pt overall, light
 up clockwise in discrete steps to mean working. The blocks are 3 pt on Retina
 displays and 2 pt on 1× displays, keeping a physical pixel between blocks.

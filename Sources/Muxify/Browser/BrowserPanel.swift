@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import MuxifyCore
 
 /// A Window's Browser: a tab strip over the active Tab's toolbar and page.
 struct BrowserPanel: View {
@@ -79,6 +80,7 @@ private struct TabItem: View {
             }
             .frame(width: 14)
             Text(tab.displayTitle)
+                    .accessibilityIdentifier("browser-tab-title-" + tab.id.uuidString)
                 .font(.system(size: 12))
                 .foregroundStyle(isActive ? .primary : .secondary)
                 .lineLimit(1)
@@ -139,12 +141,12 @@ private struct TabContent: View {
         .onAppear {
             address = tab.urlString
             scanPorts()
-            consumeFocusRequest()
+            consumeKeyboardRequest()
         }
         .onChange(of: tab.urlString) { _, newValue in
             if !addressFocused { address = newValue }
         }
-        .onChange(of: browser.wantsAddressFocus) { _, _ in consumeFocusRequest() }
+        .onChange(of: browser.keyboardRequest) { _, _ in consumeKeyboardRequest() }
     }
 
     // MARK: - Toolbar
@@ -153,8 +155,10 @@ private struct TabContent: View {
         HStack(spacing: 4) {
             ToolbarIconButton(systemName: "chevron.left", help: "Back", action: tab.goBack)
                 .disabled(!tab.canGoBack)
+                .accessibilityIdentifier("browser-back")
             ToolbarIconButton(systemName: "chevron.right", help: "Forward", action: tab.goForward)
                 .disabled(!tab.canGoForward)
+                .accessibilityIdentifier("browser-forward")
             ToolbarIconButton(
                 systemName: tab.isLoading ? "xmark" : "arrow.clockwise",
                 help: tab.isLoading ? "Stop" : "Reload",
@@ -171,7 +175,8 @@ private struct TabContent: View {
                 Button("Show Developer Tools", action: tab.showDeveloperTools).disabled(!tab.hasPage)
                 Divider()
                 Button("Close Tab") { browser.close(tab) }
-                Button("Hide Browser") { browser.setOpen(false) }
+                Button("Hide Browser") { browser.toggle(.browser) }
+                    .disabled(!browser.layout.canToggle(.browser))
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .medium))
@@ -198,6 +203,8 @@ private struct TabContent: View {
                 .font(.system(size: 13))
                 .focused($addressFocused)
                 .onSubmit(submit)
+                .accessibilityIdentifier("browser-address")
+                .accessibilityAction(named: "Submit", submit)
                 .onExitCommand {
                     address = tab.urlString
                     focusPage()
@@ -279,12 +286,15 @@ private struct TabContent: View {
         focusPage()
     }
 
-    /// Only explicit requests (opening the panel, ⌘L) take focus; merely
-    /// switching tmux windows keeps the keyboard in the terminal.
-    private func consumeFocusRequest() {
-        guard browser.wantsAddressFocus else { return }
-        browser.wantsAddressFocus = false
-        DispatchQueue.main.async { addressFocused = true }
+    /// Only explicit requests (opening the panel, ⌘L, Focus) take the
+    /// keyboard; merely switching tmux windows keeps it in the Terminal.
+    private func consumeKeyboardRequest() {
+        guard let request = browser.keyboardRequest else { return }
+        browser.keyboardRequest = nil
+        switch request {
+        case .addressBar: DispatchQueue.main.async { addressFocused = true }
+        case .page: focusPage()
+        }
     }
 
     private func focusPage() {

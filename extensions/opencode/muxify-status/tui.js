@@ -1,7 +1,7 @@
 // Muxify Extension for OpenCode 2.
 //
 // Reports this Agent and the Status of the session open in this TUI on its own
-// tmux Pane through the pane options @muxify_agent and @muxify_agent_status
+// tmux Pane through the pane options @muxify_agent, @muxify_agent_status and @muxify_agent_conversation
 // (docs/adr/0004). OpenCode 2 loads it as a TUI plugin from
 // ~/.config/opencode/plugins/muxify-status/tui.js.
 //
@@ -12,8 +12,8 @@
 // tree makes it blocked until it is answered.
 //
 // Known gap: the open session is looked up when an event arrives, so after
-// switching to another session in this TUI the Status changes only at that
-// session's next event.
+// switching to another session in this TUI the Status and conversation id change only at
+// that session's next event.
 
 import { execFileSync } from "node:child_process";
 
@@ -38,6 +38,7 @@ function setup(api) {
 	let owner; // root of the open session when the last counted event arrived
 	let lifecycle; // working | done | failed: the owner's last execution
 	let blockers = new Set(); // pending "permission:<id>" and "form:<id>"
+	let publishedOwner;
 	let published; // the Status last written; undefined = none yet
 	// Parents announced by session.created, in case an event arrives before
 	// OpenCode's session cache knows the new (subagent) session.
@@ -66,12 +67,16 @@ function setup(api) {
 	// in the same tmux call; with no Status known, the Status is unset.
 	function publish() {
 		const status = blockers.size > 0 ? "blocked" : lifecycle;
-		if (status === published) return;
+		if (status === published && owner === publishedOwner) return;
+		publishedOwner = owner;
+		const conversation = owner === undefined
+			? ["set", "-p", "-u", "-t", pane, "@muxify_agent_conversation"]
+			: ["set", "-p", "-t", pane, "@muxify_agent_conversation", owner];
 		published = status;
 		if (status === undefined) {
-			tmux([...nameAgent, ";", "set", "-p", "-u", "-t", pane, "@muxify_agent_status"]);
+			tmux([...nameAgent, ";", ...conversation, ";", "set", "-p", "-u", "-t", pane, "@muxify_agent_status"]);
 		} else {
-			tmux([...nameAgent, ";", "set", "-p", "-t", pane, "@muxify_agent_status", status]);
+			tmux([...nameAgent, ";", ...conversation, ";", "set", "-p", "-t", pane, "@muxify_agent_status", status]);
 		}
 	}
 
@@ -140,7 +145,7 @@ function setup(api) {
 		} catch {}
 	}
 
-	// Cleanup and process exit: unset both options, once.
+	// Cleanup and process exit: unset all three options, once.
 	function stop() {
 		if (disposed) return;
 		disposed = true;
@@ -150,12 +155,15 @@ function setup(api) {
 		} catch {}
 		tmux([
 			"set", "-p", "-u", "-t", pane, "@muxify_agent", ";",
-			"set", "-p", "-u", "-t", pane, "@muxify_agent_status",
+			"set", "-p", "-u", "-t", pane, "@muxify_agent_status", ";",
+			"set", "-p", "-u", "-t", pane, "@muxify_agent_conversation",
 		]);
 	}
 
 	// Name the Agent right away; no Status until the first execution.
-	tmux(nameAgent);
+	owner = openRoot();
+	if (owner === undefined) tmux(nameAgent);
+	else publish();
 	const unsubscribe = api.data.listen(listener);
 	process.on("exit", stop);
 	return stop;

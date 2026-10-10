@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import MuxifyCore
 
 /// An NSView that hosts one libghostty surface. libghostty attaches its own
 /// Metal layer to this view and runs the PTY; we only forward input, size,

@@ -87,7 +87,7 @@ final class AppWindows {
     func handle(_ url: URL) {
         guard !isQuitting, url.scheme == "muxify" else { return }
         if url.host == "toggle-browser" { focusedStore?.handle(url); return }
-        guard ["select", "open"].contains(url.host ?? ""), openWindow != nil else { return }
+        guard ["select", "open", "topic"].contains(url.host ?? ""), openWindow != nil else { return }
         let request = catalog.openEnvironment(named: nil)
         store(for: request).handle(url)
         selectEnvironment(named: nil)

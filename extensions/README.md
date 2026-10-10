@@ -13,26 +13,25 @@ doing. There is one folder per Agent:
 
 ## What an Extension does
 
-Each Extension writes two tmux pane options on the Agent's own Pane
+Each Extension writes three tmux pane options on the Agent's own Pane
 ([ADR 0004](../docs/adr/0004-agents-report-status-through-pane-options.md)):
 
 | Option                | Values                                  |
 | --------------------- | --------------------------------------- |
 | `@muxify_agent`       | `claude`, `codex`, `opencode` or `pi`   |
+| `@muxify_agent_conversation` | The Agent's conversation id |
 | `@muxify_agent_status`| `working`, `blocked`, `done` or `failed`; unset = no Status yet |
 
 - Every write targets the Agent's own Pane: `tmux set -p -t "$TMUX_PANE" …`.
-- A Status write sets both options in one tmux call
-  (`tmux set -p -t P @muxify_agent claude \; set -p -t P @muxify_agent_status working`),
-  so an Extension installed in the middle of a conversation still names its
-  Agent.
-- When the Agent exits normally, both options are unset (`set -p -u`).
+- Status reporting also names the Agent and its conversation, so an Extension
+  installed during a conversation can report it.
+- When the Agent exits normally, all three options are unset (`set -p -u`).
 - Outside tmux (`TMUX_PANE` empty) an Extension does nothing, and it never
   fails the Agent's hook: tmux errors are ignored.
 
-Muxify reads both options in its once-a-second tmux poll and lists the Agent in
+Muxify reads these options in its once-a-second tmux poll and lists the Agent in
 the sidebar's Agents section. An Agent whose Pane is back at a plain shell is
-hidden, which covers options left behind by a crash. Muxify itself sets a third
+hidden, which covers options left behind by a crash. Muxify itself sets a fourth
 option, `@muxify_agent_unread`, when the Agent reaches done, failed or blocked
 while you aren't looking at its Window (see Unread in
 [CONTEXT.md](../CONTEXT.md)); Extensions never touch it.
@@ -119,13 +118,13 @@ nothing and always exits 0.
 
 | Hook event                                        | Status                          |
 | ------------------------------------------------- | ------------------------------- |
-| `SessionStart`                                    | sets `@muxify_agent` only       |
+| `SessionStart`                                    | sets the Agent and conversation id       |
 | `UserPromptSubmit`, `PostToolUse`, `ElicitationResult` | working                    |
 | `PermissionRequest`, `Elicitation`                | blocked                         |
 | `PreToolUse` (`AskUserQuestion`, `ExitPlanMode`)  | blocked                         |
 | `Stop`                                            | done                            |
 | `StopFailure`                                     | failed                          |
-| `SessionEnd`                                      | unsets both options             |
+| `SessionEnd`                                      | unsets all three options             |
 | anything else                                     | nothing                         |
 
 Known gap: Claude Code fires no hook when you press Esc to interrupt a turn or
@@ -143,14 +142,14 @@ never fire for subagents), prints nothing and always exits 0.
 
 | Hook event                                  | Status                          |
 | ------------------------------------------- | ------------------------------- |
-| `SessionStart` (at the first prompt)        | sets `@muxify_agent` only       |
+| `SessionStart` (at the first prompt)        | sets the Agent and conversation id       |
 | `UserPromptSubmit`, `PostToolUse`           | working                         |
 | `PreToolUse`, `tool_name` `request_user_input` | blocked                      |
 | `PreToolUse`, any other tool                | working                         |
 | `PermissionRequest`                         | blocked                         |
 | `Stop`                                      | done                            |
 | `Interrupt` (Esc)                           | done                            |
-| `SessionEnd`                                | unsets both options             |
+| `SessionEnd`                                | unsets all three options             |
 | anything else                               | nothing                         |
 
 **Launch Codex with `--no-daemon`.** By default Codex runs conversations in a
@@ -207,14 +206,14 @@ nothing.
 
 | Event                                                   | Status                          |
 | ------------------------------------------------------- | ------------------------------- |
-| plugin setup (TUI start)                                | sets `@muxify_agent` only       |
+| plugin setup (TUI start)                                | sets the Agent and conversation id       |
 | `session.execution.started` (root session)              | working                         |
 | `session.execution.succeeded` (root session)            | done                            |
 | `session.execution.interrupted` (root session, e.g. Esc) | done                            |
 | `session.execution.failed` (root session)               | failed                          |
 | `permission.asked`, `form.created` (any session in the tree) | blocked until answered     |
 | `permission.replied`, `form.replied`, `form.cancelled`  | back to the last execution Status |
-| cleanup (plugin unloaded) or process exit               | unsets both options             |
+| cleanup (plugin unloaded) or process exit               | unsets all three options             |
 
 While any permission or form in the tree is pending the Status is blocked;
 once none is, it is the root session's last execution Status (unset if no
@@ -240,13 +239,13 @@ it too.
 
 | Pi event                                   | Status                                    |
 | ------------------------------------------ | ----------------------------------------- |
-| `session_start`                            | sets `@muxify_agent` only                 |
+| `session_start`                            | sets the Agent and conversation id                 |
 | `agent_start`                              | working                                   |
 | `ui_prompt_start` (a dialog opens)         | blocked                                   |
 | `ui_prompt_end` (the dialog closes)        | back to the run's Status (unset if no run yet) |
 | `agent_end`                                | remembers the last assistant message's `stopReason` |
 | `agent_settled`, when `ctx.isIdle()`       | failed if that `stopReason` is `error`, otherwise done (Esc, `aborted`, counts as done) |
-| `session_shutdown` with reason `quit`      | unsets both options                       |
+| `session_shutdown` with reason `quit`      | unsets all three options                       |
 | anything else                              | nothing                                   |
 
 `agent_start` can fire more than once for one prompt (retries, compaction,

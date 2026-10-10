@@ -1,6 +1,7 @@
 import AppKit
 import WebKit
 import XCTest
+@testable import MuxifyCore
 
 final class BrowserDeveloperToolsTests: XCTestCase {
     func testDeveloperExtrasSetterReceivesABoolean() {
@@ -40,7 +41,7 @@ final class BrowserDeveloperToolsTests: XCTestCase {
     @MainActor func testTabsEnableInspectionAndPreserveTheirWebViewWhenSwitching() throws {
         _ = NSApplication.shared
         let browser = Browser(windowID: "@1", stored: StoredBrowser(
-            tabURLs: ["about:blank", "about:blank"], activeTab: 0, isOpen: true))
+            tabURLs: ["about:blank", "about:blank"], activeTab: 0, layout: PanelLayout(shown: .both)))
         defer { browser.tearDown() }
         let first = try XCTUnwrap(browser.activeTab)
         let webView = first.webView
