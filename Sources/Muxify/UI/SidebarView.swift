@@ -254,13 +254,13 @@ private struct TopicChildren: View {
                 ForEach(windows) { window in
                     HStack(spacing: 6) {
                         Image(systemName: "clock.arrow.circlepath").font(.system(size: 11)).frame(width: 14)
-                        Text(window.name).font(.system(size: 12)).lineLimit(1)
+                        Text(window.name).font(.system(size: 12)).lineLimit(1).hoverLabelTitle()
                         Spacer(minLength: 4)
                     }
                     .foregroundStyle(.secondary)
                     .padding(.leading, 24).padding(.trailing, 6).padding(.vertical, 4)
-                    .help(window.directory)
                     .accessibilityElement(children: .combine)
+                    .hoverLabel(title: window.name, titleFont: .systemFont(ofSize: 12), detail: Paths.tildify(window.directory))
                     .accessibilityIdentifier("remembered-window-\(window.id)")
                 }
             }
@@ -918,6 +918,7 @@ struct WindowRow: View {
                     .font(typography.font(for: .title))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .hoverLabelTitle()
                 if let summary = content?.text.summary, !summary.isEmpty {
                     Text(summary)
                         .font(typography.font(for: .location))
@@ -976,7 +977,8 @@ struct WindowRow: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
-        .help("\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
+        .hoverLabel(title: window.displayTitle, titleFont: .systemFont(ofSize: 12),
+                    detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
     }
 
     private func customPart(_ parts: [SidebarPart], side: String) -> some View {
@@ -1040,7 +1042,7 @@ private struct PaneRow: View {
                     .font(.system(size: 10)).frame(width: 14)
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(formatted.title).font(.system(size: 12)).lineLimit(1).truncationMode(.tail)
+                    Text(formatted.title).font(.system(size: 12)).lineLimit(1).truncationMode(.tail).hoverLabelTitle()
                     if !formatted.summary.isEmpty {
                         Text(formatted.summary).font(.system(size: 11)).lineLimit(1).foregroundStyle(.secondary)
                     }
@@ -1060,7 +1062,8 @@ private struct PaneRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(row.pane.path.isEmpty ? row.pane.label : Paths.tildify(row.pane.path))
+        .hoverLabel(title: row.pane.label, titleFont: .systemFont(ofSize: 12),
+                    detail: row.pane.path.isEmpty ? row.pane.label : Paths.tildify(row.pane.path))
         .accessibilityIdentifier("pane-" + row.pane.id)
         .accessibilityValue([row.pane.isActive ? "active" : nil, row.agent?.status?.rawValue].compactMap { $0 }.joined(separator: ", "))
     }
@@ -1125,6 +1128,9 @@ struct AgentRow: View {
     let text: SidebarFormats.Text
     let notification: AgentStatus?
 
+    private var detail: String {
+        "\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")\(agent.unread ? ", unread" : "")"
+    }
     @Environment(\.sidebarTypography) private var typography
 
     @State private var hovering = false
@@ -1140,6 +1146,7 @@ struct AgentRow: View {
                     .font(typography.font(for: .title))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .hoverLabelTitle()
                 if !text.summary.isEmpty {
                     Text(text.summary)
                         .font(typography.font(for: .location))
@@ -1162,7 +1169,8 @@ struct AgentRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
-        .help("\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")\(agent.unread ? ", unread" : "")")
+        .accessibilityHint(detail)
+        .hoverLabel(title: text.title, titleFont: .systemFont(ofSize: 12), detail: detail)
     }
 }
 
