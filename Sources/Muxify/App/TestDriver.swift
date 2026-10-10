@@ -4,7 +4,7 @@ import AppKit
 /// Lets scripts/verify drive a Debug build through its accessibility tree.
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
-/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, snapshot, each
+/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, each
 /// with the option `reveal` that scrolls the target into view first. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
@@ -259,6 +259,7 @@ enum TestDriver {
         let text = command["text"] as? String ?? ""
         var pressed = false
         if name == "snapshot" { return ["rows": [], "pressed": snapshot(of: target, to: text)] }
+        if name == "hover" { return ["rows": [], "pressed": hover(target)] }
         let elements = dump()
         for element in elements {
             let object = element.object
@@ -332,7 +333,7 @@ enum TestDriver {
         return true
     }
 
-    /// Draws the App Window's layers, and those of its sheet, into a PNG at `path`, cut to the element with the identifier `target` when
+    /// Draws the App Window's layers, and those of its child windows and sheet, into a PNG at `path`, cut to the element with the identifier `target` when
     /// one is named. It goes through no window server capture, so it needs no screen recording permission and
     /// works while the window is behind other apps.
     private static func snapshot(of target: String, to path: String) -> Bool {
@@ -346,8 +347,8 @@ enum TestDriver {
               let context = NSGraphicsContext(bitmapImageRep: bitmap)?.cgContext else { return false }
         context.scaleBy(x: scale, y: scale)
         layer.render(in: context)
-        // A sheet draws over the App Window where it sits on screen.
-        for child in [window.attachedSheet].compactMap({ $0 }) where child.isVisible {
+        // Child windows, such as a hover label, and a sheet draw over the App Window where they sit on screen.
+        for child in (window.childWindows ?? []) + [window.attachedSheet].compactMap({ $0 }) where child.isVisible {
             guard let childLayer = (child.contentView?.superview ?? child.contentView)?.layer else { continue }
             context.saveGState()
             context.translateBy(x: child.frame.minX - window.frame.minX, y: child.frame.minY - window.frame.minY)
@@ -365,6 +366,32 @@ enum TestDriver {
         }
         guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return false }
         return (try? png.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
+    /// Puts the pointer on the element for the views under it, without moving the real pointer: each tracking area
+    /// there gets a synthesized entered and moved event, as the window server would send. SwiftUI's `onHover` follows.
+    private static func hover(_ target: String) -> Bool {
+        guard let screen = (dump().first { $0.row["accessibilityIdentifier"] == target }?.object
+                                .value(forKey: "accessibilityFrame") as? NSValue)?.rectValue,
+              let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.contains(NSPoint(x: screen.midX, y: screen.midY)) })
+        else { return false }
+        let point = window.convertPoint(fromScreen: NSPoint(x: screen.midX, y: screen.midY))
+        guard let event = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) else { return false }
+        var view = window.contentView?.hitTest(window.contentView?.convert(point, from: nil) ?? point)
+        while let current = view {
+            let local = current.convert(point, from: nil)
+            for area in current.trackingAreas where area.rect.contains(local) || area.options.contains(.inVisibleRect) {
+                guard let owner = area.owner as? NSResponder,
+                      let enter = NSEvent.enterExitEvent(with: .mouseEntered, location: point, modifierFlags: [], timestamp: event.timestamp,
+                                                         windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                                         trackingNumber: unsafeBitCast(area, to: Int.self), userData: nil) else { continue }
+                owner.mouseEntered(with: enter)
+                if area.options.contains(.mouseMoved) { owner.mouseMoved(with: event) }
+            }
+            view = current.superview
+        }
+        return true
     }
 
     private static func menuItem(titled title: String, in menu: NSMenu?) -> NSMenuItem? {
