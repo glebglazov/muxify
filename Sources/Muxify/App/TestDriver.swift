@@ -4,7 +4,7 @@ import AppKit
 /// Lets scripts/verify drive a Debug build through its accessibility tree.
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
-/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, each
+/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, snapshot, each
 /// with the option `reveal` that scrolls the target into view first. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
@@ -207,8 +207,11 @@ enum TestDriver {
         func step() -> [String: Any]? {
             ticks += 1
             if let element = TestDriver.dump().first(where: { $0.row["accessibilityIdentifier"] == target })?.object {
-                guard !aligned, let frame = (element as? NSAccessibilityProtocol)?.accessibilityFrame(),
-                      let scrollView = scrollViews.first(where: { screenFrame(of: $0)?.intersects(frame) == true }),
+                // A row of a tall lazy item, such as an open card, is in the tree while it is still out of view,
+                // so the scroll view that holds it is the one in the same column when none shows it yet.
+                guard !aligned, let frame = (element.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue,
+                      let scrollView = scrollViews.first(where: { screenFrame(of: $0)?.intersects(frame) == true })
+                          ?? scrollViews.first(where: { screenFrame(of: $0).map { $0.minX...$0.maxX ~= frame.midX } == true }),
                       let clip = screenFrame(of: scrollView) else { return TestDriver.run(command) }
                 aligned = true
                 scroll(scrollView, by: clip.maxY - frame.maxY)
@@ -255,6 +258,7 @@ enum TestDriver {
         let target = command["target"] as? String ?? ""
         let text = command["text"] as? String ?? ""
         var pressed = false
+        if name == "snapshot" { return ["rows": [], "pressed": snapshot(of: target, to: text)] }
         let elements = dump()
         for element in elements {
             let object = element.object
@@ -326,6 +330,41 @@ enum TestDriver {
         guard object.responds(to: legacyPress) else { return false }
         _ = object.perform(legacyPress, with: NSAccessibility.Action.press.rawValue)
         return true
+    }
+
+    /// Draws the App Window's layers, and those of its sheet, into a PNG at `path`, cut to the element with the identifier `target` when
+    /// one is named. It goes through no window server capture, so it needs no screen recording permission and
+    /// works while the window is behind other apps.
+    private static func snapshot(of target: String, to path: String) -> Bool {
+        guard !path.isEmpty, let window = NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.titled) }),
+              let view = window.contentView?.superview ?? window.contentView, let layer = view.layer else { return false }
+        let scale = window.backingScaleFactor
+        let size = view.bounds.size
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: bitmap)?.cgContext else { return false }
+        context.scaleBy(x: scale, y: scale)
+        layer.render(in: context)
+        // A sheet draws over the App Window where it sits on screen.
+        for child in [window.attachedSheet].compactMap({ $0 }) where child.isVisible {
+            guard let childLayer = (child.contentView?.superview ?? child.contentView)?.layer else { continue }
+            context.saveGState()
+            context.translateBy(x: child.frame.minX - window.frame.minX, y: child.frame.minY - window.frame.minY)
+            childLayer.render(in: context)
+            context.restoreGState()
+        }
+        guard var image = bitmap.cgImage else { return false }
+        if !target.isEmpty {
+            guard let screen = (dump().first { $0.row["accessibilityIdentifier"] == target }?.object
+                                    .value(forKey: "accessibilityFrame") as? NSValue)?.rectValue else { return false }
+            let frame = window.convertFromScreen(screen)
+            let crop = CGRect(x: frame.minX * scale, y: (size.height - frame.maxY) * scale, width: frame.width * scale, height: frame.height * scale)
+            guard let cropped = image.cropping(to: crop) else { return false }
+            image = cropped
+        }
+        guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return false }
+        return (try? png.write(to: URL(fileURLWithPath: path))) != nil
     }
 
     private static func menuItem(titled title: String, in menu: NSMenu?) -> NSMenuItem? {
