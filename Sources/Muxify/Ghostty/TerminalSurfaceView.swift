@@ -37,12 +37,26 @@ final class TerminalSurfaceView: NSView {
         config.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 2)
         config.context = GHOSTTY_SURFACE_CONTEXT_WINDOW
 
+        // libghostty otherwise appends Contents/MacOS, where a case-insensitive
+        // lookup of `muxify` starts the GUI instead of the bundled CLI.
+        let environment = ["PATH", "GHOSTTY_BIN_DIR"].compactMap { key -> (String, String)? in
+            ProcessInfo.processInfo.environment[key].map { (key, $0) }
+        }
+        let strings = environment.flatMap { [strdup($0.0), strdup($0.1)] }
+        defer { strings.forEach { free($0) } }
+        var variables = environment.indices.map {
+            ghostty_env_var_s(key: UnsafePointer(strings[$0 * 2]), value: UnsafePointer(strings[$0 * 2 + 1]))
+        }
         let cwd = workingDirectory ?? NSHomeDirectory()
         surface = command.withCString { commandPtr in
             cwd.withCString { cwdPtr in
                 config.command = commandPtr
                 config.working_directory = cwdPtr
-                return ghostty_surface_new(app, &config)
+                return variables.withUnsafeMutableBufferPointer { buffer in
+                    config.env_vars = buffer.baseAddress
+                    config.env_var_count = buffer.count
+                    return ghostty_surface_new(app, &config)
+                }
             }
         }
         guard surface != nil else { return nil }

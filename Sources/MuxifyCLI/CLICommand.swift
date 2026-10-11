@@ -3,6 +3,7 @@ import MuxifyCore
 
 enum CLICommand: Equatable {
     case help
+    case browserAvailable(pane: String?)
     case browserOpen(window: String, urls: [String])
     case sessionOpen(name: String)
     case extensionsInstall
@@ -14,6 +15,7 @@ enum CLICommand: Equatable {
 
     static let usage = """
     usage: muxify browser open [--window <id>] <url>...
+           muxify browser available
            muxify session open <session name>
            muxify extensions install
            muxify simulator serve [--port <port>] [--origin <https://host>]
@@ -30,6 +32,8 @@ enum CLICommand: Equatable {
            muxify project list [--json]
            muxify agent list [--topic <id|label>] [--status <status>] [--unread] [--json]
 
+    browser available  Prints local, remote or no for this Pane's newest Client.
+                       Exits 0 for local or remote, and 1 for no.
     browser open   Opens each URL as a Tab in this tmux Window's Browser.
                      --window <id>   open in another Window instead, e.g. --window @12
     session open   Shows the tmux Session in Muxify. The name may contain spaces,
@@ -108,6 +112,10 @@ enum CLICommand: Equatable {
         case "browser":
             switch args.popFirst() {
             case "-h", "--help": self = .help
+            case "available":
+                if args.first == "-h" || args.first == "--help" { self = .help; return }
+                guard args.isEmpty else { throw CLIError("browser available takes no arguments", exitCode: 2) }
+                self = .browserAvailable(pane: environment["TMUX_PANE"])
             case "open": self = try Self.browser(arguments: args, environment: environment)
             default: throw CLIError(Self.usage, exitCode: 2)
             }
@@ -168,9 +176,14 @@ enum CLICommand: Equatable {
         return .browserOpen(window: target, urls: Array(args))
     }
 
+    @discardableResult
     func execute(using runner: any CLICommandRunning = CLIProcessRunner(),
-                 executableURL: URL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])) async throws {
+                 executableURL: URL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])) async throws -> Int32 {
         switch self {
+        case .browserAvailable(let pane):
+            let result = BrowserAvailability.check(pane: pane, using: runner)
+            print(result.rawValue)
+            return result.exitCode
         case .help: print(Self.usage)
         case .simulator(let arguments): try await SimulatorCommand.serve(arguments: arguments)
         case .extensionsInstall:
@@ -200,6 +213,7 @@ enum CLICommand: Equatable {
         case .agent(let invocation): try await invocation.run()
         case .window(let invocation): try await invocation.run()
         }
+        return 0
     }
 
     private func open(_ url: String, using runner: any CLICommandRunning) throws {

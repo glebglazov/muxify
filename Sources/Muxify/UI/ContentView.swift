@@ -74,6 +74,7 @@ struct ContentView: View {
         .overlay(alignment: .top) {
             HeaderBar(store: store, keybinds: store.config.keybinds, height: headerHeight)
         }
+        .modifier(ClientVerification(store: store))
         .ignoresSafeArea()
         // Names the window for the Window menu and Mission Control.
         .navigationTitle(store.isRemote

@@ -278,6 +278,69 @@ Configurable [Keybindings](keybindings.md) work throughout the app, including in
 Browser pages. The guide lists all actions, defaults, built-in shortcuts and a
 complete Config example.
 
+### Check whether a program runs from Muxify
+
+When the Muxify CLI is installed, run `muxify browser available` when the program starts.
+It prints `local`, `remote` or `no`. It exits 0 for `local` or `remote`, and 1 for `no`.
+The command uses the same Client check as the script below and does not start Muxify.
+
+On a machine without the CLI, run this `/bin/sh` check when the program starts. It prints `local`, `remote`,
+or `no`. It needs only `tmux` and shell builtins. It checks the most recently
+active non-control Client of the Pane's own Session.
+
+```sh
+muxify_environment() (
+    [ -n "${TMUX_PANE:-}" ] || { printf '%s\n' no; return; }
+    clients=$(tmux list-clients -t "$TMUX_PANE" -F '#{client_activity} #{client_control_mode} #{client_pid}' 2>/dev/null) || {
+        printf '%s\n' no; return
+    }
+    newest=-1
+    client=
+    while read -r activity control pid; do
+        [ "$control" = 0 ] || continue
+        if [ "$activity" -gt "$newest" ]; then
+            newest=$activity
+            client=$pid
+        fi
+    done <<EOF
+$clients
+EOF
+    [ -n "$client" ] || { printf '%s\n' no; return; }
+    options=$(tmux show-options -s 2>/dev/null) || { printf '%s\n' no; return; }
+    separator='␟'
+    while read -r option rest; do
+        case "$option" in
+            @muxify_client_*)
+                marker=$(tmux show-options -sqv "$option" 2>/dev/null) || continue
+                [ "${marker%%"$separator"*}" = "$client" ] || continue
+                kind=${marker##*"$separator"}
+                case "$kind" in
+                    local|remote) printf '%s\n' "$kind"; return ;;
+                esac
+                ;;
+        esac
+    done <<EOF
+$options
+EOF
+    printf '%s\n' no
+)
+muxify_environment
+```
+
+Each Muxify Client has a server option named `@muxify_client_<nonce>`. Its value
+has five `␟`-separated fields: Client PID, TTY, home directory, host name, and
+`local` or `remote`. Muxify removes its option when the Client detaches. A stale
+option from a crash cannot match a Client that is no longer connected.
+
+The result describes the time of the check. Input through another Client can
+change it. tmux records Client activity in whole seconds. If Clients have the
+same activity time, the check uses the first one in `list-clients`.
+
+For `local`, a program can use `muxify browser open <url>`. For `remote`, it can
+set `tmux set-option -w -t "$TMUX_PANE" @muxify_open <url>`. A page served on a
+remote machine needs an address that the Mac can reach, such as its Tailscale
+address. For `no`, use the program's normal browser behavior.
+
 ## Sidebar
 
 `sidebar.topics` and `sidebar.sessions` enable the two Sidebar modes. Both default to `true`.

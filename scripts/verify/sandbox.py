@@ -195,6 +195,12 @@ class Sandbox:
     def tmux_ok(self, *args):
         return subprocess.run(self._tmux_command(args), env=self.env, capture_output=True, text=True)
 
+    def tmux_client(self, session, terminal):
+        """Starts a plain Client on a PTY owned by the check."""
+        return subprocess.Popen(self._tmux_command(['attach-session', '-t', session]),
+                                env=dict(self.env, TERM='xterm-256color'),
+                                stdin=terminal, stdout=terminal, stderr=terminal)
+
     # app
 
     def launch(self, args=(), app_source=DEBUG_APP, timeout=30):
