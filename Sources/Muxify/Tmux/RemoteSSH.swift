@@ -157,7 +157,7 @@ final class RemoteSSH {
         // A child owns the tmux client PID recorded in the marker. Its parent
         // remains on the same foreground SSH/PTY to report inventory on exit.
         let attachment = """
-        marker="$$\(Tmux.separator)$1\(Tmux.separator)${HOME}\(Tmux.separator)$(uname -n)"
+        marker="$$\(Tmux.separator)$1\(Tmux.separator)${HOME}\(Tmux.separator)$(uname -n)\(Tmux.separator)remote"
         tmux -u set-option -sq \(Tmux.shellQuote(markerOption)) "$marker" || exit $?
         if [ -n "$2" ]; then
             exec tmux -u -T RGB attach-session -t "$2"
@@ -204,6 +204,7 @@ final class RemoteSSH {
         # Advertise it for this client only, without rewriting server options.
         /bin/sh -c \(Tmux.shellQuote(attachment)) muxify "$client_tty" "$target"
         status=$?
+        tmux -u set-option -su \(Tmux.shellQuote(markerOption)) 2>/dev/null
         \(reportSnapshot)
         exit "$status"
         """

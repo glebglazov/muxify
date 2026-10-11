@@ -13,13 +13,21 @@ final class TmuxServerTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         other = TmuxServer(socketPath: directory.appendingPathComponent("other").path, configPath: "/dev/null")
         for name in ["TMUX", "TMUX_PANE", "TMUX_TMPDIR"] { saved[name] = ProcessInfo.processInfo.environment[name] }
+        unsetenv("TMUX")
+        unsetenv("TMUX_PANE")
+        setenv("TMUX_TMPDIR", directory.path, 1)
     }
 
     override func tearDownWithError() throws {
+        if let socket = try? other?.run(["display-message", "-p", "#{socket_path}"]) {
+            XCTAssertEqual(socket.trimmingCharacters(in: .whitespacesAndNewlines), directory.appendingPathComponent("other").path)
+            if socket.trimmingCharacters(in: .whitespacesAndNewlines) == directory.appendingPathComponent("other").path {
+                _ = try? other?.run(["kill-server"])
+            }
+        }
         for (name, value) in saved {
             if let value { setenv(name, value, 1) } else { unsetenv(name) }
         }
-        _ = try? other?.run(["kill-server"])
         if let directory { try? FileManager.default.removeItem(at: directory) }
     }
 

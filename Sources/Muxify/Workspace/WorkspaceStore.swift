@@ -1193,6 +1193,9 @@ final class WorkspaceStore {
         if panes != snapshot.panes { panes = snapshot.panes }
         if serverRunning != snapshot.serverRunning { serverRunning = snapshot.serverRunning }
         let ownTTY = clientTTY ?? (isRemote ? nil : surface?.ttyName)
+        if !isRemote, surface?.processExited == false {
+            connection?.updateLocalClient(snapshot.clients.first { $0.tty == ownTTY && !$0.isControl })
+        }
         if recoveryPending, let ownTTY,
            snapshot.clients.contains(where: { $0.tty == ownTTY && $0.windowID == selectedWindowID }) {
             recoveryPending = false
@@ -1313,6 +1316,7 @@ final class WorkspaceStore {
             terminalMessage = "Could not start the terminal."
             return
         }
+        connection.updateLocalClient(nil)
         surface?.close()
         surface = view
         clientTTY = nil
@@ -2008,6 +2012,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         }
         // A close request (e.g. cmd+w) while tmux is still attached: keep the client.
         guard view.processExited else { return }
+        connection?.updateLocalClient(nil)
         view.close()
         surface = nil
         clientTTY = nil

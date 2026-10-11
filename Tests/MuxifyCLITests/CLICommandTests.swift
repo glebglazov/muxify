@@ -334,6 +334,40 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
+    func testBrowserAvailabilityParsingAndStatus() async throws {
+        XCTAssertEqual(try CLICommand(arguments: ["browser", "available"], environment: [:]), .browserAvailable(pane: nil))
+        XCTAssertEqual(try CLICommand(arguments: ["browser", "available", "--help"]), .help)
+        XCTAssertThrowsError(try CLICommand(arguments: ["browser", "available", "extra"]))
+        let status = try await CLICommand.browserAvailable(pane: nil).execute(using: RecordingRunner(results: []))
+        XCTAssertEqual(status, 1)
+        for kind in ["local", "remote"] {
+            let runner = RecordingRunner(results: [
+                .init(status: 0, output: "90 1 999\n12 0 100\n12 0 200\n11 0 300\n"),
+                .init(status: 0, output: "ordinary value\n@muxify_client_stale value\n@muxify_client_live value\n"),
+                .init(status: 0, output: "200␟tty␟home␟host␟local\n"),
+                .init(status: 0, output: "100␟extra␟fields␟are␟allowed␟\(kind)\n"),
+            ])
+            let command = try CLICommand(arguments: ["browser", "available"], environment: ["TMUX_PANE": "%7"])
+            let status = try await command.execute(using: runner)
+            XCTAssertEqual(status, 0)
+            XCTAssertTrue(runner.calls.allSatisfy { $0.quiet && $0.command == "tmux" })
+        }
+    }
+
+    func testBrowserAvailabilityQuietFailuresAndUnmarkedClients() {
+        let cases: [[CLICommandResult]] = [
+            [.init(status: 1, output: "")],
+            [.init(status: 0, output: "10 1 123\n")],
+            [.init(status: 0, output: "10 0 123\n"), .init(status: 1, output: "")],
+            [.init(status: 0, output: "10 0 123\n"), .init(status: 0, output: "")],
+            [.init(status: 0, output: "10 0 123\n"), .init(status: 0, output: "@muxify_client_bad x"), .init(status: 1, output: "")],
+            [.init(status: 0, output: "10 0 123\n"), .init(status: 0, output: "@muxify_client_bad x"), .init(status: 0, output: "123␟unknown")],
+        ]
+        for results in cases {
+            XCTAssertEqual(BrowserAvailability.check(pane: "%7", using: RecordingRunner(results: results)), .no)
+        }
+    }
+
     func testProcessRunnerPreservesArgumentBoundaries() throws {
         let result = try CLIProcessRunner().run("/usr/bin/printf", arguments: ["%s\n", "a b", "x; y", "$HOME"], quiet: false)
         XCTAssertEqual(result.status, 0)
