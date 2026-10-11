@@ -21,7 +21,9 @@ address bar has focus. All available `keybindings` actions are listed below.
 | `toggle_focus` | ⇧⌘↩ | Focus the side the keyboard is in: show it alone and hide the Sidebar. While Focus is on, end it |
 | `focus_terminal` | ⌥⌘T | Focus the Terminal and move the keyboard into it. While the Terminal is in Focus, end Focus |
 | `focus_browser` | ⌥⌘B | Focus the Browser and move the keyboard into it, also when the Browser is hidden. While the Browser is in Focus, end Focus |
-| `move_keyboard_to_terminal` | ⌃ + backquote | Move the keyboard into the Terminal of the current App Window |
+| `move_keyboard_to_terminal` | ⌃ + backquote, ⌃0, ⌥0 | Move the keyboard into the Terminal of the current App Window |
+| `select_card_1` … `select_card_9` | ⌃1 … ⌃9 | Jump To the Topic or Session at that position in Sidebar order |
+| `select_tab_1` … `select_tab_9` | ⌥1 … ⌥9 | Select that Tab and move the keyboard into the Browser, showing it if hidden |
 | `select_window_1` | ⌘1 | Select the first Window in the current Session |
 | `select_window_2` | ⌘2 | Select the second Window |
 | `select_window_3` | ⌘3 | Select the third Window |
@@ -87,7 +89,25 @@ keybindings:
   toggle_focus: shift+cmd+enter
   focus_terminal: alt+cmd+t
   focus_browser: alt+cmd+b
-  move_keyboard_to_terminal: ctrl+backquote
+  move_keyboard_to_terminal: [ctrl+backquote, ctrl+0, alt+0]
+  select_card_1: ctrl+1
+  select_card_2: ctrl+2
+  select_card_3: ctrl+3
+  select_card_4: ctrl+4
+  select_card_5: ctrl+5
+  select_card_6: ctrl+6
+  select_card_7: ctrl+7
+  select_card_8: ctrl+8
+  select_card_9: ctrl+9
+  select_tab_1: alt+1
+  select_tab_2: alt+2
+  select_tab_3: alt+3
+  select_tab_4: alt+4
+  select_tab_5: alt+5
+  select_tab_6: alt+6
+  select_tab_7: alt+7
+  select_tab_8: alt+8
+  select_tab_9: alt+9
   select_window_1: cmd+1
   select_window_2: cmd+2
   select_window_3: cmd+3
@@ -122,10 +142,40 @@ To change New App Window, use `new_app_window: cmd+shift+n`; use
 `new_app_window: []` to disable its shortcuts. This also removes the terminal's
 default ⌘N behavior. New tmux Session remains available from the File menu.
 
-Move Keyboard to Terminal defaults to Control + backquote, leaving Command + backquote
+Move Keyboard to Terminal defaults to Control + backquote, Control + 0, and Option + 0. This leaves Command + backquote
 for macOS App Window switching. Use `move_keyboard_to_terminal: []` to disable it, or
 `move_keyboard_to_terminal: cmd+backquote` to restore the old shortcut at the cost of native
 App Window switching.
+
+## Hints
+
+Cards and Tabs show a key-only Hint at rest. Window rows can show one too.
+The rest Hint uses the first trigger with the usual modifiers for that item.
+For example, `ctrl+j` shows `J` on a card. Positions above 9 have no Hint.
+A loading Tab shows its spinner instead of the rest Hint.
+
+Hold a modifier alone to show the full trigger. The default delay is 0.35 seconds.
+[Hints Config](configuration.md#hints) controls the delay and each item's rest and hold Hints.
+Pressing the configured key acts at once, even before the Hints appear.
+Each Hint shows the trigger from the current Config. Its modifiers must match exactly.
+For example, holding Control does not show a shortcut that needs Control and Command.
+Letter remaps and multiple triggers appear as configured. Terminal Hints show numeric triggers only.
+
+Card positions follow Pinned Topics, other open Topics, then all No Topic Sessions.
+In Sessions mode, they follow the Session cards. The Agents section has no Hints.
+Jump To a Dormant Topic shows its empty Topic view. It does not start a Session.
+Window positions stay within the current Session. Tab positions follow the Browser strip.
+A missing position does nothing.
+
+A hidden Sidebar still accepts card shortcuts, but shows no Hints.
+A hidden Browser shows no Tab Hints, but a Tab shortcut shows the Browser and selects the Tab.
+Only rendered cards and Window rows show Hints. A Pane row never takes a Window Hint.
+A held card Hint hides its Pin mark. A rest Hint leaves the Pin mark visible.
+A held Hint replaces the rest key in the leading slot. The content dims while held Hints stay at full opacity.
+
+Any other key or modifier release clears held Hints. Rest Hints stay visible. After another key, release all modifiers before a new hold.
+Opening a palette, changing the Environment, or leaving the App Window also clears held Hints.
+Each App Window has its own hold state.
 
 ## Command Palette keybindings
 

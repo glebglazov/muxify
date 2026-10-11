@@ -28,6 +28,24 @@ public enum ConfigAction: String, KeybindAction {
     case focusTerminal = "focus_terminal"
     case focusBrowser = "focus_browser"
     case moveKeyboardToTerminal = "move_keyboard_to_terminal"
+    case selectCard1 = "select_card_1"
+    case selectCard2 = "select_card_2"
+    case selectCard3 = "select_card_3"
+    case selectCard4 = "select_card_4"
+    case selectCard5 = "select_card_5"
+    case selectCard6 = "select_card_6"
+    case selectCard7 = "select_card_7"
+    case selectCard8 = "select_card_8"
+    case selectCard9 = "select_card_9"
+    case selectTab1 = "select_tab_1"
+    case selectTab2 = "select_tab_2"
+    case selectTab3 = "select_tab_3"
+    case selectTab4 = "select_tab_4"
+    case selectTab5 = "select_tab_5"
+    case selectTab6 = "select_tab_6"
+    case selectTab7 = "select_tab_7"
+    case selectTab8 = "select_tab_8"
+    case selectTab9 = "select_tab_9"
     case selectWindow1 = "select_window_1"
     case selectWindow2 = "select_window_2"
     case selectWindow3 = "select_window_3"
@@ -55,7 +73,25 @@ public enum ConfigAction: String, KeybindAction {
         .toggleFocus: ["shift+cmd+enter"],
         .focusTerminal: ["alt+cmd+t"],
         .focusBrowser: ["alt+cmd+b"],
-        .moveKeyboardToTerminal: ["ctrl+backquote"],
+        .moveKeyboardToTerminal: ["ctrl+backquote", "ctrl+0", "alt+0"],
+        .selectCard1: ["ctrl+1"],
+        .selectCard2: ["ctrl+2"],
+        .selectCard3: ["ctrl+3"],
+        .selectCard4: ["ctrl+4"],
+        .selectCard5: ["ctrl+5"],
+        .selectCard6: ["ctrl+6"],
+        .selectCard7: ["ctrl+7"],
+        .selectCard8: ["ctrl+8"],
+        .selectCard9: ["ctrl+9"],
+        .selectTab1: ["alt+1"],
+        .selectTab2: ["alt+2"],
+        .selectTab3: ["alt+3"],
+        .selectTab4: ["alt+4"],
+        .selectTab5: ["alt+5"],
+        .selectTab6: ["alt+6"],
+        .selectTab7: ["alt+7"],
+        .selectTab8: ["alt+8"],
+        .selectTab9: ["alt+9"],
         .selectWindow1: ["cmd+1"],
         .selectWindow2: ["cmd+2"],
         .selectWindow3: ["cmd+3"],

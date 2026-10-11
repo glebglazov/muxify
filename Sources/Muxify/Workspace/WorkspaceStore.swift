@@ -798,6 +798,7 @@ final class WorkspaceStore {
     var config: Config { remoteConfig?.config ?? configStore.config }
     /// From the last look at `sessions.paths` on the Environment's machine.
     let palette = CommandPalette()
+    let hintHold = HintHold()
     var isRemote: Bool { activeEnvironment != nil }
     var environmentName: String { activeEnvironment?.name ?? "Local" }
     /// The Ghostty theme's colors; the header and sidebar follow them.
@@ -962,6 +963,7 @@ final class WorkspaceStore {
     /// open or focus another App Window through the app coordinator.
     private func transition(to next: RemoteEnvironment?, target: Target? = nil, createSessionIfNeeded: Bool = true) {
         guard !isShuttingDown else { return }
+        receiveHintInput(.reset)
         if next != activeEnvironment {
             remoteConfig = nil
             remoteConfigPath = nil
@@ -1056,6 +1058,7 @@ final class WorkspaceStore {
     /// Called before AppKit commits to quitting. Snapshot UI-owned Browser
     /// state here, then wait asynchronously for every owned transport to close.
     func shutdown(completion: @escaping () -> Void) {
+        receiveHintInput(.reset)
         guard !isShuttingDown else { connectionCleanup.whenFinished(completion); return }
         isShuttingDown = true
         started = false
@@ -1350,7 +1353,7 @@ final class WorkspaceStore {
     /// Session's Windows participate, in the same order as the Sidebar.
     private func navigateWindows(_ navigation: WindowNavigation) {
         guard let current = selectedWindow else { return }
-        let siblings = windows.filter { $0.sessionID == current.sessionID }
+        let siblings = quickSwitchWindows
         guard let currentIndex = siblings.firstIndex(of: current),
               let targetIndex = navigation.targetIndex(currentIndex: currentIndex, count: siblings.count)
         else { return }
@@ -1851,15 +1854,13 @@ final class WorkspaceStore {
         case .focusTerminal: toggleFocus(.terminal)
         case .focusBrowser: toggleFocus(.browser)
         case .moveKeyboardToTerminal: moveKeyboardToTerminal()
-        case .selectWindow1: navigateWindows(.position(1))
-        case .selectWindow2: navigateWindows(.position(2))
-        case .selectWindow3: navigateWindows(.position(3))
-        case .selectWindow4: navigateWindows(.position(4))
-        case .selectWindow5: navigateWindows(.position(5))
-        case .selectWindow6: navigateWindows(.position(6))
-        case .selectWindow7: navigateWindows(.position(7))
-        case .selectWindow8: navigateWindows(.position(8))
-        case .selectWindow9: navigateWindows(.position(9))
+        case .selectCard1, .selectCard2, .selectCard3, .selectCard4, .selectCard5,
+             .selectCard6, .selectCard7, .selectCard8, .selectCard9,
+             .selectWindow1, .selectWindow2, .selectWindow3, .selectWindow4, .selectWindow5,
+             .selectWindow6, .selectWindow7, .selectWindow8, .selectWindow9,
+             .selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5,
+             .selectTab6, .selectTab7, .selectTab8, .selectTab9:
+            if let selection = action.quickSwitchSelection { quickSwitch(selection) }
         case .selectNextWindow: navigateWindows(.next)
         case .selectPrevWindow: navigateWindows(.previous)
         }
@@ -1871,16 +1872,33 @@ final class WorkspaceStore {
     /// never the app window (which would quit Muxify); ⌃Tab and ⌃⇧Tab switch Tabs.
     /// Other keys in the terminal are left to Ghostty/tmux bindings.
     private func installKeyMonitor() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
             guard let self else { return event }
             return self.handleKeyEvent(event)
         }
+    }
+
+    @discardableResult
+    func performConfiguredShortcut(_ trigger: KeyTrigger) -> Bool {
+        guard !isShuttingDown, let action = config.keybinds.action(for: trigger) else { return false }
+        perform(action)
+        return true
     }
 
     private static let closeTab = KeyTrigger(modifiers: .command, key: .character("w"))
 
     func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         guard !isShuttingDown, let window = terminalHost.window, event.window === window else { return event }
+        if event.type == .flagsChanged {
+            receiveHintInput(.modifiers(KeyTrigger.Modifiers(event.modifierFlags)))
+            if palette.isOpen { receiveHintInput(.reset) }
+            return event
+        }
+        if event.type == .keyUp {
+            receiveHintInput(.keyUp(event.keyCode))
+            return event
+        }
+        receiveHintInput(.keyDown(event.keyCode))
         if let trigger = KeyTrigger(event) {
             if palette.handle(trigger, in: event) { return nil }
             let config = self.config
@@ -1889,10 +1907,7 @@ final class WorkspaceStore {
                 return nil
             }
             let keybinds = config.keybinds
-            if let action = keybinds.action(for: trigger) {
-                perform(action)
-                return nil
-            }
+            if performConfiguredShortcut(trigger) { return nil }
             if keybinds.suppressesDefaultAppWindowShortcut(trigger) { return nil }
             if trigger == Self.closeTab {
                 if keyboardIsInBrowser { browserCommand { $0.closeActiveTab() } }

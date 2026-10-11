@@ -34,6 +34,26 @@ public struct Config: Equatable {
     public var projectAliases: [String: String] = [:]
     public var topics = Topics()
     public var notifications = Notifications()
+    public var hints = Hints()
+
+    public struct Hints: Equatable {
+        public var holdDelay: TimeInterval? = 0.35
+        public var cards = Surface(always: true)
+        public var windows = Surface(always: false)
+        public var tabs = Surface(always: true)
+        public var terminal = Terminal()
+
+        public init() {}
+
+        public struct Surface: Equatable {
+            public var always: Bool
+            public var hold = true
+        }
+
+        public struct Terminal: Equatable {
+            public var hold = true
+        }
+    }
 
     public struct Topics: Equatable {
         public var snoozePresets = SnoozePreset.defaults
@@ -248,6 +268,13 @@ public struct Config: Equatable {
         #       title: '#{window_name}'
         #       summary: '#{agent_group}'
         #
+        # hints:
+        #   hold_delay: 0.35 # seconds; 0 shows at once; false disables hold Hints
+        #   cards: { always: true, hold: true }
+        #   windows: { always: false, hold: true }
+        #   tabs: { always: true, hold: true }
+        #   terminal: { hold: true }
+        #
         # notifications:
         #   done_enabled: true
         #   failed_enabled: true
@@ -281,8 +308,12 @@ public struct Config: Equatable {
         #   # with no keybinding. A trigger listed here is taken from the
         #   # defaults of other actions.
         #   # Keybindings work throughout Muxify, including in the Browser.
-        #   # move_keyboard_to_terminal uses Ctrl+backquote, leaving Cmd+backquote for
-        #   # macOS App Window switching unless you explicitly bind it here.
+        #   # move_keyboard_to_terminal uses Ctrl+backquote, Ctrl+0 and Alt+0.
+        #   # Cmd+backquote stays available for macOS App Window switching.
+        #   # select_card_1 through select_card_9 Jump To Topic or Session cards.
+        #   # select_tab_1 through select_tab_9 select Tabs and show the Browser.
+        #   # Hold the exact modifiers alone to show Hints after hints.hold_delay.
+        #   # Hints show the resolved triggers. The shortcuts act without a wait.
         #   # select_window_1 through select_window_9 pick the first through
         #   # ninth Windows in the current Session, not their tmux indices.
         #   # select_next_window and select_prev_window wrap within the Session
@@ -381,6 +412,7 @@ private struct ConfigReader {
         "projects_aliases": { $0.problem(at: $1, "projects_aliases moved to projects.aliases") },
         "topics": { $0.readTopics($1) },
         "notifications": { $0.readNotifications($1) },
+        "hints": { $0.readHints($1) },
         "sidebar": { $0.readSidebar($1) },
         "ghostty": { $0.readGhostty($1) },
         "ui": { $0.readUI($1) },
@@ -533,6 +565,45 @@ private struct ConfigReader {
                 continue
             }
             config.topics.titleCommandFallbacks.append(command)
+        }
+    }
+
+    mutating func readHints(_ node: Node) {
+        for (name, key, value) in entries(of: node, "hints") {
+            if name == "hold_delay" {
+                if value.tag == Tag(.bool), value.bool == false {
+                    config.hints.holdDelay = nil
+                } else if (value.tag == Tag(.int) || value.tag == Tag(.float)),
+                          let delay = value.float, delay.isFinite, delay >= 0 {
+                    config.hints.holdDelay = delay
+                } else {
+                    problem(at: value, "hints.hold_delay: expected nonnegative seconds or false")
+                }
+                continue
+            }
+            guard ["cards", "windows", "tabs", "terminal"].contains(name) else {
+                problem(at: key, "unknown key \"hints.\(name)\"")
+                continue
+            }
+            for (setting, settingKey, settingValue) in entries(of: value, "hints.\(name)") {
+                guard setting == "hold" || (setting == "always" && name != "terminal") else {
+                    problem(at: settingKey, "unknown key \"hints.\(name).\(setting)\"")
+                    continue
+                }
+                guard settingValue.tag == Tag(.bool), let enabled = settingValue.bool else {
+                    problem(at: settingValue, "hints.\(name).\(setting): expected a boolean")
+                    continue
+                }
+                switch (name, setting) {
+                case ("cards", "always"): config.hints.cards.always = enabled
+                case ("cards", _): config.hints.cards.hold = enabled
+                case ("windows", "always"): config.hints.windows.always = enabled
+                case ("windows", _): config.hints.windows.hold = enabled
+                case ("tabs", "always"): config.hints.tabs.always = enabled
+                case ("tabs", _): config.hints.tabs.hold = enabled
+                default: config.hints.terminal.hold = enabled
+                }
+            }
         }
     }
 

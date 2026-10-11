@@ -383,7 +383,7 @@ final class ConfigTests: XCTestCase {
     func testMoveKeyboardToTerminalDefaultCanBeClaimedByAnotherAction() throws {
         let config = try load("keybindings:\n  toggle_browser: ctrl+backquote")
         XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote")), .toggleBrowser)
-        XCTAssertNil(config.keybinds.firstTrigger(for: .moveKeyboardToTerminal))
+        XCTAssertEqual(config.keybinds.triggers[.moveKeyboardToTerminal], [trigger("ctrl+0"), trigger("alt+0")])
         XCTAssertEqual(config.problems, [])
     }
 
