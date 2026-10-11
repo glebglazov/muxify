@@ -501,6 +501,7 @@ private struct GroupedTopicRow: View {
 }
 
 private struct TopicCard: View {
+    @Environment(\.quickSwitchHints) private var hints
     let store: WorkspaceStore
     let topic: TopicsModel.Row
     let titles: [String: String]
@@ -523,7 +524,7 @@ private struct TopicCard: View {
     static let viewport = "topics-viewport"
 
     var body: some View {
-        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, status: status, viewport: Self.viewport) {
+        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, status: status, viewport: Self.viewport, restingOpacity: topic.isDormant ? 0.55 : 1) {
             header
         } content: {
             CardList(blocks: topic.sessions.compactMap { session in
@@ -549,9 +550,9 @@ private struct TopicCard: View {
                     .topicLink()
                     .disabled(store.changingTopic)
                     .accessibilityIdentifier("settle-topic-" + id)
+                    .opacity(hints.sidebarActive ? 0.5 : (topic.isDormant ? 0.55 : 1))
             }
         }
-        .opacity(topic.isDormant ? 0.55 : 1)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.listSpace)) } action: { frame in
             if let namedTopicID { onFrame(namedTopicID, frame) }
         }
@@ -579,6 +580,7 @@ private struct TopicCard: View {
 
     private var header: some View {
         CardHeader(title: formatted.title, isOpen: topic.isExpanded, status: status, isPinned: topic.isPinned,
+                   hintTarget: namedTopicID.map { .topic($0) },
                    notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isDormant ? ["Dormant"] : []),
                    summary: formatted.summary, reservesCorner: true) {
             if topic.isDormant { Text("Dormant").font(.system(size: 10)).foregroundStyle(.secondary) }
@@ -846,8 +848,8 @@ private struct SessionCard<Row: View>: View {
         let isSnoozed = session.windows.first?.topicID.map { model.snoozedTopicIDs.contains($0) } ?? false
         let status = AgentStatus.shown(mark: model.sessionMarks[session.id], working: model.workingSessionIDs.contains(session.id))
         SidebarCard(isOpen: isOpen, holdsSelection: session.windows.contains { $0.id == store.selectedWindowID }, status: status,
-                    viewport: viewport) {
-            CardHeader(title: formatted.title, isOpen: isOpen, status: status, notes: isSnoozed ? ["snoozed"] : [],
+                    viewport: viewport, restingOpacity: isSnoozed ? 0.45 : 1) {
+            CardHeader(title: formatted.title, isOpen: isOpen, status: status, hintTarget: .session(session.id), notes: isSnoozed ? ["snoozed"] : [],
                        summary: formatted.summary) {
                 if isSnoozed { Text("snoozed").font(.system(size: 10)).foregroundStyle(.secondary) }
                 if let topicSession = model.topicSessions[session.id] {
@@ -880,7 +882,6 @@ private struct SessionCard<Row: View>: View {
                 row(item)
             }
         }
-        .opacity(isSnoozed ? 0.45 : 1)
     }
 
     private var formatted: SidebarFormats.Text {
@@ -895,6 +896,7 @@ private struct SessionCard<Row: View>: View {
 }
 
 struct WindowRow: View {
+    @Environment(\.quickSwitchHints) private var hints
     let window: TmuxWindow
     var content: SidebarFormats.WindowRowContent? = nil
     let isSelected: Bool
@@ -907,6 +909,7 @@ struct WindowRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            if hints.windowSlotReserved { Color.clear.frame(width: 10) }
             if let left = content?.left {
                 if !left.isEmpty { customPart(left, side: "left") }
             } else {
@@ -977,6 +980,7 @@ struct WindowRow: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
+        .hintAnchor(.window(window.id))
         .hoverLabel(title: window.displayTitle, titleFont: .systemFont(ofSize: 12),
                     detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
     }

@@ -253,6 +253,7 @@ final class CommandPalette {
     }
 
     private func open() {
+        store?.hintHold.receive(.reset)
         if !isOpen {
             previousResponder = store?.terminalHost.window?.firstResponder
             query = ""

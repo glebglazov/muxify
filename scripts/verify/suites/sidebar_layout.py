@@ -138,8 +138,11 @@ class SidebarLayout(unittest.TestCase):
     def test_a_click_tool_clicks_a_closed_topic_card_on_its_title_line(self):
         key = 'topic-layout-other'
         rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'no card for the Topic')
+        if self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded'):
+            self.s.act('press', key)
+        rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityValue', '').startswith('collapsed'),
+                              'the card did not close')
         row = self.s.row(key, rs)
-        self.assertTrue(row.get('accessibilityValue', '').startswith('collapsed'), 'the card is open: %s' % row)
         bottom, top = frame(row)
         x, y = map(float, re.findall(r'-?[\d.]+', row['accessibilityActivationPoint']))
         # The title is the first line of a closed card; the summary line is under it, in the lower half.

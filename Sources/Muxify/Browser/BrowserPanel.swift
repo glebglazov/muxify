@@ -65,6 +65,7 @@ private struct TabItem: View {
     let onSelect: () -> Void
     let onClose: () -> Void
 
+    @Environment(\.quickSwitchHints) private var hints
     @State private var hovering = false
 
     var body: some View {
@@ -72,6 +73,8 @@ private struct TabItem: View {
             Group {
                 if tab.isLoading {
                     ProgressView().controlSize(.mini)
+                } else if hints[.tab(tab.id)].isEmpty, let key = hints.restKey(for: .tab(tab.id)) {
+                    HintKey(target: .tab(tab.id), key: key)
                 } else {
                     Image(systemName: "globe")
                         .font(.system(size: 10))
@@ -109,6 +112,12 @@ private struct TabItem: View {
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
         .help(tab.hasPage ? tab.urlString : "New Tab")
+        .opacity(hints[.tab(tab.id)].isEmpty ? 1 : 0.5)
+        .overlay(alignment: .leading) {
+            if !hints[.tab(tab.id)].isEmpty {
+                HintChip(target: .tab(tab.id), triggers: hints[.tab(tab.id)]).padding(.leading, 4)
+            }
+        }
     }
 
     private var background: Color {

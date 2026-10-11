@@ -11,6 +11,8 @@ struct SidebarCard<Header: View, Content: View>: View {
     let status: AgentStatus?
     /// The coordinate space of the scroll view around the list, in which the open card's header sticks to the top.
     var viewport: String? = nil
+    var restingOpacity: Double = 1
+    @Environment(\.quickSwitchHints) private var hints
     @ViewBuilder var header: () -> Header
     @ViewBuilder var content: () -> Content
 
@@ -72,6 +74,8 @@ struct SidebarCard<Header: View, Content: View>: View {
             }
             .allowsHitTesting(false)
         }
+        .opacity(hints.sidebarActive ? 0.5 : restingOpacity)
+        .cardHints(hints)
         // A container, in which the header's sort priority applies.
         .accessibilityElement(children: .contain)
         .onChange(of: holdsSelection) { _, holds in
@@ -125,6 +129,8 @@ struct CardHeader<Details: View>: View {
     let isOpen: Bool
     let status: AgentStatus?
     var isPinned = false
+    var hintTarget: QuickSwitchTarget? = nil
+    @Environment(\.quickSwitchHints) private var hints
     /// Words for the accessibility value after the open state, such as "Dormant".
     var notes: [String] = []
     let summary: String
@@ -143,8 +149,9 @@ struct CardHeader<Details: View>: View {
                 Text(title)
                     .font(typography.font(for: .session))
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if isPinned { PinMark() }
+                if let hintTarget { CardHintSlot(target: hintTarget) }
+                Spacer(minLength: 0)
+                if isPinned { PinMark().opacity(hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1) }
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { titleLine = $0 }
             HStack(spacing: 5) { details() }

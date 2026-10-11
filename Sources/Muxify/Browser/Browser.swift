@@ -161,6 +161,14 @@ final class Browser {
         changed()
     }
 
+    func jumpTo(_ tab: BrowserTab) {
+        guard tabs.contains(where: { $0.id == tab.id }) else { return }
+        select(tab)
+        changeLayout { $0.show(.browser) }
+        requestKeyboard()
+        changed()
+    }
+
     func selectTab(offset: Int) {
         guard let index = tabs.firstIndex(where: { $0.id == activeTabID }), tabs.count > 1 else { return }
         select(tabs[(index + offset + tabs.count) % tabs.count])

@@ -278,6 +278,10 @@ Configurable [Keybindings](keybindings.md) work throughout the app, including in
 Browser pages. The guide lists all actions, defaults, built-in shortcuts and a
 complete Config example.
 
+Numbered card and Tab shortcuts show key-only [Hints](keybindings.md#hints) at rest.
+Window rows can show them too. A modifier hold shows full triggers.
+Hints use the resolved keybindings of the Active Environment's Config, including remaps and disabled actions.
+
 ### Check whether a program runs from Muxify
 
 When the Muxify CLI is installed, run `muxify browser available` when the program starts.
@@ -340,6 +344,30 @@ For `local`, a program can use `muxify browser open <url>`. For `remote`, it can
 set `tmux set-option -w -t "$TMUX_PANE" @muxify_open <url>`. A page served on a
 remote machine needs an address that the Mac can reach, such as its Tailscale
 address. For `no`, use the program's normal browser behavior.
+
+## Hints
+
+All keys are optional. These are the defaults:
+
+```yaml
+hints:
+  hold_delay: 0.35
+  cards: { always: true, hold: true }
+  windows: { always: false, hold: true }
+  tabs: { always: true, hold: true }
+  terminal: { hold: true }
+```
+
+`hold_delay` is a finite, nonnegative number of seconds. `0` shows hold Hints at once.
+`false` disables hold Hints everywhere. `always` controls key-only Hints at rest.
+`hold` controls full trigger Hints while a modifier is held alone.
+The Terminal has no rest Hint and accepts only `hold`.
+
+Changes apply live and use the Active Environment's Config.
+With both switches off, an item has no Hint. Its shortcuts still work.
+Cards use the leading title gutter. Window rows reserve a leading slot when `always` is true.
+Tabs use the globe slot, except when a loading spinner is visible.
+See [Hints and shortcut positions](keybindings.md#hints) for key remaps and hold behavior.
 
 ## Sidebar
 

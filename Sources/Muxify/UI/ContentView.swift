@@ -40,6 +40,7 @@ struct ContentView: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("terminal-panel")
                         .accessibilityHidden(!showsTerminal)
+                        .quickSwitchHint(.terminal, hints: store.hintPresentation)
                     if let browser {
                         HStack(spacing: 0) {
                             if showsTerminal {
@@ -74,6 +75,7 @@ struct ContentView: View {
         .overlay(alignment: .top) {
             HeaderBar(store: store, keybinds: store.config.keybinds, height: headerHeight)
         }
+        .modifier(HintVerification(store: store))
         .modifier(ClientVerification(store: store))
         .ignoresSafeArea()
         // Names the window for the Window menu and Mission Control.
@@ -81,12 +83,24 @@ struct ContentView: View {
                          ? "\(store.environmentName) — \(store.selectedWindow?.sessionName ?? "Muxify")"
                          : store.selectedWindow?.sessionName ?? "Muxify")
         .onAppear { store.start() }
+        .onChange(of: store.config.hints.holdDelay, initial: true) { _, delay in
+            store.hintHold.configure(delay: delay)
+        }
         .onChange(of: configStore.config.remoteEnvironments) { _, _ in store.reconcileEnvironments() }
         .overlay(alignment: .bottom) {
             if let message = store.wakeToast {
                 Text(message).padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .padding(16).accessibilityIdentifier("wake-toast")
             }
+        }
+        .environment(\.quickSwitchHints, store.hintPresentation)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
+            if let window = notification.object as? NSWindow, window === store.terminalHost.window {
+                store.hintHold.receive(.reset)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            store.hintHold.receive(.reset)
         }
         .environment(\.pulses, configStore.config.pulse)
         .environment(\.chromeTheme, store.theme)

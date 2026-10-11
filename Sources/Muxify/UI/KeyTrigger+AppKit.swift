@@ -7,12 +7,7 @@ extension KeyTrigger {
     /// The trigger a key press stands for, or nil for a key Muxify cannot
     /// name.
     init?(_ event: NSEvent, layout: KeyboardLayout? = .current) {
-        let flags = event.modifierFlags
-        var modifiers: Modifiers = []
-        if flags.contains(.control) { modifiers.insert(.control) }
-        if flags.contains(.option) { modifiers.insert(.option) }
-        if flags.contains(.shift) { modifiers.insert(.shift) }
-        if flags.contains(.command) { modifiers.insert(.command) }
+        let modifiers = Modifiers(event.modifierFlags)
         if let special = SpecialKey.allCases.first(where: { $0.keyCodes.contains(event.keyCode) }) {
             self.init(modifiers: modifiers, key: .special(special))
         } else if let character = layout?.commandCharacter(keyCode: event.keyCode) {
@@ -126,5 +121,15 @@ private extension KeyTrigger.SpecialKey {
         case .down: "↓"
         case .up: "↑"
         }
+    }
+}
+
+extension KeyTrigger.Modifiers {
+    init(_ flags: NSEvent.ModifierFlags) {
+        self = []
+        if flags.contains(.control) { insert(.control) }
+        if flags.contains(.option) { insert(.option) }
+        if flags.contains(.shift) { insert(.shift) }
+        if flags.contains(.command) { insert(.command) }
     }
 }
