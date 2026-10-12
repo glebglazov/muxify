@@ -34,6 +34,27 @@ make run       # vendor libghostty, generate the Xcode project, build and open
 make install   # install a Release build into /Applications (or INSTALL_DIR)
 ```
 
+`make build`, `make run` and `make install` sign ad-hoc. macOS then sees each
+build as a new app, and you must grant Accessibility and Input Monitoring again.
+To keep the grants, set `MUXIFY_SIGN_IDENTITY` to a certificate in your
+keychain and `MUXIFY_DEVELOPMENT_TEAM` to its team ID, for example in your shell
+profile:
+
+```sh
+export MUXIFY_SIGN_IDENTITY="Apple Development"
+export MUXIFY_DEVELOPMENT_TEAM="ABCDE12345"
+```
+
+The team ID is the `OU` field of the certificate, not the ID in its name. To
+see it, run:
+
+```sh
+security find-certificate -c "Apple Development" -p | openssl x509 -noout -subject
+```
+
+Use these variables only on your own Mac. Release packaging and CI always sign
+ad-hoc.
+
 Desktop build targets run `make setup` first to prepare a fresh machine: it
 installs `xcodegen` with Homebrew if missing, then runs `scripts/setup-ghostty.sh`
 if the library or resources are not vendored yet. The script builds the exact

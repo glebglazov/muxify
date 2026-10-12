@@ -1,6 +1,10 @@
 APP := build/Build/Products/Debug/Muxify.app
 RELEASE_APP := build/Build/Products/Release/Muxify.app
 INSTALL_DIR ?= /Applications
+# Ad-hoc by default. Name a certificate and its team, and macOS keeps
+# Accessibility and Input Monitoring grants across rebuilds.
+MUXIFY_SIGN_IDENTITY ?= -
+MUXIFY_DEVELOPMENT_TEAM ?=
 
 .PHONY: all setup tools project build cli test test-release run install release clean
 
@@ -24,7 +28,7 @@ project: setup
 
 build: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet build
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 
 # Build only the CLI, without desktop app dependencies.
 cli:
@@ -49,7 +53,7 @@ release:
 
 install: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet build
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 	rm -rf "$(INSTALL_DIR)/Muxify.app"
 	cp -R "$(RELEASE_APP)" "$(INSTALL_DIR)/"
 
