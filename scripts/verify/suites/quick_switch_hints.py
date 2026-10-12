@@ -19,9 +19,10 @@ class QuickSwitchHints(unittest.TestCase):
         (s.root/'config/muxify/config.yaml').write_text('keybindings:\n  select_window_1: ctrl+w\n')
         topics = s.root/'state/muxify/topics'
         topics.mkdir()
-        for name, title, pinned in [('first', 'Pinned Topic', True), ('dormant', 'Dormant Topic', False)]:
+        # The Dormant Topic remembers no Session and has no Home Project, so going to it shows its empty Topic view.
+        for name, title, pinned, home in [('first', 'Pinned Topic', True, str(s.root)), ('dormant', 'Dormant Topic', False, None)]:
             (topics/(name + '.json')).write_text(json.dumps(dict(
-                id=name, title=title, slug=name, home_project=str(s.root), pinned=pinned,
+                id=name, title=title, slug=name, home_project=home, pinned=pinned,
                 created_at='2026-01-01T00:00:00Z', order=0 if pinned else 1)))
         cls.session, cls.first = s.tmux('new-session', '-d', '-P', '-F', '#{session_id} #{window_id}',
                                       '-s', 'topic', '-c', str(s.root), '/bin/zsh -f').split()

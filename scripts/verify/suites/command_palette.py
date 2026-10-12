@@ -148,12 +148,12 @@ class CommandPalette(unittest.TestCase):
         return 'palette-row-project:' + str(path)
 
     def choose_reopen(self, session):
-        """↩ on a Dormant or Settled row shows the Topic's Reopen choice and creates nothing; its Reopen button does."""
+        """↩ on a Settled row shows the Topic's Reopen choice and creates nothing; its Reopen button does."""
         self.s.wait_rows(lambda rs: self.s.has('reopen-choice-reopen', rs), 'the Topic did not show its Reopen choice')
         self.assertNotEqual(self.s.tmux_ok('has-session', '-t', '=' + session).returncode, 0, 'the Reopen choice created a Session')
         self.s.act('press', 'reopen-choice-reopen')
 
-    def test_return_on_a_dormant_topic_shows_its_reopen_choice_and_reopen_goes_there(self):
+    def test_return_on_a_dormant_topic_reopens_it_and_goes_there(self):
         self.write_topic('sw-dormant', 'Sw dormant', self.beta,
                          sessions=[dict(project_path=str(self.beta), windows=[dict(directory=str(self.beta), name='shell')])])
         rs = self.open_palette()
@@ -161,10 +161,10 @@ class CommandPalette(unittest.TestCase):
         rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Dormant Topic row did not show')
         self.assertIn('Reopen', self.describe(key, rs), 'a Dormant row does not say Reopen')
         self.s.act('press', key)
-        self.choose_reopen('beta/sw-dormant')
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=beta/sw-dormant').returncode == 0, 'Reopen did not create the Session', seconds=15)
         wait(lambda: 'beta/sw-dormant' in self.client_sessions(), 'the client did not go to the reopened Session', seconds=10)
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after ↩')
+        self.assertFalse(self.s.has('reopen-choice-reopen'), '↩ on a Dormant row showed the Reopen choice')
 
     def test_return_on_a_snoozed_topic_with_a_window_goes_there_and_keeps_the_snooze(self):
         self.write_topic('sw-snoozed-go', 'Sw snoozed go', self.beta, snoozed_until='never')
@@ -183,7 +183,7 @@ class CommandPalette(unittest.TestCase):
         self.assertEqual(self.records()['sw-snoozed-go'].get('snoozed_until'), 'never', 'going to the Topic changed its Snooze')
         self.assertIn(window, self.client_windows(), 'the selection moved away from the Snoozed Topic')
 
-    def test_return_on_a_dormant_snoozed_topic_and_reopen_keep_the_snooze(self):
+    def test_return_on_a_dormant_snoozed_topic_reopens_it_and_keeps_the_snooze(self):
         self.write_topic('sw-snoozed-dormant', 'Sw snoozed dormant', self.beta, snoozed_until='never',
                          sessions=[dict(project_path=str(self.beta), windows=[dict(directory=str(self.beta), name='shell')])])
         key = 'palette-row-topic-sw-snoozed-dormant'
@@ -191,7 +191,6 @@ class CommandPalette(unittest.TestCase):
         rs = self.search('snoozed dormant', key)
         self.assertIn('Reopen', self.describe(key, rs), 'a Dormant Snoozed row does not say Reopen')
         self.s.act('press', key)
-        self.choose_reopen('beta/sw-snoozed-dormant')
         wait(lambda: 'beta/sw-snoozed-dormant' in self.client_sessions(), 'the client did not go to the reopened Session', seconds=15)
         self.s.wait_shown('=beta/sw-snoozed-dormant:')
         self.assertEqual(self.records()['sw-snoozed-dormant'].get('snoozed_until'), 'never', 'Reopen changed the Snooze')

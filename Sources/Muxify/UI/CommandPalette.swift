@@ -296,7 +296,7 @@ final class CommandPalette {
             close(restoringFocus: false)
             switch item.ref {
             case .topic(let id, let window):
-                if let window { store.select(window) } else { store.showEmptyTopic(id) }
+                if let window { store.select(window) } else { store.goToTopic(.topic(id)) }
             case .agent(let agent): store.select(agent)
             case .window(let window): store.select(window)
             case .session(let session):

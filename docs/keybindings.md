@@ -183,7 +183,7 @@ Letter remaps and multiple triggers appear as configured. Terminal Hints show nu
 
 Card positions follow Pinned Topics, then other open Topics. No Topic Sessions have no position.
 In Sessions mode, they follow the Session cards. The Agents section has no Hints.
-Jump To a Dormant Topic shows its empty Topic view. It does not start a Session.
+Jump To a Dormant Topic Reopens it when it remembers a Session, and shows its empty Topic view when it does not.
 Window positions stay within the current Session. Tab positions follow the Browser strip.
 A missing position does nothing.
 

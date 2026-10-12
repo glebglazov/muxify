@@ -162,9 +162,19 @@ final class WorkspaceStore {
         }
     }
 
-    /// Goes where ↩ on the Topic's palette row would: its entry Window, or its Reopen choice when it is Dormant.
-    /// tmux keeps each Window's active Pane, so this lands on the Pane last used there.
+    /// Goes to the Topic because the user asked to: a click, a Hint key, ↩ on its palette row or Go to Topic.
+    /// A Dormant Topic that remembers a Session is Reopened at once; any other Topic shows as in `showTopic`.
     func goToTopic(_ id: TopicGroupID) {
+        if case .topic(let topicID) = id, entryWindow(of: id) == nil, !changingTopic, reopensOnArrival(topicID) {
+            reopenTopic(topicID, .reopen)
+        } else {
+            showTopic(id)
+        }
+    }
+
+    /// Shows the Topic without creating anything, as Next Topic does: its entry Window, or its Reopen choice when it
+    /// is Dormant. tmux keeps each Window's active Pane, so this lands on the Pane last used there.
+    func showTopic(_ id: TopicGroupID) {
         if let window = entryWindow(of: id) { select(window) }
         else if case .topic(let topicID) = id { showEmptyTopic(topicID) }
         else {
@@ -412,7 +422,7 @@ final class WorkspaceStore {
         let next = activeTopicID == id ? nextTopic(after: id) : nil
         if setSnooze(id, until: deadline) {
             palette.close()
-            if let next { goToTopic(next) }
+            if let next { showTopic(next) }
         }
     }
 
@@ -531,6 +541,13 @@ final class WorkspaceStore {
         case .startFresh: command = .startFresh
         }
         perform(TopicRequest(command, target: .topic(.id(id))))
+    }
+
+    /// The open Topic has a Session to create, the same test that makes the empty-Topic view offer the Reopen choice.
+    private func reopensOnArrival(_ id: String) -> Bool {
+        guard topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }),
+              case .success(let reopening)? = reopening(id, .reopen) else { return false }
+        return !reopening.sessions.isEmpty
     }
 
     /// What `reopenTopic` would create now, for the panel to show before the user chooses.
@@ -1214,7 +1231,7 @@ final class WorkspaceStore {
         if let next = pendingNextTopic {
             pendingNextTopic = nil
             recoveryPending = false
-            goToTopic(next)
+            showTopic(next)
         } else if topicSelection.showsEmptyNoTopic {
             recoveryPending = false
         } else if !changingTopic, attachIfNeeded, surface == nil {
