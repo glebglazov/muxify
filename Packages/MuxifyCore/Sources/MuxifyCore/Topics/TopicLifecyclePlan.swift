@@ -118,7 +118,28 @@ public struct TopicReopening: Hashable {
         public let name: String
         public let directory: String
         public let browser: StoredBrowser
-        public let agent: AgentResume?
+        /// tmux `#{window_layout}`, nil for a Window with one Pane or a record from before Panes were remembered.
+        public let layout: String?
+        /// In tmux order, at least one.
+        public let panes: [Pane]
+
+        public var agents: [AgentResume] {
+            panes.compactMap { if case .agent(let agent) = $0.start { return agent }; return nil }
+        }
+    }
+
+    public struct Pane: Hashable {
+        public enum Start: Hashable {
+            case shell
+            /// The Agent's resume command runs.
+            case agent(AgentResume)
+            /// The program's command line is typed at the shell's prompt, and the user presses ↩ to run it.
+            case typed(String)
+        }
+
+        public let directory: String
+        public let isActive: Bool
+        public let start: Start
     }
 
     public struct AgentResume: Hashable {
@@ -158,7 +179,8 @@ public struct TopicReopening: Hashable {
             if createsWorktree, branch == nil { throw TopicEditFailure.invalidProject }
             let saved = session["windows"]?.array ?? []
             let windows = choice == .startFresh || saved.isEmpty
-                ? [Window(name: "shell", directory: directory, browser: StoredBrowser(), agent: nil)]
+                ? [Window(name: "shell", directory: directory, browser: StoredBrowser(), layout: nil,
+                          panes: [Pane(directory: directory, isActive: true, start: .shell)])]
                 : saved.map { Self.window($0, directory: directory) }
             return Session(projectPath: project.path, projectName: project.name, name: project.name + "/" + slug, directory: directory, branch: branch,
                            createsWorktree: createsWorktree, base: session[TopicWorktrees.baseKey]?.string, windows: windows)
@@ -179,12 +201,35 @@ public struct TopicReopening: Hashable {
         let terminalOpen: Bool
         if case .bool(let value)? = window["terminal_open"] { terminalOpen = value } else { terminalOpen = true }
         let shown: PanelLayout.Shown = !browserOpen ? .terminal : terminalOpen ? .both : .browser
-        let agent = window["agent"]?.string.flatMap(AgentKind.init(rawValue:)).flatMap { kind -> AgentResume? in
-            guard let conversation = window["agent_conversation"]?.string, !conversation.isEmpty else { return nil }
-            return AgentResume(kind: kind, conversation: conversation)
+        let windowDirectory = window["directory"]?.string ?? directory
+        // A record from before Panes were remembered has one Pane, with the Window's folder and Agent.
+        let panes = (window["panes"]?.array).flatMap { $0.isEmpty ? nil : $0.map { Self.pane($0, directory: windowDirectory) } }
+            ?? [Pane(directory: windowDirectory, isActive: true, start: agent(window).map(Pane.Start.agent) ?? .shell)]
+        let layout = window["layout"]?.string
+        return Window(name: window["name"]?.string ?? "shell", directory: windowDirectory,
+                      browser: StoredBrowser(tabURLs: tabs, activeTab: active, layout: PanelLayout(shown: shown)),
+                      layout: panes.count > 1 && layout?.isEmpty == false ? layout : nil, panes: panes)
+    }
+
+    private static func pane(_ pane: JSONValue, directory: String) -> Pane {
+        let start: Pane.Start
+        if let agent = agent(pane) {
+            start = .agent(agent)
+        } else if let command = pane["command"]?.string, !command.isEmpty,
+                  command.rangeOfCharacter(from: .controlCharacters) == nil {
+            start = .typed(command)
+        } else {
+            start = .shell
         }
-        return Window(name: window["name"]?.string ?? "shell", directory: window["directory"]?.string ?? directory,
-                      browser: StoredBrowser(tabURLs: tabs, activeTab: active, layout: PanelLayout(shown: shown)), agent: agent)
+        let isActive: Bool
+        if case .bool(true)? = pane["active"] { isActive = true } else { isActive = false }
+        return Pane(directory: pane["directory"]?.string ?? directory, isActive: isActive, start: start)
+    }
+
+    private static func agent(_ fields: JSONValue) -> AgentResume? {
+        guard let kind = fields["agent"]?.string.flatMap(AgentKind.init(rawValue:)),
+              let conversation = fields["agent_conversation"]?.string, !conversation.isEmpty else { return nil }
+        return AgentResume(kind: kind, conversation: conversation)
     }
 }
 
@@ -220,20 +265,18 @@ struct TopicReopenPlan {
             let target = "=" + session.name + ":"
             let windowTarget = target + "$"
             for (index, window) in session.windows.enumerated() {
+                let first = window.panes[0].directory
                 if index == 0 {
                     commands.append(.reopenSession(name: session.name, directory: session.directory, windowName: window.name))
                     commands.append(.tmux(["set-option", "-t", target, "@muxify_topic", topic.id]))
-                    if window.directory != session.directory {
-                        commands.append(.tmux(["respawn-window", "-k", "-t", windowTarget, "-c", window.directory]))
+                    if first != session.directory {
+                        commands.append(.tmux(["respawn-window", "-k", "-t", windowTarget, "-c", first]))
                     }
                 } else {
-                    commands.append(.tmux(["new-window", "-d", "-a", "-t", windowTarget, "-c", window.directory, "-n", window.name]))
+                    commands.append(.tmux(["new-window", "-d", "-a", "-t", windowTarget, "-c", first, "-n", window.name]))
                 }
                 commands.append(.tmux(window.browser.setOptionArgs(windowID: windowTarget)))
-                if let agent = window.agent {
-                    commands.append(.sendKeys(target: windowTarget, keys: [agent.kind.resumeCommand(conversation: agent.conversation)], literal: true))
-                    commands.append(.sendKeys(target: windowTarget, keys: ["Enter"], literal: false))
-                }
+                commands += Self.panes(of: window, target: windowTarget)
             }
         }
         var reopened = topic
@@ -241,6 +284,39 @@ struct TopicReopenPlan {
         reopened.settledAt = nil
         reopened.order = TopicOrder.firstOrder(in: records, pinned: topic.isPinned)
         edit = TopicEdit(record: topic, commands: commands, selection: .sessionName(home.name), completion: .save(reopened))
+    }
+}
+
+extension TopicReopenPlan {
+    /// The Window's first Pane exists. Each split puts the new Pane last and makes it active, so after the splits a
+    /// `.+N` target, N Panes on from the active one with wrap, reaches each Pane whatever `pane-base-index` is. The
+    /// layout comes last: a layout from a newer tmux also names its active Pane, and `select-layout` makes it active.
+    /// The Window is tiled before each split, so a small detached Window has room for the next Pane.
+    static func panes(of window: TopicReopening.Window, target: String) -> [TopicPlan.Command] {
+        var commands: [TopicPlan.Command] = []
+        for (position, pane) in window.panes.enumerated().dropFirst() {
+            if position > 1 { commands.append(.tmux(["select-layout", "-t", target, "tiled"])) }
+            commands.append(.tmux(["split-window", "-t", target, "-c", pane.directory]))
+        }
+        let last = window.panes.count - 1
+        let paneTarget = { (position: Int) in position == last ? target : target + ".+" + String(position + 1) }
+        for (position, pane) in window.panes.enumerated() {
+            switch pane.start {
+            case .shell:
+                break
+            case .agent(let agent):
+                commands.append(.sendKeys(target: paneTarget(position),
+                                          keys: [agent.kind.resumeCommand(conversation: agent.conversation)], literal: true))
+                commands.append(.sendKeys(target: paneTarget(position), keys: ["Enter"], literal: false))
+            case .typed(let command):
+                commands.append(.sendKeys(target: paneTarget(position), keys: [command], literal: true))
+            }
+        }
+        if let active = window.panes.firstIndex(where: \.isActive), active != last {
+            commands.append(.tmux(["select-pane", "-t", paneTarget(active)]))
+        }
+        if last > 0 { commands.append(.tmux(["select-layout", "-t", target, window.layout ?? "tiled"])) }
+        return commands
     }
 }
 

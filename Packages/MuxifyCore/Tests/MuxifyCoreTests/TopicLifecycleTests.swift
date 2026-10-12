@@ -37,7 +37,7 @@ final class TopicLifecycleTests: XCTestCase {
         XCTAssertEqual(edit.record?.settledAt, "1970-01-01T00:00:00Z")
         XCTAssertEqual(edit.record?.outcome, "Delivered")
         XCTAssertEqual(edit.record?.sessions.count, 2)
-        XCTAssertEqual(edit.record?.sessions.first?["windows"]?[0]?["pane_count"], .integer(3))
+        XCTAssertEqual(edit.record?.sessions.first?["windows"]?[0]?["panes"]?[0]?["agent"], .string("claude"))
     }
 
     func testSettleHonoursChoicesAndOnlyRemovesMergedUnusedWorktrees() throws {
@@ -161,10 +161,93 @@ final class TopicLifecycleTests: XCTestCase {
             .object(["name": .string("without-id"), "agent": .string("claude")]),
         ])])]
         let reopening = try TopicReopening(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: [], choice: .reopen)
-        XCTAssertEqual(reopening.sessions[0].windows.map(\.agent), [.init(kind: .claude, conversation: "abc"), nil])
+        XCTAssertEqual(reopening.sessions[0].windows.map(\.agents), [[.init(kind: .claude, conversation: "abc")], []])
         let resume = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: []).edit.commands
             .filter { if case .sendKeys(_, _, true) = $0 { return true }; return false }
         XCTAssertEqual(resume, [.sendKeys(target: "=game/fix-reward:$", keys: ["claude --resume 'abc'"], literal: true)])
+    }
+
+    /// A Window of three Panes as tmux lists it: an Agent, `npm run dev` that tmux calls node, and a shell, which is active.
+    private var splitSnapshot: TmuxSnapshot {
+        let s = Tmux.separator
+        let layout = "5e2c,160x40,0,0{80x40,0,0,1,79x40,81,0[79x20,81,0,2,79x19,81,21,3]}"
+        var snapshot = Tmux.parseSnapshot([
+            ["W", "@1", "$1", "game/fix-reward", "0", "edit", "", "/work/game/api", "zsh", "1", "3", "0", "0", "", "", "", "", "",
+             "", "topic", game.path, "%3", "", "", "0", layout],
+            ["P", "%1", "@1", "2.1.0", "claude", "done", "0", "conversation-1", "0", "0", game.path, "", "/dev/ttys010"],
+            ["P", "%2", "@1", "node", "", "", "0", "", "1", "0", "/work/game/web", "", "/dev/ttys011"],
+            ["P", "%3", "@1", "zsh", "", "", "0", "", "2", "1", "/work/game/api", "", "/dev/ttys012"],
+        ].map { $0.joined(separator: s) }.joined(separator: "\n"))
+        snapshot.commandLines = PaneCommandLines().updating(for: snapshot) {
+            "  700   700 ttys010  claude --resume conversation-1\n  710   710 ttys011  node /usr/local/bin/npm run dev\n"
+                + "  711   710 ttys011  node server.js\n  720   720 ttys012  -zsh\n"
+        }
+        return snapshot
+    }
+
+    func testRememberingASplitWindowRecordsItsLayoutAndEachPane() throws {
+        let record = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.path)
+            .remembering(splitSnapshot, projects: [game], order: .oldestFirst))
+        let window = try XCTUnwrap(record.sessions.first?["windows"]?[0])
+        XCTAssertEqual(window["layout"], .string("5e2c,160x40,0,0{80x40,0,0,1,79x40,81,0[79x20,81,0,2,79x19,81,21,3]}"))
+        XCTAssertEqual(window["panes"], .array([
+            .object(["index": .integer(0), "directory": .string(game.path), "active": .bool(false),
+                     "agent": .string("claude"), "agent_conversation": .string("conversation-1")]),
+            .object(["index": .integer(1), "directory": .string("/work/game/web"), "active": .bool(false),
+                     "command": .string("node /usr/local/bin/npm run dev")]),
+            .object(["index": .integer(2), "directory": .string("/work/game/api"), "active": .bool(true)]),
+        ]))
+    }
+
+    func testReopenOfASplitWindowMakesEachPaneResumesItsAgentAndTypesItsProgramWithoutRunningIt() throws {
+        let record = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.path)
+            .remembering(splitSnapshot, projects: [game], order: .oldestFirst))
+        let edit = try TopicReopenPlan(topic: record, records: [record], windows: [], projects: [game], existingDirectories: []).edit
+        let target = "=game/fix-reward:$"
+        let browser = TopicPlan.Command.tmux(StoredBrowser().setOptionArgs(windowID: target))
+        let panes = Array(try XCTUnwrap(edit.commands.split(separator: browser, omittingEmptySubsequences: false).last))
+        XCTAssertEqual(panes, [
+            .tmux(["split-window", "-t", target, "-c", "/work/game/web"]),
+            .tmux(["select-layout", "-t", target, "tiled"]),
+            .tmux(["split-window", "-t", target, "-c", "/work/game/api"]),
+            .sendKeys(target: target + ".+1", keys: ["claude --resume 'conversation-1'"], literal: true),
+            .sendKeys(target: target + ".+1", keys: ["Enter"], literal: false),
+            .sendKeys(target: target + ".+2", keys: ["node /usr/local/bin/npm run dev"], literal: true),
+            .tmux(["select-layout", "-t", target, "5e2c,160x40,0,0{80x40,0,0,1,79x40,81,0[79x20,81,0,2,79x19,81,21,3]}"]),
+        ], "the last Pane is active after the splits, so .+1 is the first; the shell gets no keys and needs no select-pane")
+        XCTAssertEqual(edit.commands.first, .reopenSession(name: "game/fix-reward", directory: game.path, windowName: "edit"),
+                       "the first Pane is made in its own folder")
+    }
+
+    func testReopenSelectsTheRememberedActivePaneWhenItIsNotTheLast() throws {
+        var saved = topic
+        saved.sessions = [.object(["project_path": .string(game.path), "windows": .array([.object(["name": .string("edit"), "panes": .array([
+            .object(["directory": .string(game.path), "active": .bool(false)]),
+            .object(["directory": .string(game.path), "active": .bool(true)]),
+            .object(["directory": .string(game.path), "active": .bool(false)]),
+        ])])])])]
+        let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: [game.path]).edit
+        XCTAssertEqual(edit.commands.suffix(2), [.tmux(["select-pane", "-t", "=game/fix-reward:$.+2"]),
+                                                 .tmux(["select-layout", "-t", "=game/fix-reward:$", "tiled"])],
+                       "two steps on from the last Pane, which wraps to the second, whatever pane-base-index is")
+    }
+
+    func testReopenOfARecordWithoutPanesMakesOnePaneForEachWindowAsBefore() throws {
+        var saved = topic
+        saved.sessions = [.object(["project_path": .string(game.path), "windows": .array([
+            .object(["name": .string("agent"), "directory": .string("/work/game/api"), "pane_count": .integer(3),
+                     "agent": .string("claude"), "agent_conversation": .string("abc")]),
+        ])])]
+        let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: []).edit
+        let target = "=game/fix-reward:$"
+        XCTAssertEqual(edit.commands, [
+            .reopenSession(name: "game/fix-reward", directory: game.path, windowName: "agent"),
+            .tmux(["set-option", "-t", "=game/fix-reward:", "@muxify_topic", "topic"]),
+            .tmux(["respawn-window", "-k", "-t", target, "-c", "/work/game/api"]),
+            .tmux(StoredBrowser().setOptionArgs(windowID: target)),
+            .sendKeys(target: target, keys: ["claude --resume 'abc'"], literal: true),
+            .sendKeys(target: target, keys: ["Enter"], literal: false),
+        ])
     }
 
     func testReopenKeepsSessionWorktreeWhenFirstWindowUsesMainWorkingCopy() throws {

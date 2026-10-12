@@ -101,7 +101,7 @@ default branch when there is no `base`. Settle removes only a Worktree that the 
 `$XDG_STATE_HOME/muxify/worktrees/`. If a Worktree that Settle would remove
 has modified or untracked files, Settle fails and changes nothing: the Topic
 stays open and its Sessions stay live. Each Window stores its active Pane's `directory`
-and `start_command`, its tmux `name` and `pane_count`, its Browser Tab URLs
+and `start_command`, its tmux `name`, its Browser Tab URLs
 in `browser_tabs` and the active Tab's index in `browser_active_tab`. `browser_open` and `terminal_open` hold the
 Window's Browser and Terminal toggles; Reopen shows the Browser alone when `browser_open` is true and `terminal_open` is
 false. Maximize is not stored. `start_command` holds the active Pane's start arguments as serialized by tmux's
@@ -109,7 +109,21 @@ false. Maximize is not stored. `start_command` holds the active Pane's start arg
 must parse this tmux argument format before execution. It must not send the
 stored string directly to a shell. If the
 active Pane runs an Agent, `agent` names its kind and `agent_conversation`
-holds its conversation id when available. Reopen will use one Pane per Window.
+holds its conversation id when available.
+
+Each Window also stores `layout`, tmux's `#{window_layout}`, and `panes`, one
+object for each Pane in tmux order. A Pane stores its tmux `index`, its
+`directory`, and `active`, which is true for the Window's active Pane. An Agent
+Pane stores `agent` and `agent_conversation` as the Window does. A Pane that runs
+another program, not a shell, stores its full command line in `command`. Muxify
+reads it with `ps` on the Environment's machine, because tmux gives only the
+program's name. A zoomed Pane is not stored as zoomed.
+
+Reopen makes each Pane again in its folder, then sets `layout`, and makes the
+remembered active Pane active. It resumes each Agent Pane. It types each
+`command` at the Pane's shell prompt but does not run it: the user presses ↩.
+A Window without `panes`, from an older record, gets one Pane with the Window's
+`directory` and Agent.
 `window_id` matches a live Window to its record so that renaming or reordering
 Windows retains unknown fields. It is not a target for Reopen after a restart.
 

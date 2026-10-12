@@ -30,7 +30,8 @@ final class RememberedSessionsTests: XCTestCase {
         let fields = try windowFields(first)
         XCTAssertEqual(fields["directory"], .string("/work/a/src"))
         XCTAssertEqual(fields["name"], .string("editor"))
-        XCTAssertEqual(fields["pane_count"], .integer(2))
+        XCTAssertEqual(fields["panes"], .array([.object(["index": .integer(0), "directory": .string("/work/a/src"), "active": .bool(false),
+                                                         "agent": .string("codex"), "agent_conversation": .string("conversation-1")])]))
         XCTAssertEqual(fields["start_command"], .string("codex"))
         XCTAssertEqual(fields["agent"], .string("codex"))
         XCTAssertEqual(fields["agent_conversation"], .string("conversation-1"))

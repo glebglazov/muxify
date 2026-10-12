@@ -33,6 +33,8 @@ public struct TmuxWindow: Identifiable, Hashable {
     public var startCommand: String = ""
     /// tmux `#{session_created}` of the Window's Session, in seconds since 1970.
     public var sessionCreated = 0
+    /// tmux `#{window_layout}`: where each Pane sits, as `select-layout` takes it. tmux gives the unzoomed layout.
+    public var layout = ""
 
     /// The pane title is what shells and TUIs set via OSC 0/2 (fish sets it to
     /// `~/w/project`), so it is the best human label. tmux defaults it to the
@@ -155,6 +157,8 @@ public struct TmuxPane: Hashable {
     /// `@muxify_agent_unread`, which Muxify itself sets.
     public let unread: Bool
     public var agentConversation: String = ""
+    /// `#{pane_tty}`, such as `/dev/ttys003`.
+    public var tty = ""
 
     /// What the Sidebar calls this Pane.
     public var label: String {
@@ -187,6 +191,10 @@ public struct TmuxSnapshot {
         self.ownClientTTY = ownClientTTY
         self.homeDirectory = homeDirectory
     }
+
+    /// The full command line of each Pane's program. tmux does not give it, so a snapshot has none until the
+    /// caller reads `ps` for it.
+    public var commandLines = PaneCommandLines()
 
     /// The Agents running in this snapshot's Panes, in tmux order.
     public var agents: [Agent] { Agent.list(panes: panes, windows: windows) }
@@ -304,13 +312,13 @@ public enum Tmux {
             "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{session_activity}",
             "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(shownOption)}", "#{\(openOption)}",
             "#{\(lastWindowOption)}", "#{\(agentOption)}", "#{@muxify_topic}", "#{session_path}", "#{pane_id}", "#{pane_start_command}",
-            "#{\(maximizeOption)}", "#{session_created}",
+            "#{\(maximizeOption)}", "#{session_created}", "#{window_layout}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}", "#{client_pid}", "#{client_control_mode}"].joined(separator: s)
         let paneFormat = [
             "P", "#{pane_id}", "#{window_id}", "#{pane_current_command}",
             "#{\(agentOption)}", "#{\(agentStatusOption)}", "#{\(agentUnreadOption)}", "#{\(agentConversationOption)}",
-            "#{pane_index}", "#{pane_active}", "#{pane_current_path}", "#{pane_title}",
+            "#{pane_index}", "#{pane_active}", "#{pane_current_path}", "#{pane_title}", "#{pane_tty}",
         ].joined(separator: s)
 
         return [
@@ -344,7 +352,8 @@ public enum Tmux {
                     storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], shown: f[15], maximized: field(23)),
                     openRequests: f[16].split(separator: " ").map(String.init),
                     topicID: field(19).isEmpty ? nil : field(19), sessionPath: field(20),
-                    activePaneID: field(21), startCommand: field(22), sessionCreated: Int(field(24)) ?? 0
+                    activePaneID: field(21), startCommand: field(22), sessionCreated: Int(field(24)) ?? 0,
+                    layout: field(25)
                 ))
                 if !f[17].isEmpty { lastWindowID = f[17] }
             } else if f.first == "C", f.count >= 4 {
@@ -355,7 +364,7 @@ public enum Tmux {
                 panes.append(TmuxPane(
                     id: f[1], windowID: f[2], index: Int(field(8)) ?? 0, isActive: field(9) == "1",
                     title: field(11), path: field(10), command: f[3],
-                    agent: f[4], agentStatus: f[5], unread: f[6] == "1", agentConversation: field(7)
+                    agent: f[4], agentStatus: f[5], unread: f[6] == "1", agentConversation: field(7), tty: field(12)
                 ))
             } else if f.first == "S", f.count >= 2 {
                 serverID = f[1]

@@ -45,17 +45,20 @@ final class TmuxConnection: @unchecked Sendable {
     func runScriptAsync(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20,
                         completion: @escaping (Result<String, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { () throws -> String in
-                self.lock.lock()
-                let stopped = self.retired
-                self.lock.unlock()
-                guard !stopped else { throw TmuxError.cancelled }
-                let invocation = self.remote?.script(script, arguments: arguments)
-                    ?? CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify"] + arguments)
-                return try self.runner.run(invocation, timeout: timeout)
-            }
+            let result = Result { try self.runScript(script, arguments: arguments, timeout: timeout) }
             DispatchQueue.main.async { completion(result) }
         }
+    }
+
+    /// `runScriptAsync` for a caller that is already off the main thread.
+    func runScript(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20) throws -> String {
+        lock.lock()
+        let stopped = retired
+        lock.unlock()
+        guard !stopped else { throw TmuxError.cancelled }
+        let invocation = remote?.script(script, arguments: arguments)
+            ?? CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify"] + arguments)
+        return try runner.run(invocation, timeout: timeout)
     }
 
     /// Serializes marker writes with removal, so a late registration cannot

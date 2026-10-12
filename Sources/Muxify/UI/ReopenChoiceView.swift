@@ -12,7 +12,7 @@ struct ReopenChoiceView: View {
     var body: some View {
         VStack(spacing: 16) {
             HStack(alignment: .top, spacing: 16) {
-                column(.reopen, reopen, title: "Reopen", summary: "The remembered Windows, Tabs and Agents.")
+                column(.reopen, reopen, title: "Reopen", summary: "The remembered Windows, Panes, Tabs and Agents.")
                 column(.startFresh, startFresh, title: "Start Fresh", summary: "One shell Window in each Project.")
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -61,11 +61,13 @@ struct ReopenChoiceView: View {
 
     private func windowLine(_ window: TopicReopening.Window, in session: TopicReopening.Session) -> some View {
         let tabs = window.browser.tabURLs.count
+        let agents = window.agents.map(\.kind.displayName)
         let details = [window.directory == session.directory ? nil : (window.directory as NSString).abbreviatingWithTildeInPath,
+                       window.panes.count == 1 ? nil : "\(window.panes.count) Panes",
                        tabs == 0 ? nil : tabs == 1 ? "1 Tab" : "\(tabs) Tabs",
-                       window.agent.map { "resumes \($0.kind.displayName)" }].compactMap { $0 }
+                       agents.isEmpty ? nil : "resumes " + agents.joined(separator: ", ")].compactMap { $0 }
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: window.agent == nil ? "terminal" : "sparkles").foregroundStyle(.tertiary)
+            Image(systemName: agents.isEmpty ? "terminal" : "sparkles").foregroundStyle(.tertiary)
             Text(window.name)
             Text(details.joined(separator: " · ")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }

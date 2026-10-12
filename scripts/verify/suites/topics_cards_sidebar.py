@@ -559,6 +559,40 @@ class TopicsCardsSidebar(TopicsSidebar):
         s.wait_shown('=alpha/click-dormant:')
         self.assertFalse(s.has('reopen-choice-reopen'), 'going to the Dormant Topic showed the Reopen choice')
 
+    def test_a_dormant_topic_comes_back_with_the_panes_of_its_split_window_and_its_program_typed_not_run(self):
+        s = self.s
+        # Reopen reaches each Pane by its place, not its index, so a pane-base-index the user changed must not matter.
+        s.tmux('set-option', '-g', 'pane-base-index', '1')
+        self.addCleanup(s.tmux, 'set-option', '-gu', 'pane-base-index')
+        self.write_topic('split-dormant', 'Split dormant', self.alpha, sessions=[dict(project_path=str(self.alpha))])
+        sid = self.new_session('alpha/split-dormant', self.alpha, topic='split-dormant')
+        # Each split goes right after the first Pane, which stays active: shell, sleep, shell.
+        s.tmux('split-window', '-d', '-t', sid + ':', '-c', str(self.alpha), SHELL)
+        s.tmux('split-window', '-d', '-t', sid + ':', '-c', str(self.alpha), 'sleep 6061')
+
+        def remembered():
+            windows = self.records().get('split-dormant', {}).get('sessions', [{}])[0].get('windows', [])
+            panes = windows[0].get('panes', []) if windows else []
+            return len(panes) == 3 and any(pane.get('command') == 'sleep 6061' for pane in panes)
+        wait(remembered, 'the Topic did not remember three Panes and the program: %s' % self.records().get('split-dormant'))
+        s.tmux('kill-session', '-t', sid)
+        self.find('topic-split-dormant')
+        s.wait_rows(lambda rs: 'Dormant' in self.describe('topic-split-dormant', rs), 'the Topic did not become Dormant')
+
+        s.act('press', 'topic-split-dormant')
+        self.wait_session('alpha/split-dormant')
+        self.addCleanup(self.end_session, s.tmux('display-message', '-p', '-t', '=alpha/split-dormant:', '#{session_id}'))
+        panes = lambda: [line.split() for line in s.tmux('list-panes', '-t', '=alpha/split-dormant:', '-F',
+                                                         '#{pane_id} #{pane_active} #{pane_current_command}').splitlines()]
+        wait(lambda: len(panes()) == 3, 'Reopen did not make three Panes: %s' % panes())
+        typed = lambda: [pane[0] for pane in panes() if 'sleep 6061' in s.tmux('capture-pane', '-p', '-t', pane[0])]
+        wait(lambda: len(typed()) == 1, 'Reopen did not type the program in one Pane')
+        time.sleep(REFRESH_LIMIT)
+        now = panes()
+        self.assertEqual(typed(), [now[1][0]], 'Reopen typed the program in the wrong Pane: %s' % now)
+        self.assertEqual([pane[1] for pane in now], ['1', '0', '0'], 'the remembered active Pane is not active: %s' % now)
+        self.assertNotIn('sleep', [pane[2] for pane in now], 'Reopen ran the program it should only type')
+
     def test_next_topic_on_a_dormant_topic_shows_what_each_choice_creates_and_start_fresh_opens_one_shell_window_per_project(self):
         s = self.s
         agent = dict(directory=str(self.alpha), name='agent', agent='claude', agent_conversation='conversation-1',

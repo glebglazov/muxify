@@ -165,6 +165,10 @@ public struct TopicService: Sendable {
         case .settle(let choices, let outcome):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)
+            var snapshot = snapshot
+            snapshot.commandLines = PaneCommandLines().updating(for: snapshot) {
+                try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", PaneCommandLines.script]))
+            }
             return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, projects: projects, choices: choices, outcome: outcome,
                                                  mergedWorktrees: TopicWorktrees.mergedPaths(in: topic, root: paths.worktrees.path),
                                                  order: sessionOrder).edit)

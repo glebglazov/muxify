@@ -712,6 +712,8 @@ final class WorkspaceStore {
     let topicWatcher = TopicWatcher()
     var topicSelection = TopicSelection()
     private(set) var topicBranches = TopicBranches()
+    /// The last read, so a refresh runs `ps` only when a Topic Pane starts another program.
+    @ObservationIgnored private var paneCommandLines = PaneCommandLines()
 
     /// The Snoozed and Settled groups the user opened, and the Settled pages shown.
     var topicGroups = TopicGroupsState(defaults: .standard) {
@@ -1141,8 +1143,13 @@ final class WorkspaceStore {
         let topicGeneration = topicEditGeneration
         let records = topicWatcher.records
         let remote = isRemote
+        let commandLines = paneCommandLines
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { try connection.snapshot() }
+            let result = Result { () throws -> TmuxSnapshot in
+                var snapshot = try connection.snapshot()
+                snapshot.commandLines = commandLines.updating(for: snapshot) { try? connection.runScript(PaneCommandLines.script) }
+                return snapshot
+            }
             let snapshot = try? result.get()
             let paths = (snapshot?.windows.map(\.sessionPath) ?? []) + (snapshot?.panes.map(\.path) ?? [])
             let branches = remote ? TopicBranches() : TopicBranches(records: records, paths: paths) {
@@ -1171,6 +1178,7 @@ final class WorkspaceStore {
                         self.isConnected = true
                     }
                     if self.topicBranches != branches { self.topicBranches = branches }
+                    self.paneCommandLines = snapshot.commandLines
                     self.apply(snapshot, attachIfNeeded: attachIfNeeded)
                 case .failure(let error):
                     self.isConnected = false

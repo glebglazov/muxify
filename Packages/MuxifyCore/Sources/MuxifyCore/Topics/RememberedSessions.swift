@@ -31,7 +31,7 @@ extension TopicRecord {
                 fields["window_id"] = .string(window.id)
                 fields["directory"] = .string(window.path)
                 fields["name"] = .string(window.name)
-                fields["pane_count"] = .integer(Int64(window.paneCount))
+                fields["pane_count"] = nil
                 fields["start_command"] = .string(window.startCommand)
                 fields["browser_tabs"] = .array(window.storedBrowser.tabURLs.map(JSONValue.string))
                 fields["browser_active_tab"] = .integer(Int64(window.storedBrowser.activeTab))
@@ -41,6 +41,9 @@ extension TopicRecord {
                 let agent = pane.flatMap { Agent.runs(in: $0) ? $0 : nil }
                 fields["agent"] = agent.map { .string($0.agent) }
                 fields["agent_conversation"] = agent.flatMap { $0.agentConversation.isEmpty ? nil : .string($0.agentConversation) }
+                let panes = snapshot.panes.filter { $0.windowID == window.id }.sorted { $0.index < $1.index }
+                fields["layout"] = panes.isEmpty || window.layout.isEmpty ? nil : .string(window.layout)
+                fields["panes"] = panes.isEmpty ? nil : .array(panes.map { Self.remembered($0, in: window, commandLines: snapshot.commandLines) })
                 return .object(fields)
             })
             return .object(session)
@@ -49,6 +52,20 @@ extension TopicRecord {
         var updated = self
         updated.sessions = remembered
         return updated
+    }
+
+    /// An Agent Pane keeps its conversation, a Pane that runs another program keeps its command line, and a shell
+    /// keeps only its folder.
+    private static func remembered(_ pane: TmuxPane, in window: TmuxWindow, commandLines: PaneCommandLines) -> JSONValue {
+        var fields: [String: JSONValue] = ["index": .integer(Int64(pane.index)), "directory": .string(pane.path.isEmpty ? window.path : pane.path),
+                                           "active": .bool(pane.isActive)]
+        if Agent.runs(in: pane) {
+            fields["agent"] = .string(pane.agent)
+            if !pane.agentConversation.isEmpty { fields["agent_conversation"] = .string(pane.agentConversation) }
+        } else if let line = commandLines[pane] {
+            fields["command"] = .string(line)
+        }
+        return .object(fields)
     }
 }
 
