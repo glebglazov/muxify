@@ -620,8 +620,11 @@ private struct TopicCard: View {
             if case .topic(let id) = topic.id {
                 Divider()
                 if topic.isDormant {
-                    Button("Reopen…") { store.showEmptyTopic(id) }
+                    Button("Reopen") { store.reopenTopic(id, .reopen) }
                         .accessibilityIdentifier("reopen-topic-" + id)
+                        .disabled(store.changingTopic)
+                    Button("Start Fresh") { store.reopenTopic(id, .startFresh) }
+                        .accessibilityIdentifier("start-fresh-topic-" + id)
                         .disabled(store.changingTopic)
                 }
                 Button("Snooze…") { store.presentSnoozeTopic(id) }

@@ -238,7 +238,7 @@ A step that kills a process needs ⌘↩ to confirm. The keys inside a palette a
 
 | Action | Topic | Session | Window | Agent | Project or Worktree |
 | --- | --- | --- | --- | --- | --- |
-| Jump to (↩) | Go to its Window, or show its Reopen choice when Dormant or Settled | Switch to it | Select it | Select its Window and Pane | Create the Session there, then switch |
+| Jump to (↩) | Go to its Window, Reopen it when Dormant, or show its Reopen choice when Settled | Switch to it | Select it | Select its Window and Pane | Create the Session there, then switch |
 | New Session (⌘↩) | — | — | — | — | Start another Session there, then switch |
 | Copy Path (⌘C) | — | Its start folder | The active Pane's folder | The Pane's folder | The folder |
 | Copy tmux Target (⌘⇧C) | — | Session name | `session:index` | Pane ID | — |

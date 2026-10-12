@@ -544,16 +544,40 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.assertIsNotNone(latency, 'Reopen did not return the Topic to the Topics list; Topic rows %s' % self.topic_rows(rs))
         self.assertIsNone(self.records()['group-settled'].get('settled_at'), 'Reopen kept the settle date in the record')
 
-    def test_a_dormant_topic_shows_what_each_choice_creates_and_start_fresh_opens_one_shell_window_per_project(self):
+    def test_pressing_a_dormant_topic_card_reopens_it_without_the_reopen_choice(self):
+        s = self.s
+        self.write_topic('click-dormant', 'Click dormant', self.alpha, sessions=[dict(project_path=str(self.alpha), windows=[
+            dict(directory=str(self.alpha), name='edit'), dict(directory=str(self.alpha), name='logs')])])
+        self.find('topic-click-dormant')
+        s.act('press', 'topic-click-dormant')
+        self.wait_session('alpha/click-dormant')
+        self.addCleanup(self.end_session, s.tmux('display-message', '-p', '-t', '=alpha/click-dormant:', '#{session_id}'))
+        wait(lambda: s.tmux('list-windows', '-t', '=alpha/click-dormant:', '-F', '#{window_name}').split() == ['edit', 'logs'],
+             'Reopen did not create the remembered Windows')
+        s.wait_shown('=alpha/click-dormant:')
+        self.assertFalse(s.has('reopen-choice-reopen'), 'going to the Dormant Topic showed the Reopen choice')
+
+    def test_next_topic_on_a_dormant_topic_shows_what_each_choice_creates_and_start_fresh_opens_one_shell_window_per_project(self):
         s = self.s
         agent = dict(directory=str(self.alpha), name='agent', agent='claude', agent_conversation='conversation-1',
                      browser_tabs=['https://example.com/a'], browser_open=True)
-        self.write_topic('choice-dormant', 'Choice dormant', self.alpha, sessions=[
+        self.write_topic('choice-active', 'Choice active', self.beta, order=-2001)
+        sid = self.new_session('beta/choice-active', self.beta, topic='choice-active')
+        self.write_topic('choice-dormant', 'Choice dormant', self.alpha, order=-2000, sessions=[
             dict(project_path=str(self.alpha), windows=[dict(directory=str(self.alpha), name='edit'), agent]),
             dict(project_path=str(self.beta), windows=[dict(directory=str(self.beta), name='logs')])])
         self.find('topic-choice-dormant')
-        s.act('action', 'topic-choice-dormant', 'Go to Topic')
-        rs = s.wait_rows(lambda rs: s.has('reopen-choice-start-fresh', rs), 'the Dormant Topic did not show its Reopen choice')
+        self.select_window(sid + ':')
+        s.wait_shown(sid + ':')
+        self.press_menu_item('Go to…')
+        key = 'palette-row-topic-choice-active'
+        s.wait_rows(lambda rs: s.has(key, rs), 'the Active Topic did not show in Go to')
+        s.act('action', key, 'Snooze Topic')
+        rs = s.wait_rows(lambda rs: s.has('palette-note', rs), 'Snooze did not show the Next Topic')
+        note = s.row('palette-note', rs)
+        self.assertIn('Then opens: Choice dormant', note.get('accessibilityLabel', '') + note.get('accessibilityValue', ''))
+        s.act('press', 'palette-row-never')
+        rs = s.wait_rows(lambda rs: s.has('reopen-choice-start-fresh', rs), 'Next Topic did not show the Reopen choice')
         reopen = self.describe('reopen-session-alpha', rs)
         for text in ['edit', 'agent', '1 Tab', 'resumes Claude Code']:
             self.assertIn(text, reopen, 'the Reopen column does not say ' + text)
