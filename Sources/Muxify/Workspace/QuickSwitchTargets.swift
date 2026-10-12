@@ -76,10 +76,11 @@ extension QuickSwitchTargets {
     init(model: TopicsModel, sessions: [SessionGroup], windows: [TmuxWindow], tabIDs: [UUID]) {
         let cards: [QuickSwitchTarget]
         if model.mode == .topics {
+            // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
             cards = model.rows.compactMap { row in
                 if case .topic(let id) = row.id { return .topic(id) }
                 return nil
-            } + model.noTopicSessions.map { .session($0.id.session) }
+            }
         } else {
             cards = sessions.map { .session($0.id) }
         }

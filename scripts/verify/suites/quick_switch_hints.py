@@ -75,7 +75,7 @@ class QuickSwitchHints(unittest.TestCase):
         self.input('Release modifiers')
         self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '1', 'release did not restore rest Hint')
 
-    def test_card_shortcuts_jump_to_dormant_and_unrendered_no_topic_session(self):
+    def test_card_shortcuts_reach_topics_and_never_no_topic_sessions(self):
         self.input('Press ⌃2')
         self.s.wait_rows(lambda rows: not self.s.has('hint-terminal', rows)
                          and self.s.has('empty-topic-title', rows)
@@ -86,7 +86,15 @@ class QuickSwitchHints(unittest.TestCase):
         self.assertFalse(self.s.has('hint-terminal'), 'Dormant placeholder has a Terminal Hint')
         self.input('Release modifiers')
         self.input('Press ⌃3')
-        self.s.wait_shown(self.no_topic)
+        time.sleep(2)
+        self.assertEqual(self.value('empty-topic-title'), 'Dormant Topic', 'a No Topic Session has a card number')
+        self.select(self.no_topic)
+        card = 'no-topic-session-' + self.no_topic_session
+        self.s.wait_rows(lambda rows: self.s.has(card, rows), 'opened No Topic card missing')
+        self.input('Hold Control')
+        self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '⌃1', 'no hold Hint')
+        self.assertFalse(self.s.has('hint-session-' + self.no_topic_session), 'opened No Topic card has a Hint')
+        self.input('Release modifiers')
         self.s.act('press', 'toggle-sidebar')
         self.input('Press ⌃1')
         self.s.wait_shown(self.first)

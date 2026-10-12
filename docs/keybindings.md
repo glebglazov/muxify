@@ -181,7 +181,7 @@ Each Hint shows the trigger from the current Config. Its modifiers must match ex
 For example, holding Control does not show a shortcut that needs Control and Command.
 Letter remaps and multiple triggers appear as configured. Terminal Hints show numeric triggers only.
 
-Card positions follow Pinned Topics, other open Topics, then all No Topic Sessions.
+Card positions follow Pinned Topics, then other open Topics. No Topic Sessions have no position.
 In Sessions mode, they follow the Session cards. The Agents section has no Hints.
 Jump To a Dormant Topic shows its empty Topic view. It does not start a Session.
 Window positions stay within the current Session. Tab positions follow the Browser strip.

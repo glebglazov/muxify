@@ -207,7 +207,7 @@ final class HintTests: XCTestCase {
         }
     }
 
-    func testCardOrderIncludesPinnedDormantAndEveryNoTopicSession() {
+    func testTopicsModeCardsArePinnedThenDormantTopicsWithoutNoTopicSessions() {
         var pinned = TopicRecord(id: "pinned")
         pinned.isPinned = true
         let records = [TopicRecord(id: "dormant"), pinned]
@@ -219,9 +219,14 @@ final class HintTests: XCTestCase {
         let windows = [window("1"), window("2")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
         let topics = TopicsModel(records: records, windows: windows, config: Config(), selection: TopicSelection())
-        XCTAssertNil(topics.openedNoTopicSession)
-        let targets = QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: [])
-        XCTAssertEqual(targets.cards, [.topic("pinned"), .topic("dormant"), .session("$1"), .session("$2")])
+        XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
+                       [.topic("pinned"), .topic("dormant")])
+        var selection = TopicSelection()
+        selection.windowID = "@1"
+        let opened = TopicsModel(records: records, windows: windows, config: Config(), selection: selection)
+        XCTAssertEqual(opened.openedNoTopicSession?.id.session, "$1")
+        XCTAssertEqual(QuickSwitchTargets(model: opened, sessions: sessions, windows: windows, tabIDs: []).cards,
+                       [.topic("pinned"), .topic("dormant")])
         let sessionMode = TopicsModel(records: records, windows: windows, config: Config(),
                                       selection: TopicSelection(), mode: .sessions)
         XCTAssertEqual(QuickSwitchTargets(model: sessionMode, sessions: sessions.reversed(), windows: [], tabIDs: []).cards,
