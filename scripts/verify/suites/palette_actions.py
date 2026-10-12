@@ -43,7 +43,7 @@ class PaletteActions(unittest.TestCase):
         self.s.wait_shown(self.window)
 
     def open_move(self):
-        wait(lambda: self.s.driver('press', 'New Topic from Pane')['pressed'], 'Move menu stayed disabled')
+        wait(lambda: self.s.driver('press', 'Move Pane…')['pressed'], 'Move menu stayed disabled')
         return self.s.wait_rows(lambda rs: self.s.has('palette-row-new-topic', rs), 'Move did not open')
 
     def type_query(self, value):

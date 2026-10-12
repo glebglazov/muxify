@@ -308,7 +308,7 @@ public struct Config: Equatable {
         #   # with no keybinding. A trigger listed here is taken from the
         #   # defaults of other actions.
         #   # Keybindings work throughout Muxify, including in the Browser.
-        #   # move_keyboard_to_terminal uses Ctrl+backquote, Ctrl+0 and Alt+0.
+        #   # focus_terminal also uses Ctrl+backquote, Ctrl+0 and Alt+0.
         #   # Cmd+backquote stays available for macOS App Window switching.
         #   # select_card_1 through select_card_9 Jump To Topic or Session cards.
         #   # select_tab_1 through select_tab_9 select Tabs and show the Browser.
@@ -864,6 +864,42 @@ private struct ConfigReader {
         }
     }
 
+    /// Old `keybindings` names and the actions that replaced them. A Config
+    /// that names one gets a problem, so the old name never silently stops working.
+    static let removedActions: [String: ConfigAction] = [
+        "toggle_focus": .toggleMaximize,
+        "move_keyboard_to_terminal": .focusTerminal,
+        "new_topic_from_pane": .movePane,
+        "move_session_to_topic": .moveSession,
+        "zen_mode": .toggleZen,
+    ]
+
+    /// The same for `keybindings.command_palette`. Its old move_* names are
+    /// valid `keybindings` actions, so each scope keeps its own table.
+    static let removedPaletteActions: [String: PaletteAction] = [
+        "snooze": .snoozeTopic,
+        "add_project": .addProjectToTopic,
+        "zen": .startZen,
+        "settle": .settleTopic,
+        "forget": .forgetTopic,
+        "unsnooze": .unsnoozeTopic,
+        "reopen": .reopenTopic,
+        "start_fresh": .startTopicFresh,
+        "pin": .pinTopic,
+        "unpin": .unpinTopic,
+        "copy_path": .copyFolder,
+        "paste_path": .pasteFolder,
+        "reveal": .revealFolder,
+        "copy_target": .copyTmuxTarget,
+        "move_pane": .choosePane,
+        "move_window": .chooseWindow,
+        "move_session": .chooseSession,
+        "include_tab": .toggleIncludeTab,
+        "new_worktree": .toggleNewWorktree,
+        "suggest": .suggestTopicTitle,
+        "suggest_title": .suggestTopicTitle,
+    ]
+
     mutating func readKeybindings(_ node: Node) {
         for (name, key, value) in entries(of: node, "keybindings") {
             if name == "command_palette" {
@@ -872,6 +908,10 @@ private struct ConfigReader {
             }
             if name == "open_switcher" {
                 problem(at: key, "open_switcher is gone: the Go to… Command Palette replaces the Switcher; bind it in command_palettes")
+                continue
+            }
+            if let renamed = Self.removedActions[name] {
+                problem(at: key, "\(name) is gone: use \(renamed.rawValue)")
                 continue
             }
             guard let action = ConfigAction(rawValue: name) else {
@@ -889,6 +929,10 @@ private struct ConfigReader {
         var named: [PaletteAction] = []
         var claims: [Claim<PaletteAction>] = []
         for (name, key, value) in entries(of: node, "keybindings.command_palette") {
+            if let renamed = Self.removedPaletteActions[name] {
+                problem(at: key, "\(name) is gone: use \(renamed.rawValue)")
+                continue
+            }
             guard let action = PaletteAction(rawValue: name) else {
                 problem(at: key, "unknown Command Palette action \"\(name)\"")
                 continue

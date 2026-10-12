@@ -8,7 +8,7 @@ private struct HintAnchors: PreferenceKey {
     }
 }
 
-struct HintChip: View {
+struct HintBadge: View {
     let target: QuickSwitchTarget
     let triggers: [KeyTrigger]
 
@@ -91,7 +91,7 @@ extension View {
                         if case .window = target {
                             Group {
                                 if !hints[target].isEmpty {
-                                    HintChip(target: target, triggers: hints[target])
+                                    HintBadge(target: target, triggers: hints[target])
                                 } else if let key = hints.restKey(for: target) {
                                     HintKey(target: target, key: key)
                                 }
@@ -104,7 +104,7 @@ extension View {
                                 .frame(width: rect.width, height: rect.height)
                                 .overlay(alignment: .trailing) {
                                     if !hints[target].isEmpty {
-                                        HintChip(target: target, triggers: hints[target])
+                                        HintBadge(target: target, triggers: hints[target])
                                     } else if let key = hints.restKey(for: target) {
                                         CardRestKey(target: target, key: key)
                                     }
@@ -123,7 +123,7 @@ extension View {
         opacity(hints[target].isEmpty ? 1 : 0.5)
             .overlay(alignment: .topTrailing) {
                 if !hints[target].isEmpty {
-                    HintChip(target: target, triggers: hints[target]).padding(4)
+                    HintBadge(target: target, triggers: hints[target]).padding(4)
                 }
             }
     }

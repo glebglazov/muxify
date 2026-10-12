@@ -3,27 +3,29 @@
 ## Configurable actions
 
 These keybindings work throughout Muxify, including while a Browser page or its
-address bar has focus. All available `keybindings` actions are listed below.
+address bar has Focus. All available `keybindings` actions are listed below.
 
 | Action | Default shortcuts | What it does |
 | --- | --- | --- |
 | `new_app_window` | ⌘N | Open a new Local Muxify App Window |
 | `new_topic` | Unbound | Open New Topic in the palette |
-| `new_topic_from_pane` | ⌘⇧T | Open Move for the current Pane |
-| `move_session_to_topic` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
+| `move_pane` | ⌘⇧T | Open Move for the current Pane |
+| `move_window` | Unbound | Open Move for the selected Window |
+| `move_session` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
 | `add_project_to_topic` | ⌘⇧A | Open Add a Project for the Active Topic in the palette |
 | `snooze_topic` | ⌥⌘S | Snooze the Active Topic, then open the Next Topic |
-| `zen_mode` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic, it only ends Zen |
+| `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic, it only ends Zen |
 | `settle_topic` | Unbound | Settle the Active Topic, then open the Next Topic |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser. It does nothing while the Browser is the only side shown |
-| `toggle_focus` | ⇧⌘↩ | Focus the side the keyboard is in: show it alone and hide the Sidebar. While Focus is on, end it |
-| `focus_terminal` | ⌥⌘T | Focus the Terminal and move the keyboard into it. While the Terminal is in Focus, end Focus |
-| `focus_browser` | ⌥⌘B | Focus the Browser and move the keyboard into it, also when the Browser is hidden. While the Browser is in Focus, end Focus |
-| `move_keyboard_to_terminal` | ⌃ + backquote, ⌃0, ⌥0 | Move the keyboard into the Terminal of the current App Window |
+| `toggle_maximize` | ⇧⌘↩ | Maximize the side that has Focus: show it alone and hide the Sidebar. While the Window is Maximized, Restore it |
+| `toggle_maximize_terminal` | ⌥⌘J | Maximize the Terminal and move Focus to it. While the Terminal is Maximized, Restore the Window |
+| `toggle_maximize_browser` | ⌥⌘B | Maximize the Browser and move Focus to it, also when the Browser is hidden. While the Browser is Maximized, Restore the Window |
+| `focus_terminal` | ⌘⇧J, ⌃ + backquote, ⌃0, ⌥0 | Move Focus to the Terminal. If the Terminal is hidden, show it. If the Browser is Maximized, Restore first |
+| `focus_browser` | ⌘⇧B | Move Focus to the Browser: to its page, or to the address field of a blank Tab. If the Browser is hidden, show it. If the Terminal is Maximized, Restore first |
 | `select_card_1` … `select_card_9` | ⌃1 … ⌃9 | Jump To the Topic or Session at that position in Sidebar order |
-| `select_tab_1` … `select_tab_9` | ⌥1 … ⌥9 | Select that Tab and move the keyboard into the Browser, showing it if hidden |
+| `select_tab_1` … `select_tab_9` | ⌥1 … ⌥9 | Select that Tab and move Focus to the Browser, showing it if hidden |
 | `select_window_1` | ⌘1 | Select the first Window in the current Session |
 | `select_window_2` | ⌘2 | Select the second Window |
 | `select_window_3` | ⌘3 | Select the third Window |
@@ -45,27 +47,37 @@ Tab, Add a Project, Snooze Topic, Settle Topic, and Zen or End Zen. These use th
 current item and appear when that item is available. Back returns from an input
 step to the Commands search.
 
-Move opens for a Pane with ⌘⇧T or a Session with ⌘⇧M. Its chips select
-Pane, Window or Session. For a Pane or Window, New Topic is the first row.
-A Pane can also move to a New Window. The ＋ Tab chip includes the active
-Browser Tab and keeps its history. A Topic that cannot accept the move shows
+Commands also lists the layout and Focus actions: Maximize or Restore, Maximize
+Terminal, Maximize Browser, Focus Terminal, Focus Browser, and Show or Hide for
+the Sidebar, the Terminal and the Browser. Each row shows its configured shortcut.
+A row appears only when its action can change something.
+
+Move opens for a Pane with ⌘⇧T, a Window with `move_window` or a Session with ⌘⇧M.
+Its Pane, Window and Session buttons select what moves. For a Pane or Window,
+New Topic is the first row. A Pane can also move to a New Window. The ＋ Tab
+button includes the active Browser Tab and keeps its history. A Topic that cannot accept the move shows
 the reason. Move does nothing while `sidebar.topics` is off.
 
 Every Action uses the palette's view, including Actions from Sidebar and menu
 bar items. ⎋ closes without a change. ⌫ in an empty field goes back one step.
 A step that kills a process needs ⌘↩ to confirm.
 
-Focus never changes the toggles. When Focus ends, the Window shows what its
-toggles say. A Sidebar, Terminal or Browser toggle used during Focus first keeps
-what is on screen, then ends Focus and applies. Focus on a side that is already
-alone, with the Sidebar hidden, has nothing to hide and does nothing. Each Window
-keeps its own Focus: the Sidebar shows again in a Window without Focus. ⇧⌘↩ is
-also Ghostty's default for `toggle_split_zoom`; Muxify's binding takes
-precedence, as for every Muxify keybinding.
+Maximize never changes the toggles. On Restore, the Window shows what its
+toggles say. A Sidebar, Terminal or Browser toggle used while the Window is
+Maximized first keeps what is on screen, then restores the Window and applies.
+Maximize of a side that is already alone, with the Sidebar hidden, has nothing to
+hide and does nothing. Each Window keeps its own Maximize state: the Sidebar shows
+again in a Window that is not Maximized. ⇧⌘↩ is also Ghostty's default for
+`toggle_split_zoom`. Muxify's binding takes precedence, as for every Muxify
+keybinding.
+
+Focus is where keyboard input goes: the Terminal, the Browser or a Command
+Palette. `focus_terminal` and `focus_browser` move Focus only. They never
+Maximize a side.
 
 All tmux Window navigation stays within the focused App Window's current Session
 and follows sidebar order, not tmux's window indices.
-Switching Windows also restores that Window's Browser and moves the keyboard to
+Switching Windows also restores that Window's Browser and moves Focus to
 its Terminal, or to its Browser when its Terminal is hidden. If a
 numbered position does not exist, the shortcut does nothing.
 
@@ -77,19 +89,21 @@ action, keeps the default bindings, and assigns optional next/previous shortcuts
 keybindings:
   new_app_window: cmd+n
   new_topic: []
-  new_topic_from_pane: cmd+shift+t
-  move_session_to_topic: cmd+shift+m
+  move_pane: cmd+shift+t
+  move_window: []
+  move_session: cmd+shift+m
   add_project_to_topic: cmd+shift+a
   snooze_topic: alt+cmd+s
-  zen_mode: shift+alt+cmd+s
+  toggle_zen: shift+alt+cmd+s
   settle_topic: []
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
   toggle_terminal: cmd+j
   toggle_browser: cmd+b
-  toggle_focus: shift+cmd+enter
-  focus_terminal: alt+cmd+t
-  focus_browser: alt+cmd+b
-  move_keyboard_to_terminal: [ctrl+backquote, ctrl+0, alt+0]
+  toggle_maximize: shift+cmd+enter
+  toggle_maximize_terminal: alt+cmd+j
+  toggle_maximize_browser: alt+cmd+b
+  focus_terminal: [cmd+shift+j, ctrl+backquote, ctrl+0, alt+0]
+  focus_browser: cmd+shift+b
   select_card_1: ctrl+1
   select_card_2: ctrl+2
   select_card_3: ctrl+3
@@ -142,10 +156,16 @@ To change New App Window, use `new_app_window: cmd+shift+n`; use
 `new_app_window: []` to disable its shortcuts. This also removes the terminal's
 default ⌘N behavior. New tmux Session remains available from the File menu.
 
-Move Keyboard to Terminal defaults to Control + backquote, Control + 0, and Option + 0. This leaves Command + backquote
-for macOS App Window switching. Use `move_keyboard_to_terminal: []` to disable it, or
-`move_keyboard_to_terminal: cmd+backquote` to restore the old shortcut at the cost of native
-App Window switching.
+Focus Terminal defaults to Command + Shift + J, Control + backquote, Control + 0
+and Option + 0. This leaves Command + backquote for macOS App Window switching.
+Use `focus_terminal: []` to disable it, or `focus_terminal: cmd+backquote` to
+use that key instead. Then macOS App Window switching does not work.
+
+The old names `toggle_focus`, `move_keyboard_to_terminal`, `new_topic_from_pane`,
+`move_session_to_topic` and `zen_mode` are gone. A Config that names one shows a
+problem that names the new action. `focus_terminal` and `focus_browser` keep their
+names with a new meaning. A Config that binds them changes behavior and shows no
+problem.
 
 ## Hints
 
@@ -192,62 +212,67 @@ conflict with the actions above:
 | `select_next` | Down, ⌃J | Highlight the next result or action |
 | `select_prev` | Up, ⌃K | Highlight the previous result or action |
 | `show_actions` | ⌘K | Show or hide the actions menu |
-| `copy_path` | ⌘C | Copy the result's folder |
-| `copy_target` | ⌘⇧C | Copy the result's tmux target or Pane ID |
-| `paste_path` | ⌃Y | Type the result's folder, as one shell word, at the prompt of the current Pane |
-| `snooze` | ⌃S | Open Snooze for the highlighted open, Dormant or Snoozed Topic |
+| `copy_folder` | ⌘C | Copy the result's folder |
+| `copy_tmux_target` | ⌘⇧C | Copy the result's tmux target or Pane ID |
+| `paste_folder` | ⌃Y | Type the result's folder, as one shell word, at the prompt of the current Pane |
+| `snooze_topic` | ⌃S | Open Snooze for the highlighted open, Dormant or Snoozed Topic |
 | `move` | Unbound | Open Move for the highlighted result |
-| `add_project` | Unbound | Add a Project to the highlighted Topic |
+| `add_project_to_topic` | Unbound | Add a Project to the highlighted Topic |
 | `rename` | Unbound | Rename the highlighted Topic or Window |
-| `suggest` | Unbound | Suggest a title for the highlighted Topic |
-| `zen` | Unbound | Start Zen for the highlighted Topic |
-| `settle` | Unbound | Settle the highlighted Topic |
-| `forget` | Unbound | Forget the highlighted Topic |
-| `unsnooze` | Unbound | Unsnooze the highlighted Topic |
-| `reopen` | Unbound | Reopen the highlighted Topic |
-| `start_fresh` | Unbound | Start Fresh for the highlighted Topic |
-| `pin` | Unbound | Pin the highlighted Topic |
-| `unpin` | Unbound | Unpin the highlighted Topic |
+| `suggest_topic_title` | ⌥S | In Rename or New Topic, type a title that the Agents suggest. On a highlighted Topic, rename it to that title |
+| `start_zen` | Unbound | Start Zen for the highlighted Topic. While Zen is on, end it |
+| `settle_topic` | Unbound | Settle the highlighted Topic |
+| `forget_topic` | Unbound | Forget the highlighted Topic |
+| `unsnooze_topic` | Unbound | Unsnooze the highlighted Topic |
+| `reopen_topic` | Unbound | Reopen the highlighted Topic |
+| `start_topic_fresh` | Unbound | Start Fresh for the highlighted Topic |
+| `pin_topic` | Unbound | Pin the highlighted Topic |
+| `unpin_topic` | Unbound | Unpin the highlighted Topic |
 | `remove_from_topic` | Unbound | Remove the highlighted Session or Window from its Topic |
 | `new_window` | Unbound | Create a Window in the highlighted Session |
-| `reveal` | Unbound | Reveal the result's folder in Finder |
+| `reveal_folder` | Unbound | Show the result's folder in Finder |
 | `kill_window` | Unbound | Confirm a kill of the highlighted Window |
-| `move_pane` | ⌥1 | Select the Pane chip in Move |
-| `move_window` | ⌥2 | Select the Window chip in Move |
-| `move_session` | ⌥3 | Select the Session chip in Move |
-| `include_tab` | ⌥T | Turn the ＋ Tab chip on or off in Move |
-| `new_worktree` | ⌥W | Turn the New Worktree option on or off when available |
-| `suggest_title` | ⌥S | Suggest a Topic title when available |
+| `choose_pane` | ⌥1 | Select the Pane button in Move |
+| `choose_window` | ⌥2 | Select the Window button in Move |
+| `choose_session` | ⌥3 | Select the Session button in Move |
+| `toggle_include_tab` | ⌥T | Turn the ＋ Tab button on or off in Move |
+| `toggle_new_worktree` | ⌥W | Turn the New Worktree option on or off when available |
 
 ```yaml
 keybindings:
   command_palette:
     jump_to: enter
     select_next: [down, ctrl+j, ctrl+n]
-    copy_target: []
+    copy_tmux_target: []
 ```
 
-⎋ and ⌘1–⌘5 (the source chips) are not configurable. With no results, ⌘C
+The old palette names `copy_path`, `copy_target`, `paste_path`, `snooze`,
+`add_project`, `suggest`, `suggest_title`, `zen`, `settle`, `forget`, `unsnooze`,
+`reopen`, `start_fresh`, `pin`, `unpin`, `reveal`, `move_pane`, `move_window`,
+`move_session`, `include_tab` and `new_worktree` are gone. A Config that names one
+under `command_palette` shows a problem that names the new action.
+
+⎋ and ⌘1–⌘5 (the Source buttons) are not configurable. With no results, ⌘C
 copies the search text.
 
 ## Built-in shortcuts
 
 These shortcuts are not configurable as actions in Muxify's `keybindings`
 section. Configured Muxify bindings still take precedence over them. When the
-terminal has focus, Ghostty bindings can take precedence over menu shortcuts.
+terminal has Focus, Ghostty bindings can take precedence over menu shortcuts.
 
 | Shortcut | Action |
 | --- | --- |
 | ⌘ + backquote / ⌘⇧ + backquote | Cycle App Windows forward / backward (macOS) |
 | ⌘⇧, | Reload the Muxify Config and Ghostty config |
 
-**Browser shortcuts** apply when the Browser has focus. Menu clicks work even
+**Browser shortcuts** apply when the Browser has Focus. Menu clicks work even
 when it does not. New Tab and Open Location can reveal a hidden Browser:
 
 | Shortcut | Action |
 | --- | --- |
 | ⌘T | Open a new Browser Tab |
-| ⌘L | Focus the address bar, opening the Browser if hidden |
+| ⌘L | Move Focus to the address bar, opening the Browser if hidden |
 | ⌘W | Close the active Browser Tab |
 | ⌘⇧] or ⌃Tab | Select the next Browser Tab |
 | ⌘⇧[ or ⌃⇧Tab | Select the previous Browser Tab |
@@ -260,7 +285,7 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | Escape (address bar) | Restore the current URL and focus the page |
 
 The ⌃Tab shortcuts also require the Browser to be open. ⌘W never closes the
-Muxify app window; when the terminal has focus, it does nothing unless you
+Muxify app window; when the terminal has Focus, it does nothing unless you
 assign it to a configurable action.
 
 Developer Tools are also available from **Browser → Show Developer Tools**,

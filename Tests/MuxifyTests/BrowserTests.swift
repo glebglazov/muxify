@@ -109,7 +109,7 @@ final class BrowserTests: XCTestCase {
         XCTAssertTrue(destination.activeTab === tab)
         XCTAssertEqual(destination.tabs.count, 1)
         XCTAssertTrue(destination.layout.shows(.browser))
-        XCTAssertEqual(destination.keyboardRequest, .addressBar)
+        XCTAssertEqual(destination.focusRequest, .addressBar)
         XCTAssertEqual(shownChanges, ["@1", "@2"])
     }
 
@@ -192,16 +192,27 @@ final class BrowserTests: XCTestCase {
     }
 
     @MainActor
-    func testFocusOnAnEmptyBrowserGivesItABlankTabThatGoesWhenFocusEnds() {
+    func testMaximizeOfAnEmptyBrowserGivesItABlankTabThatGoesOnRestore() {
         let browser = Browser(windowID: "@1", stored: StoredBrowser())
-        browser.toggleFocus(.browser, sidebarShown: true)
+        browser.toggleMaximize(.browser, sidebarShown: true)
         XCTAssertTrue(browser.layout.shows(.browser))
         XCTAssertFalse(browser.layout.shows(.terminal))
         XCTAssertEqual(browser.stored.tabURLs, ["about:blank"])
-        XCTAssertEqual(browser.keyboardRequest, .addressBar)
-        browser.toggleFocus(.browser, sidebarShown: false)
+        XCTAssertEqual(browser.focusRequest, .addressBar)
+        browser.toggleMaximize(.browser, sidebarShown: false)
         XCTAssertFalse(browser.layout.shows(.browser))
         XCTAssertEqual(browser.stored.tabURLs, [])
+    }
+
+    @MainActor
+    func testRevealingTheBrowserFromAMaximizedTerminalRestoresAndAsksForFocus() {
+        let browser = Browser(windowID: "@1", stored: StoredBrowser(layout: PanelLayout(shown: .terminal, maximized: .terminal)))
+        browser.reveal(.browser)
+        XCTAssertNil(browser.layout.maximized, "the Maximized Terminal was not restored")
+        XCTAssertTrue(browser.layout.shows(.terminal))
+        XCTAssertTrue(browser.layout.shows(.browser))
+        XCTAssertEqual(browser.stored.tabURLs, ["about:blank"])
+        XCTAssertEqual(browser.focusRequest, .addressBar, "the blank Tab's address field did not ask for Focus")
     }
 
     @MainActor

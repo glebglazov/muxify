@@ -331,7 +331,7 @@ class CommandPalette(unittest.TestCase):
         wait(lambda: window in self.client_windows(), 'the client did not go into the Topic Session', seconds=10)
 
     def open_move(self):
-        self.s.act('press', 'Move Session to Topic…')
+        self.s.act('press', 'Move Session…')
         return self.s.wait_rows(lambda rs: self.s.has('palette-row-new-topic', rs), 'Move did not open')
 
     def test_move_makes_a_new_topic_titled_by_the_query_from_the_selected_session(self):
@@ -371,7 +371,7 @@ class CommandPalette(unittest.TestCase):
 
         def refused():
             # The menu follows the Sidebar about a second later; a press that still lands opens Move.
-            if self.s.driver('press', 'Move Session to Topic…')['pressed']:
+            if self.s.driver('press', 'Move Session…')['pressed']:
                 self.close_palette()
                 return False
             return True
@@ -379,7 +379,7 @@ class CommandPalette(unittest.TestCase):
         self.assertIsNone(self.rows_until(lambda rs: self.s.has('palette-search', rs), seconds=2)[0], 'Move opened')
         config.write_text(text)
         self.s.wait_rows(lambda rs: self.s.has('sidebar-view-topics', rs), 'the Sidebar did not offer Topics mode again')
-        wait(lambda: self.s.driver('press', 'Move Session to Topic…')['pressed'], 'the menu item did not come back', seconds=10)
+        wait(lambda: self.s.driver('press', 'Move Session…')['pressed'], 'the menu item did not come back', seconds=10)
         self.close_palette()
 
     def test_the_palette_opens_with_the_active_topic_first_under_the_cursor(self):

@@ -46,7 +46,7 @@ final class CommandPalette {
     var suggestionRequest = UUID()
     /// nil selects the first result.
     var selectedID: String?
-    /// The chips that are on: the palette's `sources` when it opens.
+    /// The Source buttons that are on: the palette's `sources` when it opens.
     var selection: Set<PaletteSource> = [] {
         didSet { if selection != oldValue { selectedID = nil } }
     }
@@ -77,20 +77,20 @@ final class CommandPalette {
 
     var theme: PaletteTheme { PaletteTheme(store?.theme) }
 
-    /// One chip per Source this App Window has; ⌘1… switch them on and off.
-    var chips: [PaletteSource] {
+    /// One button per Source this App Window has; ⌘1… switch them on and off.
+    var sourceButtons: [PaletteSource] {
         guard let current else { return [] }
-        return current.chips.filter { $0 != .topics || catalog?.offersTopics == true }
+        return current.allSources.filter { $0 != .topics || catalog?.offersTopics == true }
     }
 
-    /// The palette's own Sources that this App Window has, else every chip.
+    /// The palette's own Sources that this App Window has, else every Source button.
     private var openingSelection: Set<PaletteSource> {
-        let own = Set(current?.sources ?? []).intersection(chips)
-        return own.isEmpty ? Set(chips) : own
+        let own = Set(current?.sources ?? []).intersection(sourceButtons)
+        return own.isEmpty ? Set(sourceButtons) : own
     }
 
-    /// The last chip that is on stays on.
-    func toggleChip(_ source: PaletteSource) {
+    /// The last Source button that is on stays on.
+    func toggleSource(_ source: PaletteSource) {
         if !selection.contains(source) {
             selection.insert(source)
         } else if selection.count > 1 {
@@ -114,7 +114,7 @@ final class CommandPalette {
     var results: PickList<PaletteItem> {
         guard let catalog else { return .empty }
         if let flow { return flowResults(flow) }
-        return catalog.list(chips.filter(selection.contains), query: query)
+        return catalog.list(sourceButtons.filter(selection.contains), query: query)
     }
 
     func selected(in list: PickList<PaletteItem>) -> PickRow<PaletteItem>? {
@@ -130,11 +130,11 @@ final class CommandPalette {
         case .topic(let id, _):
             guard let store, !store.isRemote, let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return actions }
             if topic.settledAt == nil {
-                actions += topic.snoozedUntil == nil ? [.snooze] : [.unsnooze]
-                actions += [.zen, .settle, .addProject, .rename, .suggest, topic.isPinned ? .unpin : .pin]
+                actions += topic.snoozedUntil == nil ? [.snoozeTopic] : [.unsnoozeTopic]
+                actions += [.startZen, .settleTopic, .addProjectToTopic, .rename, .suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
             }
-            if topic.settledAt != nil || !store.windows.contains(where: { $0.topicID == id }) { actions += [.reopen, .startFresh] }
-            actions += [.forget]
+            if topic.settledAt != nil || !store.windows.contains(where: { $0.topicID == id }) { actions += [.reopenTopic, .startTopicFresh] }
+            actions += [.forgetTopic]
         case .session(let session):
             if store?.isRemote == false { actions += [.move]; if session.windows.first?.topicID != nil { actions += [.removeFromTopic] } }
             actions += [.newWindow]
@@ -146,9 +146,9 @@ final class CommandPalette {
         case .project: actions += [.newSession]
         case .choice, .command: break
         }
-        if !item.path.isEmpty { actions += [.copyPath]; if store?.isRemote == false { actions += [.reveal] } }
-        if item.target != nil { actions += [.copyTarget] }
-        if row.paste != nil { actions += [.pastePath] }
+        if !item.path.isEmpty { actions += [.copyFolder]; if store?.isRemote == false { actions += [.revealFolder] } }
+        if item.target != nil { actions += [.copyTmuxTarget] }
+        if row.paste != nil { actions += [.pasteFolder] }
         return actions
     }
 
@@ -168,25 +168,25 @@ final class CommandPalette {
             case .command: return "Run"
             }
         case .newSession: return "New Session"
-        case .copyPath: return "Copy Path"
-        case .copyTarget: return item.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"
-        case .pastePath: return "Paste Path"
-        case .snooze: return "Snooze Topic"
+        case .copyFolder: return "Copy Path"
+        case .copyTmuxTarget: return item.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"
+        case .pasteFolder: return "Paste Path"
+        case .snoozeTopic: return "Snooze Topic"
         case .move: return "Move to…"
-        case .addProject: return "Add a Project"
+        case .addProjectToTopic: return "Add a Project"
         case .rename: return "Rename"
-        case .suggest: return "Suggest title from Agents"
-        case .zen: return store?.topicWatcher.zen == nil ? "Zen" : "End Zen"
-        case .settle: return "Settle"
-        case .forget: return "Forget"
-        case .unsnooze: return "Unsnooze"
-        case .reopen: return "Reopen"
-        case .startFresh: return "Start Fresh"
-        case .pin: return "Pin"
-        case .unpin: return "Unpin"
+        case .suggestTopicTitle: return "Suggest title from Agents"
+        case .startZen: return store?.topicWatcher.zen == nil ? "Zen" : "End Zen"
+        case .settleTopic: return "Settle"
+        case .forgetTopic: return "Forget"
+        case .unsnoozeTopic: return "Unsnooze"
+        case .reopenTopic: return "Reopen"
+        case .startTopicFresh: return "Start Fresh"
+        case .pinTopic: return "Pin"
+        case .unpinTopic: return "Unpin"
         case .removeFromTopic: return "Remove from Topic"
         case .newWindow: return "New Window"
-        case .reveal: return "Reveal in Finder"
+        case .revealFolder: return "Reveal in Finder"
         case .killWindow: return "Kill Window"
         default: return action.rawValue
         }
@@ -275,7 +275,7 @@ final class CommandPalette {
         DispatchQueue.main.async { [weak store] in
             guard let store, !store.palette.isOpen else { return }
             if let responder, let window = store.terminalHost.window, window.makeFirstResponder(responder) { return }
-            store.moveKeyboardToTerminal()
+            store.focusTerminal()
         }
     }
 
@@ -309,12 +309,12 @@ final class CommandPalette {
             guard case .project(let target) = item.ref else { return }
             close(restoringFocus: false)
             store.newSession(in: target)
-        case .copyPath:
+        case .copyFolder:
             copy(item.path, title: "Copied Path", shown: Paths.tildify(item.path, home: store.homeDirectory))
-        case .copyTarget:
+        case .copyTmuxTarget:
             guard let target = item.target else { return }
             copy(target, title: item.kind == .agent ? "Copied Pane ID" : "Copied tmux Target", shown: target)
-        case .pastePath:
+        case .pasteFolder:
             guard let paste = row.paste else { return }
             close()
             store.pasteIntoTerminal(paste)
@@ -330,7 +330,7 @@ final class CommandPalette {
         showCopied(title: title, value: shown)
     }
 
-    /// Shared by palette and Browser copies, without taking keyboard focus.
+    /// Shared by palette and Browser copies, without taking Focus.
     func showCopied(title: String, value: String) {
         copiedWork?.cancel()
         let confirmation = PaletteCopy(title: title, value: value)
@@ -390,8 +390,8 @@ final class CommandPalette {
                 return true
             }
         }
-        if let index = Self.commandDigits.firstIndex(of: trigger), chips.indices.contains(index) {
-            toggleChip(chips[index])
+        if let index = Self.commandDigits.firstIndex(of: trigger), sourceButtons.indices.contains(index) {
+            toggleSource(sourceButtons[index])
             return true
         }
         return false

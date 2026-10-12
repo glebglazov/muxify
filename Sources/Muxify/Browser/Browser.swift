@@ -7,8 +7,8 @@ import MuxifyCore
 /// written back onto the tmux Window (ADR 0003).
 @Observable
 final class Browser {
-    /// Where the panel puts the keyboard once it shows the active Tab.
-    enum KeyboardRequest { case addressBar, page }
+    /// Where the panel puts Focus once it shows the active Tab.
+    enum FocusRequest { case addressBar, page }
 
     let windowID: String
     /// The local scanner must never use a remote Window ID against local tmux.
@@ -17,7 +17,7 @@ final class Browser {
     private(set) var activeTabID: UUID?
     /// Shows the Browser only while it has a Tab.
     private(set) var layout: PanelLayout
-    var keyboardRequest: KeyboardRequest?
+    var focusRequest: FocusRequest?
 
     @ObservationIgnored var onChange: ((Browser) -> Void)?
     /// Called when the Terminal or the Browser appears or disappears.
@@ -55,19 +55,24 @@ final class Browser {
         changed()
     }
 
-    func toggleFocus(_ side: PanelLayout.Side, sidebarShown: Bool) {
-        changeLayout { $0.toggleFocus(side, sidebarShown: sidebarShown) }
+    func toggleMaximize(_ side: PanelLayout.Side, sidebarShown: Bool) {
+        changeLayout { $0.toggleMaximize(side, sidebarShown: sidebarShown) }
         changed()
     }
 
-    func commitFocus() {
-        changeLayout { $0.commitFocus() }
+    func commitMaximize() {
+        changeLayout { $0.commitMaximize() }
         changed()
     }
 
-    /// Asks the panel for the keyboard: the page, or the address field of a blank Tab.
-    func requestKeyboard() {
-        keyboardRequest = activeTab?.hasPage == true ? .page : .addressBar
+    func reveal(_ side: PanelLayout.Side) {
+        changeLayout { $0.reveal(side) }
+        changed()
+    }
+
+    /// Asks the panel for Focus: the page, or the address field of a blank Tab.
+    func requestFocus() {
+        focusRequest = activeTab?.hasPage == true ? .page : .addressBar
     }
 
     /// A shown Browser always has a Tab: an empty one gets a blank Tab to type
@@ -78,7 +83,7 @@ final class Browser {
         guard layout != before else { return }
         if layout.shows(.browser), !before.shows(.browser) {
             if tabs.isEmpty { appendTab(nil) }
-            if activeTab?.hasPage == false { keyboardRequest = .addressBar }
+            if activeTab?.hasPage == false { focusRequest = .addressBar }
         } else if !layout.shows(.browser), before.shows(.browser) {
             dropBlankTabs()
         }
@@ -113,7 +118,7 @@ final class Browser {
 
     func newTab() {
         appendTab(nil)
-        keyboardRequest = .addressBar
+        focusRequest = .addressBar
         changeLayout { $0.show(.browser) }
         changed()
     }
@@ -165,7 +170,7 @@ final class Browser {
         guard tabs.contains(where: { $0.id == tab.id }) else { return }
         select(tab)
         changeLayout { $0.show(.browser) }
-        requestKeyboard()
+        requestFocus()
         changed()
     }
 

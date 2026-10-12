@@ -15,19 +15,21 @@ extension KeybindAction {
 public enum ConfigAction: String, KeybindAction {
     case newAppWindow = "new_app_window"
     case newTopic = "new_topic"
-    case newTopicFromPane = "new_topic_from_pane"
-    case moveSessionToTopic = "move_session_to_topic"
+    case movePane = "move_pane"
+    case moveWindow = "move_window"
+    case moveSession = "move_session"
     case addProjectToTopic = "add_project_to_topic"
     case snoozeTopic = "snooze_topic"
-    case zenMode = "zen_mode"
+    case toggleZen = "toggle_zen"
     case settleTopic = "settle_topic"
     case toggleSidebar = "toggle_sidebar"
     case toggleTerminal = "toggle_terminal"
     case toggleBrowser = "toggle_browser"
-    case toggleFocus = "toggle_focus"
+    case toggleMaximize = "toggle_maximize"
+    case toggleMaximizeTerminal = "toggle_maximize_terminal"
+    case toggleMaximizeBrowser = "toggle_maximize_browser"
     case focusTerminal = "focus_terminal"
     case focusBrowser = "focus_browser"
-    case moveKeyboardToTerminal = "move_keyboard_to_terminal"
     case selectCard1 = "select_card_1"
     case selectCard2 = "select_card_2"
     case selectCard3 = "select_card_3"
@@ -61,19 +63,21 @@ public enum ConfigAction: String, KeybindAction {
     public static let defaultSpelling: KeyValuePairs<ConfigAction, [String]> = [
         .newAppWindow: ["cmd+n"],
         .newTopic: [],
-        .newTopicFromPane: ["cmd+shift+t"],
-        .moveSessionToTopic: ["cmd+shift+m"],
+        .movePane: ["cmd+shift+t"],
+        .moveWindow: [],
+        .moveSession: ["cmd+shift+m"],
         .addProjectToTopic: ["cmd+shift+a"],
         .settleTopic: [],
         .snoozeTopic: ["alt+cmd+s"],
-        .zenMode: ["shift+alt+cmd+s"],
+        .toggleZen: ["shift+alt+cmd+s"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
         .toggleTerminal: ["cmd+j"],
         .toggleBrowser: ["cmd+b"],
-        .toggleFocus: ["shift+cmd+enter"],
-        .focusTerminal: ["alt+cmd+t"],
-        .focusBrowser: ["alt+cmd+b"],
-        .moveKeyboardToTerminal: ["ctrl+backquote", "ctrl+0", "alt+0"],
+        .toggleMaximize: ["shift+cmd+enter"],
+        .toggleMaximizeTerminal: ["alt+cmd+j"],
+        .toggleMaximizeBrowser: ["alt+cmd+b"],
+        .focusTerminal: ["cmd+shift+j", "ctrl+backquote", "ctrl+0", "alt+0"],
+        .focusBrowser: ["cmd+shift+b"],
         .selectCard1: ["ctrl+1"],
         .selectCard2: ["ctrl+2"],
         .selectCard3: ["ctrl+3"],
@@ -116,33 +120,32 @@ public enum PaletteAction: String, KeybindAction {
     case selectNext = "select_next"
     case selectPrev = "select_prev"
     case showActions = "show_actions"
-    case copyPath = "copy_path"
-    case copyTarget = "copy_target"
-    case pastePath = "paste_path"
-    case snooze
+    case copyFolder = "copy_folder"
+    case copyTmuxTarget = "copy_tmux_target"
+    case pasteFolder = "paste_folder"
+    case snoozeTopic = "snooze_topic"
 
     case move
-    case addProject = "add_project"
+    case addProjectToTopic = "add_project_to_topic"
     case rename
-    case suggest
-    case zen
-    case settle
-    case forget
-    case unsnooze
-    case reopen
-    case startFresh = "start_fresh"
-    case pin
-    case unpin
+    case suggestTopicTitle = "suggest_topic_title"
+    case startZen = "start_zen"
+    case settleTopic = "settle_topic"
+    case forgetTopic = "forget_topic"
+    case unsnoozeTopic = "unsnooze_topic"
+    case reopenTopic = "reopen_topic"
+    case startTopicFresh = "start_topic_fresh"
+    case pinTopic = "pin_topic"
+    case unpinTopic = "unpin_topic"
     case removeFromTopic = "remove_from_topic"
     case newWindow = "new_window"
-    case reveal
+    case revealFolder = "reveal_folder"
     case killWindow = "kill_window"
-    case movePane = "move_pane"
-    case moveWindow = "move_window"
-    case moveSession = "move_session"
-    case includeTab = "include_tab"
-    case newWorktree = "new_worktree"
-    case suggestTitle = "suggest_title"
+    case choosePane = "choose_pane"
+    case chooseWindow = "choose_window"
+    case chooseSession = "choose_session"
+    case toggleIncludeTab = "toggle_include_tab"
+    case toggleNewWorktree = "toggle_new_worktree"
 
     public static let defaultSpelling: KeyValuePairs<PaletteAction, [String]> = [
         .jumpTo: ["enter"],
@@ -150,32 +153,31 @@ public enum PaletteAction: String, KeybindAction {
         .selectNext: ["down", "ctrl+j"],
         .selectPrev: ["up", "ctrl+k"],
         .showActions: ["cmd+k"],
-        .copyPath: ["cmd+c"],
-        .copyTarget: ["cmd+shift+c"],
-        .pastePath: ["ctrl+y"],
-        .snooze: ["ctrl+s"],
+        .copyFolder: ["cmd+c"],
+        .copyTmuxTarget: ["cmd+shift+c"],
+        .pasteFolder: ["ctrl+y"],
+        .snoozeTopic: ["ctrl+s"],
         .move: [],
-        .addProject: [],
+        .addProjectToTopic: [],
         .rename: [],
-        .suggest: [],
-        .zen: [],
-        .settle: [],
-        .forget: [],
-        .unsnooze: [],
-        .reopen: [],
-        .startFresh: [],
-        .pin: [],
-        .unpin: [],
+        .suggestTopicTitle: ["alt+s"],
+        .startZen: [],
+        .settleTopic: [],
+        .forgetTopic: [],
+        .unsnoozeTopic: [],
+        .reopenTopic: [],
+        .startTopicFresh: [],
+        .pinTopic: [],
+        .unpinTopic: [],
         .removeFromTopic: [],
         .newWindow: [],
-        .reveal: [],
+        .revealFolder: [],
         .killWindow: [],
-        .movePane: ["alt+1"],
-        .moveWindow: ["alt+2"],
-        .moveSession: ["alt+3"],
-        .includeTab: ["alt+t"],
-        .newWorktree: ["alt+w"],
-        .suggestTitle: ["alt+s"],
+        .choosePane: ["alt+1"],
+        .chooseWindow: ["alt+2"],
+        .chooseSession: ["alt+3"],
+        .toggleIncludeTab: ["alt+t"],
+        .toggleNewWorktree: ["alt+w"],
     ]
 
     public static let defaultTriggers = parse(defaultSpelling)

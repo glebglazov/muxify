@@ -1,4 +1,4 @@
-"""The header's panel toggles and Focus: what a Window shows of its Sidebar, Terminal and Browser.
+"""The header's panel toggles, Maximize and Focus: what a Window shows of its Sidebar, Terminal and Browser.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.panels
@@ -89,42 +89,77 @@ class Panels(unittest.TestCase):
         self.assertEqual(self.panels(), {'sidebar', 'browser'}, 'the Browser toggle hid the only side shown')
         self.s.act('press', 'toggle-terminal')
 
-    def test_focus_hides_the_sidebar_and_the_other_side_and_a_second_press_restores_both(self):
-        self.s.act('press', 'Focus Browser')
-        self.wait_panels({'browser'}, 'Focus Browser did not show the Browser alone')
-        self.wait_options({'@muxify_focus': 'browser', '@muxify_browser': 'on'},
-                          'the tmux Window does not keep the toggles with Focus on the Browser')
-        self.s.act('press', 'toggle-focus')
-        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'ending Focus did not show what the toggles say')
-        self.wait_options({'@muxify_focus': ''}, 'Focus stayed on the tmux Window')
+    def test_maximize_hides_the_sidebar_and_the_other_side_and_restore_shows_both(self):
+        self.s.act('press', 'Maximize Browser')
+        self.wait_panels({'browser'}, 'Maximize Browser did not show the Browser alone')
+        self.wait_options({'@muxify_maximize': 'browser', '@muxify_browser': 'on'},
+                          'the tmux Window does not keep the toggles with the Browser Maximized')
+        self.s.act('press', 'toggle-maximize')
+        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'Restore did not show what the toggles say')
+        self.wait_options({'@muxify_maximize': ''}, 'Maximize stayed on the tmux Window')
 
-    def test_focus_on_a_hidden_browser_shows_it_alone_with_a_blank_tab_until_focus_ends(self):
+    def test_maximize_of_a_hidden_browser_shows_it_alone_with_a_blank_tab_until_restore(self):
         self.window = self.new_window('hidden-browser', tabs=False)
-        self.s.act('press', 'Focus Browser')
-        self.wait_panels({'browser'}, 'Focus Browser did not show the hidden Browser alone')
-        self.s.act('press', 'Focus Browser')
-        self.wait_panels({'sidebar', 'terminal'}, 'ending Focus did not hide the Browser again')
-        self.wait_options({'@muxify_tabs': ''}, 'the blank Tab stayed after Focus ended')
+        self.s.act('press', 'Maximize Browser')
+        self.wait_panels({'browser'}, 'Maximize Browser did not show the hidden Browser alone')
+        self.s.act('press', 'Maximize Browser')
+        self.wait_panels({'sidebar', 'terminal'}, 'Restore did not hide the Browser again')
+        self.wait_options({'@muxify_tabs': ''}, 'the blank Tab stayed after Restore')
 
-    def test_a_toggle_during_focus_keeps_what_is_on_screen_then_applies(self):
-        self.s.act('press', 'Focus Terminal')
-        self.wait_panels({'terminal'}, 'Focus Terminal did not show the Terminal alone')
+    def test_a_toggle_while_maximized_keeps_what_is_on_screen_then_applies(self):
+        self.s.act('press', 'Maximize Terminal')
+        self.wait_panels({'terminal'}, 'Maximize Terminal did not show the Terminal alone')
         self.s.act('press', 'toggle-sidebar')
-        self.wait_panels({'sidebar', 'terminal'}, 'the Sidebar toggle during Focus did not keep the Terminal alone')
-        self.wait_options({'@muxify_browser': '', '@muxify_focus': ''},
-                          'the toggles on the tmux Window are not the Terminal alone without Focus')
+        self.wait_panels({'sidebar', 'terminal'}, 'the Sidebar toggle while Maximized did not keep the Terminal alone')
+        self.wait_options({'@muxify_browser': '', '@muxify_maximize': ''},
+                          'the toggles on the tmux Window are not the Terminal alone without Maximize')
 
-    def test_focus_belongs_to_its_window(self):
-        other = self.new_window('focus-other')
+    def test_maximize_belongs_to_its_window(self):
+        other = self.new_window('maximize-other')
         self.select_window(self.window)
-        self.s.act('press', 'Focus Terminal')
-        self.wait_panels({'terminal'}, 'Focus Terminal did not hide the Sidebar')
+        self.s.act('press', 'Maximize Terminal')
+        self.wait_panels({'terminal'}, 'Maximize Terminal did not hide the Sidebar')
         self.select_window(other)
-        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'a Window without Focus does not show the Sidebar')
+        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'a Window without Maximize does not show the Sidebar')
         self.select_window(self.window)
-        self.wait_panels({'terminal'}, 'the Window in Focus did not hide the Sidebar again')
-        self.s.act('press', 'toggle-focus')
-        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'ending Focus did not show what the toggles say')
+        self.wait_panels({'terminal'}, 'the Maximized Window did not hide the Sidebar again')
+        self.s.act('press', 'toggle-maximize')
+        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'Restore did not show what the toggles say')
+
+    def test_focus_terminal_shows_a_hidden_terminal(self):
+        self.s.act('press', 'toggle-terminal')
+        self.wait_panels({'sidebar', 'browser'}, 'the Terminal toggle did not hide the Terminal')
+        self.s.act('press', 'Focus Terminal')
+        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'Focus Terminal did not show the hidden Terminal')
+        self.wait_options({'@muxify_browser': 'on'}, 'Focus Terminal did not turn the Terminal toggle on')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+
+    def test_focus_browser_restores_a_maximized_terminal(self):
+        self.s.act('press', 'Maximize Terminal')
+        self.wait_panels({'terminal'}, 'Maximize Terminal did not show the Terminal alone')
+        self.s.act('press', 'Focus Browser')
+        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'Focus Browser did not restore the Maximized Terminal')
+        self.wait_options({'@muxify_maximize': '', '@muxify_browser': 'on'},
+                          'Focus Browser did not restore the toggles on the tmux Window')
+        self.wait_focus('browser', 'Focus Browser did not give the Browser Focus')
+
+    def test_the_focus_browser_command_gives_the_browser_focus(self):
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
+        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands field did not show')
+        self.s.act('focus', 'palette-search')
+        self.s.act('set', 'palette-search', 'Focus Browser')
+        key = 'palette-row-command-Focus Browser'
+        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Focus Browser was missing from Commands')
+        self.s.act('press', key)
+        self.wait_focus('browser', 'the Focus Browser Command did not give the Browser Focus')
+
+    def wait_focus(self, side, message):
+        def has_focus():
+            responders = self.s.driver('responder')['responders']
+            return any(name.startswith(FOCUS_CLASSES[side]) for name in responders)
+        wait(has_focus, message)
 
     def test_the_tmux_client_keeps_its_width_while_the_terminal_is_hidden(self):
         time.sleep(SETTLE)
@@ -137,6 +172,9 @@ class Panels(unittest.TestCase):
         self.wait_panels({'sidebar', 'terminal', 'browser'}, 'the Terminal toggle did not show the Terminal again')
         time.sleep(SETTLE)
         self.assertEqual(self.client_width(), before, 'tmux resized the client when the Terminal came back')
+
+
+FOCUS_CLASSES = {'terminal': ('TerminalSurfaceView',), 'browser': ('WKWebView', 'WKContentView', 'NSTextView')}
 
 
 def horizontal(row):

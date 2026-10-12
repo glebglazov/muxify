@@ -31,7 +31,7 @@ fresh connection with state preserved, and background SSH shutdown that leaves
 tmux Sessions and a sibling SSH connection running. Unit tests check cleanup
 thread/order and deferred quit replies.
 App Window tests check Environment deduplication, focused/originating-window
-routing, live ⌘N and Move Keyboard to Terminal overrides, native window-cycle shortcut
+routing, live ⌘N and Focus Terminal overrides, native window-cycle shortcut
 pass-through and isolated Browser views in hidden disposable native windows,
 without starting Ghostty or connecting to tmux.
 It creates and removes its own isolated remote tmux server; existing Sessions,

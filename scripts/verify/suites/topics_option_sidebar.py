@@ -198,6 +198,25 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertLess(orders['order-lower'], orders['order-upper'], 'saved Topic orders: %s' % orders)
         self.assertLess(orders['order-upper'], orders['order-middle'], 'saved Topic orders: %s' % orders)
 
+    def test_title_suggestion_on_a_palette_topic_row_renames_the_topic(self):
+        topic_id = 'row-suggestion'
+        self.write_topic(topic_id, 'Row suggestion proof', self.alpha)
+        sid = self.new_session('alpha/row-suggestion', self.alpha, '/bin/sleep 300', topic=topic_id)
+        pane = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{pane_id}')
+        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'opencode')
+        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', 'working')
+        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_conversation', 'title-suggestion-conversation')
+        self.find('topic-' + topic_id, 'the Topic did not appear')
+        wait(lambda: self.s.driver('press', 'Go to…')['pressed'], 'Go to… did not open')
+        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'the Go to… field did not show')
+        self.s.act('focus', 'palette-search')
+        self.s.act('set', 'palette-search', 'Row suggestion proof')
+        key = 'palette-row-topic-' + topic_id
+        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Go to… did not show the Topic row')
+        self.s.act('action', key, 'Suggest title from Agents')
+        wait(lambda: self.records()[topic_id].get('title') == 'Verified Agent Title',
+             'suggest_topic_title on the Topic row did not rename the Topic: %s' % self.records()[topic_id], seconds=15)
+
     def test_title_suggestion_fills_rename_field_and_waits_for_confirmation(self):
         topic_id = 'title-suggestion'
         self.write_topic(topic_id, '', self.alpha)
@@ -214,6 +233,7 @@ class TopicsOptionSidebar(TopicsSidebar):
             lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == 'Verified Agent Title',
             'suggestion did not fill the Rename field')
         self.assertEqual(self.s.row('palette-search', rs).get('accessibilityValue'), 'Verified Agent Title')
+        self.assertIn('⌥S', self.describe('palette-suggest-title', rs), 'the Rename step does not offer suggest_topic_title')
         self.assertIn('Title suggestion verification prompt', self.title_prompt.read_text())
         self.assertEqual(self.records()[topic_id]['title'], '', 'suggestion renamed the Topic before confirmation')
 

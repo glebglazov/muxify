@@ -123,7 +123,7 @@ extension WorkspaceStore {
             if let browser = currentBrowser, let tab = browser.tabs.first(where: { $0.id == id }) {
                 browser.jumpTo(tab)
             }
-        case .terminal: moveKeyboardToTerminal()
+        case .terminal: focus(.terminal)
         }
     }
 }

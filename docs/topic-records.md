@@ -104,7 +104,7 @@ stays open and its Sessions stay live. Each Window stores its active Pane's `dir
 and `start_command`, its tmux `name` and `pane_count`, its Browser Tab URLs
 in `browser_tabs` and the active Tab's index in `browser_active_tab`. `browser_open` and `terminal_open` hold the
 Window's Browser and Terminal toggles; Reopen shows the Browser alone when `browser_open` is true and `terminal_open` is
-false. Focus is not stored. `start_command` holds the active Pane's start arguments as serialized by tmux's
+false. Maximize is not stored. `start_command` holds the active Pane's start arguments as serialized by tmux's
 `pane_start_command` format. An empty string means the default shell. Reopen
 must parse this tmux argument format before execution. It must not send the
 stored string directly to a shell. If the

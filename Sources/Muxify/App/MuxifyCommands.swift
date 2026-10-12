@@ -48,11 +48,14 @@ import MuxifyCore
             Button("New Topic…") { store?.presentNewTopic() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .newTopic)?.shortcut)
                 .disabled(!topicsAvailable)
-            Button("New Topic from Pane") { store?.newTopicFromPane(nil) }
-                .keyboardShortcut(keybinds.firstTrigger(for: .newTopicFromPane)?.shortcut)
+            Button("Move Pane…") { store?.presentMovePane(nil) }
+                .keyboardShortcut(keybinds.firstTrigger(for: .movePane)?.shortcut)
                 .disabled(!topicsAvailable || store?.selectedWindow == nil)
-            Button("Move Session to Topic…") { store?.presentMoveSession() }
-                .keyboardShortcut(keybinds.firstTrigger(for: .moveSessionToTopic)?.shortcut)
+            Button("Move Window…") { store?.presentMoveWindow() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .moveWindow)?.shortcut)
+                .disabled(!topicsAvailable || store?.topics.topicsEnabled != true || store?.selectedWindow == nil)
+            Button("Move Session…") { store?.presentMoveSession() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .moveSession)?.shortcut)
                 .disabled(!topicsAvailable || store?.topics.topicsEnabled != true || store?.selectedWindow == nil)
             Button("Add a Project to Topic…") { store?.presentAddProject() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .addProjectToTopic)?.shortcut)
@@ -61,7 +64,7 @@ import MuxifyCore
                 .keyboardShortcut(keybinds.firstTrigger(for: .settleTopic)?.shortcut)
                 .disabled(!topicsAvailable || store?.activeTopicID == nil)
             Button(store?.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store?.toggleZenOfActiveTopic() }
-                .keyboardShortcut(keybinds.firstTrigger(for: .zenMode)?.shortcut)
+                .keyboardShortcut(keybinds.firstTrigger(for: .toggleZen)?.shortcut)
                 .disabled(!topicsAvailable || store?.topics.topicsEnabled != true || store?.canToggleZenOfActiveTopic != true)
             Divider()
             Button("New Tab") { store?.browserCommand(opensBrowser: true) { $0.newTab() } }
@@ -81,11 +84,11 @@ import MuxifyCore
             Button(store?.panelLayout.shows(.terminal) == true ? "Hide Terminal" : "Show Terminal") { store?.toggle(.terminal) }
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleTerminal)?.shortcut)
                 .disabled(store?.canToggle(.terminal) != true)
-            Button(store?.panelLayout.focus == nil ? "Focus" : "End Focus") { store?.toggleFocus() }
-                .keyboardShortcut(keybinds.firstTrigger(for: .toggleFocus)?.shortcut)
-                .disabled(store?.canToggleFocus != true)
-            focusToggle("Focus Terminal", .terminal, .focusTerminal)
-            focusToggle("Focus Browser", .browser, .focusBrowser)
+            Button(store?.panelLayout.maximized == nil ? "Maximize" : "Restore") { store?.toggleMaximize() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .toggleMaximize)?.shortcut)
+                .disabled(store?.canToggleMaximize != true)
+            maximizeToggle("Maximize Terminal", .terminal, .toggleMaximizeTerminal)
+            maximizeToggle("Maximize Browser", .browser, .toggleMaximizeBrowser)
             Divider()
             Button("Open Location…") { store?.browserCommand(opensBrowser: true) { _ in store?.focusAddressBar() } }
                 .keyboardShortcut("l", modifiers: .command)
@@ -110,9 +113,12 @@ import MuxifyCore
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(store?.panelLayout.shows(.browser) != true || store?.currentBrowser?.activeTab?.hasPage != true)
             Divider()
-            Button("Move Keyboard to Terminal") { store?.moveKeyboardToTerminal() }
-                .keyboardShortcut(keybinds.firstTrigger(for: .moveKeyboardToTerminal)?.shortcut)
-                .disabled(store?.panelLayout.shows(.terminal) != true)
+            Button("Focus Terminal") { store?.focus(.terminal) }
+                .keyboardShortcut(keybinds.firstTrigger(for: .focusTerminal)?.shortcut)
+                .disabled(store?.currentBrowser == nil)
+            Button("Focus Browser") { store?.focus(.browser) }
+                .keyboardShortcut(keybinds.firstTrigger(for: .focusBrowser)?.shortcut)
+                .disabled(store?.currentBrowser == nil)
         }
         CommandGroup(after: .appSettings) {
             Button("Open Config") {
@@ -126,9 +132,9 @@ import MuxifyCore
         }
     }
 
-    private func focusToggle(_ title: String, _ side: PanelLayout.Side, _ action: ConfigAction) -> some View {
-        Toggle(title, isOn: Binding(get: { store?.panelLayout.focus == side }, set: { _ in store?.toggleFocus(side) }))
+    private func maximizeToggle(_ title: String, _ side: PanelLayout.Side, _ action: ConfigAction) -> some View {
+        Toggle(title, isOn: Binding(get: { store?.panelLayout.maximized == side }, set: { _ in store?.toggleMaximize(side) }))
             .keyboardShortcut(keybinds.firstTrigger(for: action)?.shortcut)
-            .disabled(store?.canFocus(side) != true)
+            .disabled(store?.canMaximize(side) != true)
     }
 }

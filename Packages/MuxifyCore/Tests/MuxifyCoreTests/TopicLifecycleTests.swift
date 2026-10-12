@@ -127,7 +127,7 @@ final class TopicLifecycleTests: XCTestCase {
 
     func testReopenShowsTheBrowserAloneWhenTheTopicRememberedItSo() throws {
         var alone = window("@1", session: "$1", directory: game.path, command: "zsh")
-        alone.storedBrowser.layout = PanelLayout(shown: .browser, focus: .terminal)
+        alone.storedBrowser.layout = PanelLayout(shown: .browser, maximized: .terminal)
         var saved = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.path)
             .remembering(snapshot([alone]), projects: [game], order: .oldestFirst))
         saved.settledAt = "2026-10-07T12:00:00Z"

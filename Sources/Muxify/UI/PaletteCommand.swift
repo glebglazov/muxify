@@ -12,6 +12,18 @@ enum PaletteCommand: String, CaseIterable {
     case settleTopic = "Settle Topic"
     case zen = "Zen"
     case endZen = "End Zen"
+    case maximize = "Maximize"
+    case restore = "Restore"
+    case maximizeTerminal = "Maximize Terminal"
+    case maximizeBrowser = "Maximize Browser"
+    case focusTerminal = "Focus Terminal"
+    case focusBrowser = "Focus Browser"
+    case showSidebar = "Show Sidebar"
+    case hideSidebar = "Hide Sidebar"
+    case showTerminal = "Show Terminal"
+    case hideTerminal = "Hide Terminal"
+    case showBrowser = "Show Browser"
+    case hideBrowser = "Hide Browser"
     case newAppWindow = "New Muxify Window"
     case newWindow = "New tmux Window"
     case newSession = "New tmux Session"
@@ -29,6 +41,40 @@ enum PaletteCommand: String, CaseIterable {
     case reloadPage = "Reload Page"
     case copyURL = "Copy URL"
     case developerTools = "Show Developer Tools"
+
+    /// The keybinding that does what this Command does, so the row shows its shortcut.
+    var keybinding: ConfigAction? {
+        switch self {
+        case .newTopic: .newTopic
+        case .movePane: .movePane
+        case .moveWindow: .moveWindow
+        case .moveSession: .moveSession
+        case .addProject: .addProjectToTopic
+        case .snoozeTopic: .snoozeTopic
+        case .settleTopic: .settleTopic
+        case .zen, .endZen: .toggleZen
+        case .newAppWindow: .newAppWindow
+        case .maximize, .restore: .toggleMaximize
+        case .maximizeTerminal: .toggleMaximizeTerminal
+        case .maximizeBrowser: .toggleMaximizeBrowser
+        case .focusTerminal: .focusTerminal
+        case .focusBrowser: .focusBrowser
+        case .showSidebar, .hideSidebar: .toggleSidebar
+        case .showTerminal, .hideTerminal: .toggleTerminal
+        case .showBrowser, .hideBrowser: .toggleBrowser
+        default: nil
+        }
+    }
+
+    /// Commands that change the layout or move Focus. They run as their
+    /// keybinding does, after the palette gives Focus back.
+    var isLayout: Bool {
+        switch self {
+        case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser,
+             .showSidebar, .hideSidebar, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: true
+        default: false
+        }
+    }
 }
 
 extension CommandPalette {
@@ -49,21 +95,25 @@ extension CommandPalette {
             case .back: return store.currentBrowser?.activeTab?.canGoBack == true
             case .forward: return store.currentBrowser?.activeTab?.canGoForward == true
             case .reloadPage, .copyURL, .developerTools: return store.currentBrowser?.activeTab?.hasPage == true
+            case .maximize: return store.panelLayout.maximized == nil && store.canToggleMaximize
+            case .restore: return store.currentBrowser != nil && store.panelLayout.maximized != nil
+            case .maximizeTerminal: return store.panelLayout.maximized != .terminal && store.canMaximize(.terminal)
+            case .maximizeBrowser: return store.panelLayout.maximized != .browser && store.canMaximize(.browser)
+            case .focusTerminal, .focusBrowser: return store.currentBrowser != nil
+            case .showSidebar: return !store.sidebarShown
+            case .hideSidebar: return store.sidebarShown
+            case .showTerminal: return !store.panelLayout.shows(.terminal) && store.canToggle(.terminal)
+            case .hideTerminal: return store.panelLayout.shows(.terminal) && store.canToggle(.terminal)
+            case .showBrowser: return !store.panelLayout.shows(.browser) && store.canToggle(.browser)
+            case .hideBrowser: return store.panelLayout.shows(.browser) && store.canToggle(.browser)
             default: return true
             }
         }
     }
 
     func shortcut(for command: PaletteCommand) -> String? {
+        if let action = command.keybinding { return store?.config.keybinds.firstTrigger(for: action)?.symbol }
         switch command {
-        case .newTopic: return store?.config.keybinds.firstTrigger(for: .newTopic)?.symbol
-        case .movePane: return store?.config.keybinds.firstTrigger(for: .newTopicFromPane)?.symbol
-        case .moveSession: return store?.config.keybinds.firstTrigger(for: .moveSessionToTopic)?.symbol
-        case .addProject: return store?.config.keybinds.firstTrigger(for: .addProjectToTopic)?.symbol
-        case .snoozeTopic: return store?.config.keybinds.firstTrigger(for: .snoozeTopic)?.symbol
-        case .settleTopic: return store?.config.keybinds.firstTrigger(for: .settleTopic)?.symbol
-        case .zen, .endZen: return store?.config.keybinds.firstTrigger(for: .zenMode)?.symbol
-        case .newAppWindow: return store?.config.keybinds.firstTrigger(for: .newAppWindow)?.symbol
         case .newTab: return "⌘T"
         case .closeTab: return "⌘W"
         case .openLocation: return "⌘L"
@@ -81,16 +131,21 @@ extension CommandPalette {
 
     func run(_ command: PaletteCommand) {
         guard let store, commands.contains(command) else { return }
+        if command.isLayout, let action = command.keybinding {
+            close()
+            // close() gives Focus back in a main-queue block; this one runs after it.
+            DispatchQueue.main.async { store.perform(action) }
+            return
+        }
         switch command {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addProject, .snoozeTopic, .settleTopic, .zen: break
         default: close(restoringFocus: false)
         }
         switch command {
         case .newTopic: store.presentNewTopic(keepingHistory: true)
-        case .movePane: store.newTopicFromPane(nil, keepingHistory: true)
-        case .movePaneWithTab: store.newTopicFromPane(nil, includesTab: true, keepingHistory: true)
-        case .moveWindow:
-            if let window = store.selectedWindow { openMove(window, scope: .window, keepingHistory: true) }
+        case .movePane: store.presentMovePane(nil, keepingHistory: true)
+        case .movePaneWithTab: store.presentMovePane(nil, includesTab: true, keepingHistory: true)
+        case .moveWindow: store.presentMoveWindow(keepingHistory: true)
         case .moveSession: store.presentMoveSession(keepingHistory: true)
         case .addProject: store.presentAddProject(keepingHistory: true)
         case .snoozeTopic: store.presentSnoozeTopic(keepingHistory: true)
@@ -114,6 +169,8 @@ extension CommandPalette {
         case .reloadPage: store.currentBrowser?.activeTab?.reloadOrStop()
         case .copyURL: store.currentBrowser?.activeTab?.copyURL()
         case .developerTools: store.currentBrowser?.activeTab?.showDeveloperTools()
+        case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser,
+             .showSidebar, .hideSidebar, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: break
         }
     }
 }

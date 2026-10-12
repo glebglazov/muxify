@@ -1112,7 +1112,7 @@ private struct AgentsSection: View {
                                 .onTapGesture { store.select(agent) }
                                 .accessibilityIdentifier("agent-" + agent.paneID)
                                 .contextMenu {
-                                    Button("New Topic from this Pane") { store.newTopicFromPane(PaneID(rawValue: agent.paneID).map(TopicTarget.pane)) }
+                                    Button("New Topic from this Pane") { store.presentMovePane(PaneID(rawValue: agent.paneID).map(TopicTarget.pane)) }
                                         .disabled(store.changingTopic)
                                 }
                         }

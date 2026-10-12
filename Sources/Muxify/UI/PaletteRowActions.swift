@@ -7,22 +7,22 @@ extension CommandPalette {
         if case .topic(let id, _) = item.ref,
            let topic = store.topicWatcher.records.first(where: { $0.id == id }) {
             switch action {
-            case .snooze: begin(.snooze(topic), keepingHistory: true)
-            case .zen:
+            case .snoozeTopic: begin(.snooze(topic), keepingHistory: true)
+            case .startZen:
                 if store.topicWatcher.zen == nil { begin(.zen(id), keepingHistory: true) }
                 else { close(); store.endZen() }
-            case .settle: begin(.confirm(PaletteConfirmation(.settle(topic))), keepingHistory: true)
-            case .forget: begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: true)
+            case .settleTopic: begin(.confirm(PaletteConfirmation(.settle(topic))), keepingHistory: true)
+            case .forgetTopic: begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: true)
             case .rename: begin(.text(.renameTopic(topic)), text: topic.title ?? "", keepingHistory: true)
-            case .addProject: store.refreshProjects(); begin(.addProject(topic), keepingHistory: true)
-            case .suggest:
+            case .addProjectToTopic: store.refreshProjects(); begin(.addProject(topic), keepingHistory: true)
+            case .suggestTopicTitle:
                 close()
                 store.suggestTopicTitle(for: id) { store.renameTopic(id, to: $0) }
-            case .pin: close(); store.pinTopic(id, true)
-            case .unpin: close(); store.pinTopic(id, false)
-            case .unsnooze: close(); store.unsnoozeTopic(id)
-            case .reopen: close(); store.reopenTopic(id, .reopen)
-            case .startFresh: close(); store.reopenTopic(id, .startFresh)
+            case .pinTopic: close(); store.pinTopic(id, true)
+            case .unpinTopic: close(); store.pinTopic(id, false)
+            case .unsnoozeTopic: close(); store.unsnoozeTopic(id)
+            case .reopenTopic: close(); store.reopenTopic(id, .reopen)
+            case .startTopicFresh: close(); store.reopenTopic(id, .startFresh)
             default: break
             }
             return
@@ -37,7 +37,7 @@ extension CommandPalette {
         default: window = nil; scope = .window; paneID = nil
         }
         switch action {
-        case .reveal: close(); NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: item.path)
+        case .revealFolder: close(); NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: item.path)
         case .move:
             if let window { begin(.move(MoveDraft(window: window, paneID: paneID ?? window.activePaneID, scope: scope)), keepingHistory: true) }
         case .rename:

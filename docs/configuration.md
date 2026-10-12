@@ -209,15 +209,15 @@ Without `command_palettes`, Muxify has two palettes. **Commands** opens on
   so on. Typing a Session's name finds its Project row. In Topics mode a Project
   row holds only No Topic Sessions; a Topic's Sessions are reached through its
   Topic row.
-- `windows`, shown with nothing typed only when theirs is the only chip on.
+- `windows`, shown with nothing typed only when theirs is the only Source button on.
 - `agents`: those that need you (blocked, failed or unread), then working ones,
   then the rest.
 - `commands`: Commands such as New Topic, New Muxify Window, Reload Config
   and Browser commands. A Command acts on no result.
 
-They aren't a hard limit: every palette has a chip for each source, its own
-first and on, and ⌘1–⌘5 or a click turn any chip on or off. The last chip that
-is on stays on. A palette's `keybinding` takes one trigger or a list and
+They aren't a hard limit: every palette has a Source button for each source, its own
+first and on, and ⌘1–⌘5 or a click turn any Source button on or off. The last
+Source button that is on stays on. A palette's `keybinding` takes one trigger or a list and
 follows the [keybindings](keybindings.md) rules: it is removed from other
 actions' defaults, and when two claim the same trigger the first in the file
 keeps it. Each palette is also in the View menu. Its own keybinding closes a
@@ -231,7 +231,7 @@ name, or a Settled Topic's outcome, and the matched letters are marked. With
 nothing typed, Pinned Topics come first, then the Active Topic or current row,
 then the most recently visited. On an equal match a running Session comes
 before a Project with no Session, then the more recently visited or active one.
-A Window with an Agent is left out while the Agents chip is on. ⎋ closes the
+A Window with an Agent is left out while the Agents Source button is on. ⎋ closes the
 palette without a change. In an Action, ⌫ in an empty field goes back one step.
 A step that kills a process needs ⌘↩ to confirm. The keys inside a palette are
 [configurable](keybindings.md#command-palette-keybindings).
@@ -265,11 +265,12 @@ front of the path. **Open Config** there opens the remote file in the remote's
 
 ## Browser and keybindings
 
-The top-right header has the Focus button and toggles the Sidebar, Terminal and
+The top-right header has the Maximize button and toggles the Sidebar, Terminal and
 Browser. ⌘J toggles the current Window's Terminal and ⌘B its Browser; the toggle
-of the only side shown does nothing. Focus (⇧⌘↩) shows the side the keyboard is
-in alone, with the Sidebar hidden, until you press it again. Each Window
-remembers its Browser Tabs, its toggles and its Focus.
+of the only side shown does nothing. Maximize (⇧⌘↩) shows the side that has Focus
+alone, with the Sidebar hidden. Press it again to Restore the Window. ⌘⇧J and
+⌘⇧B move Focus to the Terminal or the Browser and show that side if it is hidden.
+Each Window remembers its Browser Tabs, its toggles and its Maximize state.
 Browser-opening requests (`muxify browser open …`, terminal Cmd-click links)
 reveal its Browser. The [Simulator](simulator.md) runs in a browser, not a native
 panel.

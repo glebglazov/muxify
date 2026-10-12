@@ -16,7 +16,7 @@ public struct CommandPaletteConfig: Equatable, Identifiable {
     /// Unique among the Config's palettes.
     public let name: String
     public var triggers: [KeyTrigger]
-    /// The chips that are on when it opens, in Config order, without
+    /// The Sources that are on when it opens, in Config order, without
     /// repeats; never empty. The other Sources can be switched on.
     public let sources: [PaletteSource]
 
@@ -28,8 +28,8 @@ public struct CommandPaletteConfig: Equatable, Identifiable {
 
     public var id: String { name }
 
-    /// Every Source as a chip: the palette's own first, then the others.
-    public var chips: [PaletteSource] { sources + PaletteSource.allCases.filter { !sources.contains($0) } }
+    /// Every Source, the palette's own first, then the others.
+    public var allSources: [PaletteSource] { sources + PaletteSource.allCases.filter { !sources.contains($0) } }
 
     public var placeholder: String { name.hasSuffix("…") ? name : "Search \(name)" }
 

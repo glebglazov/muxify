@@ -22,7 +22,7 @@ struct HintVerification: ViewModifier {
                         store.receiveHintInput(.keyUp(0))
                     }
                     Button("Reset Hints") { store.receiveHintInput(.reset) }
-                    ForEach(ConfigAction.allCases.filter { $0.quickSwitchSelection != nil || $0 == .moveKeyboardToTerminal }, id: \.self) { action in
+                    ForEach(ConfigAction.allCases.filter { $0.quickSwitchSelection != nil || $0 == .focusTerminal }, id: \.self) { action in
                         ForEach(store.config.keybinds.triggers[action] ?? [], id: \.self) { trigger in
                             Button("Press " + trigger.symbol) {
                                 store.receiveHintInput(.keyDown(0))
