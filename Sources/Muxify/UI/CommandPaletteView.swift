@@ -62,7 +62,7 @@ private struct SpotlightPalette: View {
                     }
                     field(selected)
                     Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1).padding(.horizontal, 20)
-                    if palette.flow == nil { chips(selected: selected) }
+                    if palette.flow == nil { sourceButtons(selected: selected) }
                     else { flowControls(selected) }
                     if !results.rows.isEmpty {
                         list(results, selected: selected, theme: theme)
@@ -149,25 +149,25 @@ private struct SpotlightPalette: View {
         HStack(spacing: 8) {
             if case .move(let draft) = palette.flow {
                 ForEach(Array(MoveDraft.Scope.allCases.enumerated()), id: \.element) { index, scope in
-                    Button(controlTitle(scope.rawValue, [.movePane, .moveWindow, .moveSession][index])) { palette.changeMoveScope(scope) }
+                    Button(controlTitle(scope.rawValue, [.choosePane, .chooseWindow, .chooseSession][index])) { palette.changeMoveScope(scope) }
                         .buttonStyle(.bordered)
                         .tint(draft.scope == scope ? .accentColor : .secondary)
                         .accessibilityIdentifier("palette-scope-" + scope.rawValue.lowercased())
                 }
                 if draft.scope == .pane, palette.store?.browser(for: draft.window.id).activeTab != nil {
-                    Button(controlTitle(draft.includesTab ? "✓ Tab" : "＋ Tab", .includeTab)) { palette.toggleTab() }
+                    Button(controlTitle(draft.includesTab ? "✓ Tab" : "＋ Tab", .toggleIncludeTab)) { palette.toggleTab() }
                         .accessibilityIdentifier("palette-include-tab")
                         .accessibilityValue(draft.includesTab ? "on" : "off")
                 }
             }
             if case .addProject = palette.flow,
                case .choice(.project(let project)) = selected?.pick.payload?.ref, project.worktree != nil {
-                Button(controlTitle((palette.newWorktree ? "✓ " : "＋ ") + "New Worktree", .newWorktree)) { palette.newWorktree.toggle() }
+                Button(controlTitle((palette.newWorktree ? "✓ " : "＋ ") + "New Worktree", .toggleNewWorktree)) { palette.newWorktree.toggle() }
                     .accessibilityIdentifier("palette-new-worktree")
                     .accessibilityValue(palette.newWorktree ? "on" : "off")
             }
             if palette.canSuggestTitle {
-                Button(controlTitle("Suggest title", .suggestTitle)) { palette.suggestTitle() }
+                Button(controlTitle("Suggest title", .suggestTopicTitle)) { palette.suggestTitle() }
                     .accessibilityIdentifier("palette-suggest-title")
             }
             Spacer()
@@ -208,13 +208,13 @@ private struct SpotlightPalette: View {
         .allowsHitTesting(false)
     }
 
-    // MARK: Chips and results
+    // MARK: Source buttons and results
 
-    /// The Source chips, on or off, and at the far end the way into the actions menu
+    /// The Source buttons, on or off, and at the far end the way into the actions menu
     /// (whose first entry is Jump To).
-    private func chips(selected: PickRow<PaletteItem>?) -> some View {
+    private func sourceButtons(selected: PickRow<PaletteItem>?) -> some View {
         HStack(spacing: 7) {
-            ForEach(Array(palette.chips.enumerated()), id: \.element) { offset, source in
+            ForEach(Array(palette.sourceButtons.enumerated()), id: \.element) { offset, source in
                 let isOn = palette.selection.contains(source)
                 Text(source.title)
                     .font(.system(size: 13))
@@ -223,7 +223,7 @@ private struct SpotlightPalette: View {
                     .frame(height: 26)
                     .background(Capsule().fill(Color.primary.opacity(isOn ? 0.16 : 0.06)))
                     .contentShape(Capsule())
-                    .onTapGesture { palette.toggleChip(source) }
+                    .onTapGesture { palette.toggleSource(source) }
                     .help("⌘\(offset + 1)")
             }
             Spacer()
@@ -432,10 +432,10 @@ struct PaletteIcon: View {
     private func color(_ action: PaletteAction) -> Color {
         switch action {
         case .newSession: theme.green
-        case .copyPath: theme.cyan
-        case .copyTarget: theme.magenta
-        case .pastePath: theme.green
-        case .snooze: theme.yellow
+        case .copyFolder: theme.cyan
+        case .copyTmuxTarget: theme.magenta
+        case .pasteFolder: theme.green
+        case .snoozeTopic: theme.yellow
         default: theme.blue
         }
     }
@@ -443,10 +443,10 @@ struct PaletteIcon: View {
     private func symbol(_ action: PaletteAction) -> String {
         switch action {
         case .newSession: "plus"
-        case .copyPath: "doc.on.doc.fill"
-        case .copyTarget: "number"
-        case .pastePath: "text.cursor"
-        case .snooze: "moon.zzz.fill"
+        case .copyFolder: "doc.on.doc.fill"
+        case .copyTmuxTarget: "number"
+        case .pasteFolder: "text.cursor"
+        case .snoozeTopic: "moon.zzz.fill"
         default: "arrow.up.forward"
         }
     }

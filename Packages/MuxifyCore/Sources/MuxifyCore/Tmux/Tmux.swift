@@ -88,7 +88,7 @@ public struct TmuxWindow: Identifiable, Hashable {
 /// A Window's Browser as stored in tmux window options (ADR 0003). Tab URLs
 /// are space-separated (URLs never contain spaces); an empty Tab is
 /// `about:blank`. `@muxify_browser` holds the toggles (`off`: the Terminal,
-/// `on`: both, `only`: the Browser) and `@muxify_focus` the side in Focus.
+/// `on`: both, `only`: the Browser) and `@muxify_maximize` the Maximized side.
 public struct StoredBrowser: Hashable {
     public var tabURLs: [String] = []
     public var activeTab = 0
@@ -100,15 +100,15 @@ public struct StoredBrowser: Hashable {
         self.layout = layout
     }
 
-    public init(tabs: String, activeTab: String, shown: String, focus: String) {
+    public init(tabs: String, activeTab: String, shown: String, maximized: String) {
         tabURLs = tabs.split(separator: " ").map(String.init)
         self.activeTab = Int(activeTab) ?? 0
         layout = PanelLayout(shown: Self.shownValues.first { $0.value == shown }?.key ?? .terminal,
-                             focus: Self.focusValues.first { $0.value == focus }?.key)
+                             maximized: Self.maximizeValues.first { $0.value == maximized }?.key)
     }
 
     private static let shownValues: [PanelLayout.Shown: String] = [.terminal: "off", .both: "on", .browser: "only"]
-    private static let focusValues: [PanelLayout.Side: String] = [.terminal: "terminal", .browser: "browser"]
+    private static let maximizeValues: [PanelLayout.Side: String] = [.terminal: "terminal", .browser: "browser"]
 
     /// `set-option` arguments that write this state onto `windowID`.
     public func setOptionArgs(windowID: String) -> [String] {
@@ -116,7 +116,7 @@ public struct StoredBrowser: Hashable {
             (Tmux.tabsOption, tabURLs.isEmpty ? nil : tabURLs.joined(separator: " ")),
             (Tmux.activeTabOption, tabURLs.isEmpty ? nil : String(activeTab)),
             (Tmux.shownOption, layout.shown == .terminal ? nil : Self.shownValues[layout.shown]),
-            (Tmux.focusOption, layout.focus.flatMap { Self.focusValues[$0] }),
+            (Tmux.maximizeOption, layout.maximized.flatMap { Self.maximizeValues[$0] }),
         ]
         return Array(values.flatMap { option, value in
             value.map { ["set-option", "-wq", "-t", windowID, option, $0, ";"] }
@@ -237,9 +237,9 @@ public enum Tmux {
     // tmux user options Muxify keeps its state in.
     public static let tabsOption = "@muxify_tabs"
     public static let activeTabOption = "@muxify_active_tab"
-    /// The Terminal and Browser toggles and Focus (`PanelLayout`).
+    /// The Terminal and Browser toggles and Maximize (`PanelLayout`).
     public static let shownOption = "@muxify_browser"
-    public static let focusOption = "@muxify_focus"
+    public static let maximizeOption = "@muxify_maximize"
     /// One-shot: programs set it to open a Tab; Muxify consumes and clears it.
     public static let openOption = "@muxify_open"
     public static let lastWindowOption = "@muxify_last_window"
@@ -304,7 +304,7 @@ public enum Tmux {
             "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{session_activity}",
             "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(shownOption)}", "#{\(openOption)}",
             "#{\(lastWindowOption)}", "#{\(agentOption)}", "#{@muxify_topic}", "#{session_path}", "#{pane_id}", "#{pane_start_command}",
-            "#{\(focusOption)}", "#{session_created}",
+            "#{\(maximizeOption)}", "#{session_created}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}", "#{client_pid}", "#{client_control_mode}"].joined(separator: s)
         let paneFormat = [
@@ -341,7 +341,7 @@ public enum Tmux {
                     hasBell: f[11] == "1",
                     sessionActivity: Int(f[12]) ?? 0,
                     agent: f[18],
-                    storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], shown: f[15], focus: field(23)),
+                    storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], shown: f[15], maximized: field(23)),
                     openRequests: f[16].split(separator: " ").map(String.init),
                     topicID: field(19).isEmpty ? nil : field(19), sessionPath: field(20),
                     activePaneID: field(21), startCommand: field(22), sessionCreated: Int(field(24)) ?? 0

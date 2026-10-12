@@ -110,3 +110,19 @@ class PaletteCurrentCommands(unittest.TestCase):
         self.search('End Zen')
         self.assertFalse(self.s.has('palette-row-command-End Zen'), 'Zen remained active')
         self.s.act('action', 'palette-search', 'Close')
+
+    def test_layout_commands_show_their_shortcut_and_change_the_window(self):
+        self.search('Maximize Terminal')
+        key = 'palette-row-command-Maximize Terminal'
+        rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Maximize Terminal was missing from Commands')
+        row = self.s.row(key, rs)
+        self.assertIn('⌥⌘J', row.get('accessibilityLabel', '') + row.get('accessibilityValue', ''),
+                      'Maximize Terminal does not show its shortcut: %s' % row)
+        self.s.act('action', 'palette-search', 'Close')
+        self.run_command('Show Browser')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Show Browser did not close Commands')
+        wait(lambda: self.s.tmux('show-options', '-wqv', '-t', self.base, '@muxify_browser') == 'on',
+             'Show Browser did not turn the Browser toggle on')
+        self.run_command('Hide Browser')
+        wait(lambda: self.s.tmux('show-options', '-wqv', '-t', self.base, '@muxify_browser') == '',
+             'Hide Browser did not turn the Browser toggle off')

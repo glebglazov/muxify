@@ -115,7 +115,7 @@ private struct TabItem: View {
         .opacity(hints[.tab(tab.id)].isEmpty ? 1 : 0.5)
         .overlay(alignment: .leading) {
             if !hints[.tab(tab.id)].isEmpty {
-                HintChip(target: .tab(tab.id), triggers: hints[.tab(tab.id)]).padding(.leading, 4)
+                HintBadge(target: .tab(tab.id), triggers: hints[.tab(tab.id)]).padding(.leading, 4)
             }
         }
     }
@@ -150,12 +150,12 @@ private struct TabContent: View {
         .onAppear {
             address = tab.urlString
             scanPorts()
-            consumeKeyboardRequest()
+            consumeFocusRequest()
         }
         .onChange(of: tab.urlString) { _, newValue in
             if !addressFocused { address = newValue }
         }
-        .onChange(of: browser.keyboardRequest) { _, _ in consumeKeyboardRequest() }
+        .onChange(of: browser.focusRequest) { _, _ in consumeFocusRequest() }
     }
 
     // MARK: - Toolbar
@@ -295,11 +295,11 @@ private struct TabContent: View {
         focusPage()
     }
 
-    /// Only explicit requests (opening the panel, ⌘L, Focus) take the
-    /// keyboard; merely switching tmux windows keeps it in the Terminal.
-    private func consumeKeyboardRequest() {
-        guard let request = browser.keyboardRequest else { return }
-        browser.keyboardRequest = nil
+    /// Only explicit requests (opening the panel, ⌘L, Maximize, Focus Browser)
+    /// take Focus; merely switching tmux windows keeps it in the Terminal.
+    private func consumeFocusRequest() {
+        guard let request = browser.focusRequest else { return }
+        browser.focusRequest = nil
         switch request {
         case .addressBar: DispatchQueue.main.async { addressFocused = true }
         case .page: focusPage()

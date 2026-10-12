@@ -4,7 +4,7 @@ import AppKit
 /// Lets scripts/verify drive a Debug build through its accessibility tree.
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
-/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, each
+/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, each
 /// with the option `reveal` that scrolls the target into view first. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
@@ -260,6 +260,10 @@ enum TestDriver {
         var pressed = false
         if name == "snapshot" { return ["rows": [], "pressed": snapshot(of: target, to: text)] }
         if name == "hover" { return ["rows": [], "pressed": hover(target)] }
+        if name == "responder" {
+            let classes = NSApp.windows.filter(\.isVisible).compactMap { $0.firstResponder.map { String(describing: type(of: $0)) } }
+            return ["rows": [], "pressed": true, "responders": classes]
+        }
         let elements = dump()
         for element in elements {
             let object = element.object

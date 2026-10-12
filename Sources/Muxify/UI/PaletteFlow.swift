@@ -403,13 +403,13 @@ extension CommandPalette {
         if case .confirm = flow, query.isEmpty, trigger == KeyTrigger(modifiers: [], key: .character(" ")) { toggleSelected(); return true }
         if let action = store?.config.paletteKeybinds.action(for: trigger) {
             switch action {
-            case .movePane: changeMoveScope(.pane)
-            case .moveWindow: changeMoveScope(.window)
-            case .moveSession: changeMoveScope(.session)
-            case .includeTab: toggleTab()
-            case .newWorktree:
+            case .choosePane: changeMoveScope(.pane)
+            case .chooseWindow: changeMoveScope(.window)
+            case .chooseSession: changeMoveScope(.session)
+            case .toggleIncludeTab: toggleTab()
+            case .toggleNewWorktree:
                 if case .addProject = flow { newWorktree.toggle() }
-            case .suggestTitle: suggestTitle()
+            case .suggestTopicTitle: suggestTitle()
             default: return false
             }
             return true

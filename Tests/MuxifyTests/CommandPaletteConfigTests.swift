@@ -28,16 +28,16 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(keys.action(for: trigger("up")), .selectPrev)
         XCTAssertEqual(keys.action(for: trigger("ctrl+k")), .selectPrev)
         XCTAssertEqual(keys.action(for: trigger("cmd+k")), .showActions)
-        XCTAssertEqual(keys.action(for: trigger("cmd+c")), .copyPath)
-        XCTAssertEqual(keys.action(for: trigger("cmd+shift+c")), .copyTarget)
-        XCTAssertEqual(keys.action(for: trigger("ctrl+y")), .pastePath)
-        XCTAssertEqual(keys.action(for: trigger("ctrl+s")), .snooze)
-        XCTAssertEqual(keys.action(for: trigger("alt+1")), .movePane)
-        XCTAssertEqual(keys.action(for: trigger("alt+2")), .moveWindow)
-        XCTAssertEqual(keys.action(for: trigger("alt+3")), .moveSession)
-        XCTAssertEqual(keys.action(for: trigger("alt+t")), .includeTab)
-        XCTAssertEqual(keys.action(for: trigger("alt+w")), .newWorktree)
-        XCTAssertEqual(keys.action(for: trigger("alt+s")), .suggestTitle)
+        XCTAssertEqual(keys.action(for: trigger("cmd+c")), .copyFolder)
+        XCTAssertEqual(keys.action(for: trigger("cmd+shift+c")), .copyTmuxTarget)
+        XCTAssertEqual(keys.action(for: trigger("ctrl+y")), .pasteFolder)
+        XCTAssertEqual(keys.action(for: trigger("ctrl+s")), .snoozeTopic)
+        XCTAssertEqual(keys.action(for: trigger("alt+1")), .choosePane)
+        XCTAssertEqual(keys.action(for: trigger("alt+2")), .chooseWindow)
+        XCTAssertEqual(keys.action(for: trigger("alt+3")), .chooseSession)
+        XCTAssertEqual(keys.action(for: trigger("alt+t")), .toggleIncludeTab)
+        XCTAssertEqual(keys.action(for: trigger("alt+w")), .toggleNewWorktree)
+        XCTAssertEqual(keys.action(for: trigger("alt+s")), .suggestTopicTitle)
         XCTAssertEqual(config.projectRoots, [])
         XCTAssertEqual(config.problems, [])
     }
@@ -46,7 +46,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         let config = try load("""
         keybindings:
           command_palette:
-            copy_path: cmd+c
+            copy_folder: cmd+c
             jump_to: enter
 
         projects:
@@ -83,7 +83,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         """)
         let palette = try XCTUnwrap(config.commandPalettes.first)
         XCTAssertEqual(palette.sources, [.commands, .topics])
-        XCTAssertEqual(palette.chips, [.commands, .topics, .sessions, .windows, .agents])
+        XCTAssertEqual(palette.allSources, [.commands, .topics, .sessions, .windows, .agents])
         XCTAssertEqual(config.problems, [])
     }
 
@@ -91,14 +91,14 @@ final class CommandPaletteConfigTests: XCTestCase {
         let config = try load("""
         keybindings:
           command_palette:
-            include_tab: alt+1
-            move_window: []
-            suggest_title: alt+r
+            toggle_include_tab: alt+1
+            choose_window: []
+            suggest_topic_title: alt+r
         """)
-        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+1")), .includeTab)
-        XCTAssertEqual(config.paletteKeybinds.triggers[.movePane], [])
+        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+1")), .toggleIncludeTab)
+        XCTAssertEqual(config.paletteKeybinds.triggers[.choosePane], [])
         XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+2")))
-        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+r")), .suggestTitle)
+        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+r")), .suggestTopicTitle)
         XCTAssertEqual(config.problems, [])
     }
 
@@ -223,16 +223,16 @@ final class CommandPaletteConfigTests: XCTestCase {
           command_palette:
             jump_to: [enter, cmd+b]
             select_next: ctrl+n
-            copy_target: []
-            copy_path: ctrl+n
+            copy_tmux_target: []
+            copy_folder: ctrl+n
             reveal_in_finder: cmd+r
         """)
         let keys = config.paletteKeybinds
         XCTAssertEqual(keys.triggers[.jumpTo], [trigger("enter"), trigger("cmd+b")])
         XCTAssertEqual(keys.triggers[.selectNext], [trigger("ctrl+n")])
         XCTAssertEqual(keys.triggers[.selectPrev], [trigger("up"), trigger("ctrl+k")])
-        XCTAssertEqual(keys.triggers[.copyTarget], [])
-        XCTAssertEqual(keys.triggers[.copyPath], [])
+        XCTAssertEqual(keys.triggers[.copyTmuxTarget], [])
+        XCTAssertEqual(keys.triggers[.copyFolder], [])
         XCTAssertEqual(keys.triggers[.showActions], [trigger("cmd+k")])
         // Only while a palette is open: the global keybinds are untouched.
         XCTAssertEqual(config.keybinds.triggers[.toggleBrowser], [trigger("cmd+e")])

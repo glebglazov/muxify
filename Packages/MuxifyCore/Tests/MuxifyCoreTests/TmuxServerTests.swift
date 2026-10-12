@@ -41,10 +41,10 @@ final class TmuxServerTests: XCTestCase {
         XCTAssertEqual(snapshot.windows.map(\.name), ["editor"])
     }
 
-    func testAWindowKeepsTheTogglesAndFocusWrittenOntoIt() throws {
+    func testAWindowKeepsTheTogglesAndMaximizeWrittenOntoIt() throws {
         try other.run(["new-session", "-d", "-s", "work", "-c", directory.path])
         let windowID = try XCTUnwrap(other.snapshot().windows.first?.id)
-        for layout in [PanelLayout(shown: .browser, focus: .terminal), PanelLayout(shown: .both, focus: .browser), PanelLayout()] {
+        for layout in [PanelLayout(shown: .browser, maximized: .terminal), PanelLayout(shown: .both, maximized: .browser), PanelLayout()] {
             let stored = StoredBrowser(tabURLs: ["https://example.com"], layout: layout)
             try other.run(stored.setOptionArgs(windowID: windowID))
             XCTAssertEqual(other.snapshot().windows.first?.storedBrowser, stored)

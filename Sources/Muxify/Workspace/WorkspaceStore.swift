@@ -106,6 +106,13 @@ final class WorkspaceStore {
         palette.openMove(window, keepingHistory: keepingHistory)
     }
 
+    /// Move for the selected Window, in the Command Palette's view. Nothing happens with Topics off.
+    func presentMoveWindow(keepingHistory: Bool = false) {
+        guard !isRemote, topics.topicsEnabled, let window = selectedWindow else { return }
+        topicWatcher.reload()
+        palette.openMove(window, scope: .window, keepingHistory: keepingHistory)
+    }
+
     /// Types `text` at the prompt of the active Pane of the selected Window, without Enter.
     func pasteIntoTerminal(_ text: String) {
         guard let pane = selectedWindow?.activePaneID, !pane.isEmpty else {
@@ -350,7 +357,7 @@ final class WorkspaceStore {
     }
 
     /// Moves a Pane into a new Untitled Topic: the Pane that the terminal shows, or the Window's or Pane's id.
-    func newTopicFromPane(_ target: TopicTarget?, includesTab: Bool = false, keepingHistory: Bool = false) {
+    func presentMovePane(_ target: TopicTarget?, includesTab: Bool = false, keepingHistory: Bool = false) {
         guard !isRemote, let window = selectedWindow else { return }
         switch target {
         case .window(let id):
@@ -428,7 +435,7 @@ final class WorkspaceStore {
         if topicWatcher.zen != nil { endZen() } else { palette.begin(.zen(id), keepingHistory: keepingHistory) }
     }
 
-    /// The Zen menu item and the `zen_mode` key keep the Active Topic. No Topic is not a Topic, so while it is
+    /// The Zen menu item and the `toggle_zen` key keep the Active Topic. No Topic is not a Topic, so while it is
     /// active they can only end Zen.
     func toggleZenOfActiveTopic(keepingHistory: Bool = false) {
         if let id = activeTopicID { toggleZen(keeping: id, keepingHistory: keepingHistory) } else { endZen() }
@@ -632,7 +639,7 @@ final class WorkspaceStore {
                     pendingSelection = (id.rawValue, Date().addingTimeInterval(5), false)
                     selectedWindowID = id.rawValue
                     sidebarMode = .topics
-                    moveKeyboardIntoWindow()
+                    moveFocusIntoWindow()
                     if surface == nil || surface?.processExited == true,
                        let window = windows.first(where: { $0.id == id.rawValue })
                         ?? TmuxServer.local.snapshot().windows.first(where: { $0.id == id.rawValue }) {
@@ -1326,7 +1333,7 @@ final class WorkspaceStore {
         selectedWindowID = target?.windowID
         if let target { pendingSelection = (target.windowID, Date().addingTimeInterval(3), readsOnArrival) }
         terminalHost.show(view)
-        moveKeyboardIntoWindow()
+        moveFocusIntoWindow()
         let current = generation
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             guard let self, self.generation == current else { return }
@@ -1433,7 +1440,7 @@ final class WorkspaceStore {
         let previousTopicSelection = topicSelection
         selectedWindowID = target.windowID
         pendingSelection = (target.windowID, Date().addingTimeInterval(isRemote ? 10 : 2), false)
-        moveKeyboardIntoWindow()
+        moveFocusIntoWindow()
         guard let surface, !surface.processExited, let tty = clientTTY ?? (isRemote ? nil : surface.ttyName) else {
             if isRemote { return }
             attach(to: target, readsOnArrival: true)
@@ -1455,44 +1462,44 @@ final class WorkspaceStore {
         }
     }
 
-    var keyboardIsInTerminal: Bool {
+    var terminalHasFocus: Bool {
         guard let surface else { return false }
         return surface.window?.firstResponder === surface
     }
 
-    /// Keyboard focus is in the current Window's Browser (its page or omnibox).
-    var keyboardIsInBrowser: Bool {
-        !keyboardIsInTerminal && panelLayout.shows(.browser)
+    /// The current Window's Browser has Focus (its page or omnibox).
+    var browserHasFocus: Bool {
+        !terminalHasFocus && panelLayout.shows(.browser)
     }
 
-    private var keyboardSide: PanelLayout.Side { keyboardIsInBrowser ? .browser : .terminal }
+    private var focusedSide: PanelLayout.Side { browserHasFocus ? .browser : .terminal }
 
-    func moveKeyboard(into side: PanelLayout.Side) {
+    func moveFocus(into side: PanelLayout.Side) {
         switch side {
-        case .terminal: moveKeyboardToTerminal()
-        case .browser: currentBrowser?.requestKeyboard()
+        case .terminal: focusTerminal()
+        case .browser: currentBrowser?.requestFocus()
         }
     }
 
-    /// Switching Windows and closing a sheet give the keyboard back to the
-    /// Window: to its Terminal, or to its Browser while the Terminal is hidden.
-    func moveKeyboardIntoWindow() {
+    /// Switching Windows and closing a sheet give Focus back to the Window:
+    /// to its Terminal, or to its Browser while the Terminal is hidden.
+    func moveFocusIntoWindow() {
         guard !palette.isOpen else { return }
-        moveKeyboard(into: panelLayout.shows(.terminal) ? .terminal : .browser)
+        moveFocus(into: panelLayout.shows(.terminal) ? .terminal : .browser)
     }
 
-    /// When a side disappears with the keyboard in it, the keyboard moves to the side still shown.
-    private func keepKeyboardOnScreen() {
+    /// When a side with Focus disappears, Focus moves to the side still shown.
+    private func keepFocusOnScreen() {
         let layout = panelLayout
-        if !layout.shows(.terminal), keyboardIsInTerminal {
-            currentBrowser?.requestKeyboard()
-        } else if !layout.shows(.browser), !keyboardIsInTerminal {
-            moveKeyboardToTerminal()
+        if !layout.shows(.terminal), terminalHasFocus {
+            currentBrowser?.requestFocus()
+        } else if !layout.shows(.browser), !terminalHasFocus {
+            focusTerminal()
         }
     }
 
-    /// A hidden Terminal never takes the keyboard.
-    func moveKeyboardToTerminal() {
+    /// Makes the Terminal the first responder. A hidden Terminal never takes Focus.
+    func focusTerminal() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let surface, panelLayout.shows(.terminal), topics.emptyTopic == nil,
                   !topicSelection.showsEmptyNoTopic, !palette.isOpen else { return }
@@ -1661,7 +1668,7 @@ final class WorkspaceStore {
         }
         browser.onShownChange = { [weak self] browser in
             guard let self, self.generation == current, browser.windowID == self.selectedWindowID else { return }
-            keepKeyboardOnScreen()
+            keepFocusOnScreen()
         }
         browser.onCopyURL = { [weak self] url in
             guard let self, self.generation == current else { return }
@@ -1683,7 +1690,7 @@ final class WorkspaceStore {
     var sidebarShown: Bool { sidebarVisible && !panelLayout.hidesSidebar }
 
     func toggleSidebar() {
-        commitFocus()
+        commitMaximize()
         sidebarVisible.toggle()
     }
 
@@ -1691,55 +1698,62 @@ final class WorkspaceStore {
         currentBrowser != nil && panelLayout.canToggle(side)
     }
 
-    /// Shows or hides the current Window's `side`. A side that appears takes the keyboard.
+    /// Shows or hides the current Window's `side`. A side that appears takes Focus.
     func toggle(_ side: PanelLayout.Side) {
         guard let browser = currentBrowser, browser.layout.canToggle(side) else { return }
-        commitFocus()
+        commitMaximize()
         browser.toggle(side)
-        if browser.layout.shows(side) { moveKeyboard(into: side) }
+        if browser.layout.shows(side) { moveFocus(into: side) }
     }
 
-    func canFocus(_ side: PanelLayout.Side) -> Bool {
-        currentBrowser != nil && panelLayout.canFocus(side, sidebarShown: sidebarShown)
+    func canMaximize(_ side: PanelLayout.Side) -> Bool {
+        currentBrowser != nil && panelLayout.canMaximize(side, sidebarShown: sidebarShown)
     }
 
-    /// Focuses the current Window's `side` and moves the keyboard into it, or
-    /// ends Focus when `side` is in Focus already.
-    func toggleFocus(_ side: PanelLayout.Side) {
+    /// Maximizes the current Window's `side` and moves Focus into it, or
+    /// restores when `side` is Maximized already.
+    func toggleMaximize(_ side: PanelLayout.Side) {
         guard let browser = currentBrowser else { return }
-        browser.toggleFocus(side, sidebarShown: sidebarShown)
-        if browser.layout.focus == side { moveKeyboard(into: side) }
+        browser.toggleMaximize(side, sidebarShown: sidebarShown)
+        if browser.layout.maximized == side { moveFocus(into: side) }
     }
 
-    var canToggleFocus: Bool { canFocus(panelLayout.focus ?? keyboardSide) }
+    var canToggleMaximize: Bool { canMaximize(panelLayout.maximized ?? focusedSide) }
 
-    /// Focuses the side the keyboard is in, or ends Focus.
-    func toggleFocus() {
-        toggleFocus(panelLayout.focus ?? keyboardSide)
+    /// Maximizes the side that has Focus, or restores.
+    func toggleMaximize() {
+        toggleMaximize(panelLayout.maximized ?? focusedSide)
     }
 
-    /// A toggle used during Focus starts from what is on screen: the side in
-    /// Focus alone, and no Sidebar.
-    private func commitFocus() {
-        guard let browser = currentBrowser, browser.layout.focus != nil else { return }
+    /// Moves Focus into the current Window's `side`, also when Maximize of the
+    /// other side or a toggle hides it (`focus_terminal`, `focus_browser`).
+    func focus(_ side: PanelLayout.Side) {
+        currentBrowser?.reveal(side)
+        moveFocus(into: side)
+    }
+
+    /// A toggle used while Maximized starts from what is on screen: the
+    /// Maximized side alone, and no Sidebar.
+    private func commitMaximize() {
+        guard let browser = currentBrowser, browser.layout.maximized != nil else { return }
         sidebarVisible = false
-        browser.commitFocus()
+        browser.commitMaximize()
     }
 
     func focusAddressBar() {
         guard let browser = currentBrowser else { return }
         if !browser.layout.shows(.browser) { toggle(.browser) }
-        browser.keyboardRequest = .addressBar
+        browser.focusRequest = .addressBar
     }
 
-    /// Menu actions for the Browser. Their shortcuts only count when focus is
-    /// outside the terminal, where Ghostty/tmux bindings own the keyboard;
+    /// Menu actions for the Browser. Their shortcuts only count when Focus is
+    /// outside the terminal, where Ghostty/tmux bindings own the keys;
     /// clicking the menu item always works.
     func browserCommand(opensBrowser: Bool = false, _ body: (Browser) -> Void) {
-        if NSApp.currentEvent?.type == .keyDown, keyboardIsInTerminal { return }
+        if NSApp.currentEvent?.type == .keyDown, terminalHasFocus { return }
         if NSApp.currentEvent?.type == .keyDown, !opensBrowser, !panelLayout.shows(.browser) { return }
         guard let browser = currentBrowser else { return }
-        if opensBrowser, !browser.layout.shows(.browser) { commitFocus() }
+        if opensBrowser, !browser.layout.shows(.browser) { commitMaximize() }
         body(browser)
     }
 
@@ -1837,23 +1851,25 @@ final class WorkspaceStore {
 
     // MARK: - Keyboard
 
-    private func perform(_ action: ConfigAction) {
+    func perform(_ action: ConfigAction) {
         switch action {
         case .newAppWindow: onNewAppWindow?()
         case .newTopic: if !isRemote { presentNewTopic() }
-        case .newTopicFromPane: if !isRemote { newTopicFromPane(nil) }
-        case .moveSessionToTopic: if !isRemote { presentMoveSession() }
+        case .movePane: if !isRemote { presentMovePane(nil) }
+        case .moveWindow: presentMoveWindow()
+        case .moveSession: if !isRemote { presentMoveSession() }
         case .addProjectToTopic: if !isRemote { presentAddProject() }
         case .snoozeTopic: if !isRemote { presentSnoozeTopic() }
-        case .zenMode: if !isRemote { toggleZenOfActiveTopic() }
+        case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
         case .toggleSidebar: toggleSidebar()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)
-        case .toggleFocus: toggleFocus()
-        case .focusTerminal: toggleFocus(.terminal)
-        case .focusBrowser: toggleFocus(.browser)
-        case .moveKeyboardToTerminal: moveKeyboardToTerminal()
+        case .toggleMaximize: toggleMaximize()
+        case .toggleMaximizeTerminal: toggleMaximize(.terminal)
+        case .toggleMaximizeBrowser: toggleMaximize(.browser)
+        case .focusTerminal: focus(.terminal)
+        case .focusBrowser: focus(.browser)
         case .selectCard1, .selectCard2, .selectCard3, .selectCard4, .selectCard5,
              .selectCard6, .selectCard7, .selectCard8, .selectCard9,
              .selectWindow1, .selectWindow2, .selectWindow3, .selectWindow4, .selectWindow5,
@@ -1910,12 +1926,12 @@ final class WorkspaceStore {
             if performConfiguredShortcut(trigger) { return nil }
             if keybinds.suppressesDefaultAppWindowShortcut(trigger) { return nil }
             if trigger == Self.closeTab {
-                if keyboardIsInBrowser { browserCommand { $0.closeActiveTab() } }
+                if browserHasFocus { browserCommand { $0.closeActiveTab() } }
                 return nil
             }
         }
         let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        if event.keyCode == 0x30, flags == .control || flags == [.control, .shift], keyboardIsInBrowser {
+        if event.keyCode == 0x30, flags == .control || flags == [.control, .shift], browserHasFocus {
             currentBrowser?.selectTab(offset: flags.contains(.shift) ? -1 : 1)
             return nil
         }

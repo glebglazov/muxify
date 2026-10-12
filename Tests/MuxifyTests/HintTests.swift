@@ -78,7 +78,7 @@ final class HintTests: XCTestCase {
           select_card_1: []
           select_card_2: [ctrl+7, ctrl+x, ctrl+cmd+2]
           select_window_1: ctrl+1
-          move_keyboard_to_terminal: [ctrl+8, ctrl+t, alt+0]
+          focus_terminal: [ctrl+8, ctrl+t, alt+0]
         command_palettes:
           - name: Claimed
             keybinding: ctrl+3
@@ -201,9 +201,9 @@ final class HintTests: XCTestCase {
             XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("ctrl+\(position)")), ConfigAction(rawValue: "select_card_\(position)"))
             XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("alt+\(position)")), ConfigAction(rawValue: "select_tab_\(position)"))
         }
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .moveKeyboardToTerminal), try KeyTrigger("ctrl+backquote"))
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), try KeyTrigger("cmd+shift+j"))
         for modifier in ["ctrl", "alt"] {
-            XCTAssertEqual(config.keybinds.action(for: try KeyTrigger(modifier + "+0")), .moveKeyboardToTerminal)
+            XCTAssertEqual(config.keybinds.action(for: try KeyTrigger(modifier + "+0")), .focusTerminal)
         }
     }
 
@@ -239,7 +239,7 @@ final class HintTests: XCTestCase {
     }
 
     @MainActor
-    func testTabJumpShowsHiddenBrowserAndRequestsKeyboard() throws {
+    func testTabJumpShowsHiddenBrowserAndRequestsFocus() throws {
         let browser = Browser(windowID: "@1", stored: StoredBrowser(
             tabURLs: ["https://one.test", "https://two.test"], layout: PanelLayout(shown: .terminal)))
         defer { browser.tearDown() }
@@ -247,6 +247,6 @@ final class HintTests: XCTestCase {
         browser.jumpTo(tab)
         XCTAssertTrue(browser.activeTab === tab)
         XCTAssertTrue(browser.layout.shows(.browser))
-        XCTAssertEqual(browser.keyboardRequest, .page)
+        XCTAssertEqual(browser.focusRequest, .page)
     }
 }

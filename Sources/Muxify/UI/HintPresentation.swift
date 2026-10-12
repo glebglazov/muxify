@@ -19,7 +19,7 @@ struct HintPresentation {
             let target: QuickSwitchTarget
             if let selection = action.quickSwitchSelection, let selected = targets.target(for: selection) {
                 target = selected
-            } else if action == .moveKeyboardToTerminal {
+            } else if action == .focusTerminal {
                 target = .terminal
             } else { continue }
             switch target {

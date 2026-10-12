@@ -40,14 +40,64 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(KeyTrigger(event)), trigger("cmd+shift+p"))
         XCTAssertNil(ConfigAction(rawValue: "open_switcher"))
         XCTAssertFalse(Config.template.contains("open_switcher"))
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .moveSessionToTopic), trigger("cmd+shift+m"))
-        XCTAssertTrue(Config.template.contains("#   move_session_to_topic: cmd+shift+m"))
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .moveSession), trigger("cmd+shift+m"))
+        XCTAssertTrue(Config.template.contains("#   move_session: cmd+shift+m"))
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+a")), .addProjectToTopic)
         XCTAssertTrue(Config.template.contains("#   add_project_to_topic: cmd+shift+a"))
         XCTAssertTrue(config.problems.isEmpty)
         let old = try load("keybindings:\n  open_switcher: cmd+p")
         XCTAssertEqual(old.problems.map(\.message),
                        ["open_switcher is gone: the Go to… Command Palette replaces the Switcher; bind it in command_palettes"])
+    }
+
+    func testARemovedKeybindingNameIsAProblemThatNamesItsReplacement() throws {
+        let config = try load("keybindings:\n  toggle_focus: cmd+e\n  move_pane: cmd+shift+t")
+        XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2, message: "toggle_focus is gone: use toggle_maximize")])
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+e")), "a removed name still binds its trigger")
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleMaximize), trigger("shift+cmd+enter"))
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t")), .movePane)
+        XCTAssertFalse(Config.template.contains("toggle_focus"))
+    }
+
+    func testARemovedPaletteNameIsAProblemEvenWhereTheGlobalScopeUsesIt() throws {
+        let config = try load("""
+        keybindings:
+          move_window: ctrl+cmd+w
+          command_palette:
+            move_window: alt+9
+            suggest_title: alt+r
+        """)
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 4, message: "move_window is gone: use choose_window"),
+            ConfigProblem(path: root, line: 5, message: "suggest_title is gone: use suggest_topic_title"),
+        ])
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+w")), .moveWindow)
+        XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+9")))
+        XCTAssertEqual(config.paletteKeybinds.firstTrigger(for: .chooseWindow), trigger("alt+2"))
+        XCTAssertEqual(config.paletteKeybinds.firstTrigger(for: .suggestTopicTitle), trigger("alt+s"))
+    }
+
+    func testLayoutAndFocusDefaults() throws {
+        let config = try load("")
+        let expected: [(ConfigAction, [String])] = [
+            (.toggleMaximize, ["shift+cmd+enter"]),
+            (.toggleMaximizeTerminal, ["alt+cmd+j"]),
+            (.toggleMaximizeBrowser, ["alt+cmd+b"]),
+            (.focusTerminal, ["cmd+shift+j", "ctrl+backquote", "ctrl+0", "alt+0"]),
+            (.focusBrowser, ["cmd+shift+b"]),
+            (.movePane, ["cmd+shift+t"]),
+            (.moveWindow, []),
+            (.moveSession, ["cmd+shift+m"]),
+            (.toggleZen, ["shift+alt+cmd+s"]),
+            (.toggleTerminal, ["cmd+j"]),
+            (.toggleBrowser, ["cmd+b"]),
+        ]
+        for (action, spellings) in expected {
+            XCTAssertEqual(config.keybinds.triggers[action] ?? [], spellings.map(trigger), action.rawValue)
+        }
+        XCTAssertEqual(config.paletteKeybinds.triggers[.suggestTopicTitle], [trigger("alt+s")])
+        XCTAssertNil(config.keybinds.action(for: trigger("alt+cmd+t")), "the old Maximize Terminal default is still bound")
+        XCTAssertEqual(config.problems, [])
     }
 
     func testSettleCanBeBoundAndClearedAndTheRemovedActionsAreUnknown() throws {
@@ -67,33 +117,33 @@ final class ConfigTests: XCTestCase {
         XCTAssertNil(removed.keybinds.action(for: trigger("cmd+o")))
     }
 
-    func testNewTopicFromPaneActionDefaultsAndKeyboardDispatch() throws {
-        XCTAssertEqual(ConfigAction(rawValue: "new_topic_from_pane"), .newTopicFromPane)
+    func testMovePaneActionDefaultsAndKeyDispatch() throws {
+        XCTAssertEqual(ConfigAction(rawValue: "move_pane"), .movePane)
         let config = try load("")
         let key = trigger("cmd+shift+t")
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .newTopicFromPane), key)
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .movePane), key)
         XCTAssertEqual(key.symbol, "⇧⌘T")
         let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift],
                                                   timestamp: 0, windowNumber: 0, context: nil,
                                                   characters: "T", charactersIgnoringModifiers: "t",
                                                   isARepeat: false, keyCode: 0x11))
-        XCTAssertEqual(config.keybinds.action(for: try XCTUnwrap(KeyTrigger(event))), .newTopicFromPane)
-        XCTAssertTrue(Config.template.contains("#   new_topic_from_pane: cmd+shift+t"))
+        XCTAssertEqual(config.keybinds.action(for: try XCTUnwrap(KeyTrigger(event))), .movePane)
+        XCTAssertTrue(Config.template.contains("#   move_pane: cmd+shift+t"))
         XCTAssertTrue(config.problems.isEmpty)
     }
 
-    func testNewTopicFromPaneCanBeRemappedDisabledAndClaimedByAnotherAction() throws {
-        let remapped = try load("keybindings:\n  new_topic_from_pane: ctrl+cmd+t")
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t")), .newTopicFromPane)
+    func testMovePaneCanBeRemappedDisabledAndClaimedByAnotherAction() throws {
+        let remapped = try load("keybindings:\n  move_pane: ctrl+cmd+t")
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t")), .movePane)
         XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+shift+t")))
         XCTAssertTrue(remapped.problems.isEmpty)
-        let disabled = try load("keybindings:\n  new_topic_from_pane: []")
-        XCTAssertNil(disabled.keybinds.firstTrigger(for: .newTopicFromPane))
+        let disabled = try load("keybindings:\n  move_pane: []")
+        XCTAssertNil(disabled.keybinds.firstTrigger(for: .movePane))
         XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+shift+t")))
         XCTAssertTrue(disabled.problems.isEmpty)
         let claimed = try load("keybindings:\n  new_topic: cmd+shift+t")
         XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+shift+t")), .newTopic)
-        XCTAssertNil(claimed.keybinds.firstTrigger(for: .newTopicFromPane))
+        XCTAssertNil(claimed.keybinds.firstTrigger(for: .movePane))
         XCTAssertTrue(claimed.problems.isEmpty)
     }
 
@@ -185,11 +235,11 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s")), .toggleSidebar)
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+n")), .newAppWindow)
-            XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote")), .moveKeyboardToTerminal)
-            XCTAssertEqual(config.keybinds.firstTrigger(for: .moveKeyboardToTerminal), trigger("ctrl+backquote"))
+            XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote")), .focusTerminal)
+            XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), trigger("cmd+shift+j"))
             XCTAssertNil(config.keybinds.action(for: trigger("cmd+backquote")))
             XCTAssertNil(config.keybinds.action(for: trigger("cmd+shift+backquote")))
-            XCTAssertNil(config.keybinds.action(for: trigger("cmd+shift+b")))
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+b")), .focusBrowser)
             XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
             XCTAssertEqual(config.headerHeight, 30)
             XCTAssertEqual(config.sidebarTypography, SidebarTypography())
@@ -363,15 +413,15 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "ui.pulse: expected a boolean")])
     }
 
-    func testMoveKeyboardToTerminalCanBeRemappedToMultipleShortcutsOrDisabled() throws {
-        let remapped = try load("keybindings:\n  move_keyboard_to_terminal: [ctrl+cmd+t, cmd+backquote]")
+    func testFocusTerminalCanBeRemappedToMultipleShortcutsOrDisabled() throws {
+        let remapped = try load("keybindings:\n  focus_terminal: [ctrl+cmd+t, cmd+backquote]")
         XCTAssertNil(remapped.keybinds.action(for: trigger("ctrl+backquote")))
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t")), .moveKeyboardToTerminal)
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+backquote")), .moveKeyboardToTerminal)
-        XCTAssertEqual(remapped.keybinds.firstTrigger(for: .moveKeyboardToTerminal), trigger("ctrl+cmd+t"))
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t")), .focusTerminal)
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+backquote")), .focusTerminal)
+        XCTAssertEqual(remapped.keybinds.firstTrigger(for: .focusTerminal), trigger("ctrl+cmd+t"))
 
-        let disabled = try load("keybindings:\n  move_keyboard_to_terminal: []")
-        XCTAssertNil(disabled.keybinds.firstTrigger(for: .moveKeyboardToTerminal))
+        let disabled = try load("keybindings:\n  focus_terminal: []")
+        XCTAssertNil(disabled.keybinds.firstTrigger(for: .focusTerminal))
         XCTAssertNil(disabled.keybinds.action(for: trigger("ctrl+backquote")))
         XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+backquote")))
         for config in [remapped, disabled] {
@@ -380,21 +430,21 @@ final class ConfigTests: XCTestCase {
         }
     }
 
-    func testMoveKeyboardToTerminalDefaultCanBeClaimedByAnotherAction() throws {
+    func testFocusTerminalDefaultCanBeClaimedByAnotherAction() throws {
         let config = try load("keybindings:\n  toggle_browser: ctrl+backquote")
         XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote")), .toggleBrowser)
-        XCTAssertEqual(config.keybinds.triggers[.moveKeyboardToTerminal], [trigger("ctrl+0"), trigger("alt+0")])
+        XCTAssertEqual(config.keybinds.triggers[.focusTerminal], [trigger("cmd+shift+j"), trigger("ctrl+0"), trigger("alt+0")])
         XCTAssertEqual(config.problems, [])
     }
 
-    func testMoveKeyboardToTerminalReportsShortcutConflicts() throws {
+    func testFocusTerminalReportsShortcutConflicts() throws {
         let config = try load("""
         keybindings:
           toggle_browser: ctrl+cmd+t
-          move_keyboard_to_terminal: [ctrl+cmd+t, ctrl+backquote]
+          focus_terminal: [ctrl+cmd+t, ctrl+backquote]
         """)
         XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+t")), .toggleBrowser)
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .moveKeyboardToTerminal), trigger("ctrl+backquote"))
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), trigger("ctrl+backquote"))
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 3, message: "ctrl+cmd+t is already bound to toggle_browser"),
         ])
@@ -552,10 +602,10 @@ final class ConfigTests: XCTestCase {
     func testAListBindsEveryTriggerAndTheFirstIsShown() throws {
         let config = try load("""
         keybindings:
-          toggle_browser: [cmd+e, cmd+shift+b]
+          toggle_browser: [cmd+e, ctrl+cmd+b]
         """)
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e")), .toggleBrowser)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+b")), .toggleBrowser)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+b")), .toggleBrowser)
         XCTAssertNil(config.keybinds.action(for: trigger("cmd+b")))
         XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleBrowser), trigger("cmd+e"))
     }

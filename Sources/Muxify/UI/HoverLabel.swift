@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A row's hover label: after the pointer rests on the row, a label opens over it with the row's full title, when the
 /// row cuts it off, and a small second line with more about the row. One label shows at a time, in a borderless panel
-/// that can reach past the Sidebar's edge. It never takes the keyboard or a click.
+/// that can reach past the Sidebar's edge. It never takes Focus or a click.
 @MainActor
 final class HoverLabels {
     static let shared = HoverLabels()

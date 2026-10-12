@@ -421,7 +421,7 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
-    @MainActor func testMoveKeyboardToTerminalKeybindingRoutesOnlyItsWindowAndAppliesLiveOverrides() throws {
+    @MainActor func testFocusTerminalKeybindingRoutesOnlyItsWindowAndAppliesLiveOverrides() throws {
         try withWindows { windows, path in
             let first = windows.store(for: AppWindowRequest())
             let second = windows.store(for: AppWindowRequest(environmentName: "Home"))
@@ -441,7 +441,7 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertTrue(first.handleKeyEvent(commandBackquote) === commandBackquote)
             XCTAssertTrue(first.handleKeyEvent(reverseCycle) === reverseCycle)
 
-            try (Self.config + "\nkeybindings:\n  move_keyboard_to_terminal: [ctrl+cmd+t, cmd+backquote]\n")
+            try (Self.config + "\nkeybindings:\n  focus_terminal: [ctrl+cmd+t, cmd+backquote]\n")
                 .write(toFile: path, atomically: true, encoding: .utf8)
             windows.configStore.reload()
             XCTAssertTrue(first.handleKeyEvent(controlBackquote) === controlBackquote)
@@ -449,7 +449,7 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertNil(first.handleKeyEvent(remapped))
             XCTAssertNil(first.handleKeyEvent(commandBackquote), "An explicit binding may reclaim the old shortcut")
 
-            try (Self.config + "\nkeybindings:\n  move_keyboard_to_terminal: []\n")
+            try (Self.config + "\nkeybindings:\n  focus_terminal: []\n")
                 .write(toFile: path, atomically: true, encoding: .utf8)
             windows.configStore.reload()
             for event in [controlBackquote, commandBackquote, reverseCycle, remapped] {

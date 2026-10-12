@@ -115,7 +115,7 @@ struct ContentView: View {
 }
 
 /// The fixed strip along the top: room for the traffic lights, the window's
-/// drag handle, Environment selector, Focus and the panel toggles on the right.
+/// drag handle, Environment selector, Maximize and the panel toggles on the right.
 private struct HeaderBar: View {
     let store: WorkspaceStore
     let keybinds: Keybinds
@@ -129,13 +129,13 @@ private struct HeaderBar: View {
                                 status: store.environmentStatus, onSelect: store.selectEnvironment)
             let layout = store.panelLayout
             TitlebarButton(
-                systemName: layout.focus == nil ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left",
-                help: help(layout.focus == nil ? "Focus" : "End Focus", .toggleFocus),
-                isOn: layout.focus != nil,
-                action: store.toggleFocus
+                systemName: layout.maximized == nil ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left",
+                help: help(layout.maximized == nil ? "Maximize" : "Restore", .toggleMaximize),
+                isOn: layout.maximized != nil,
+                action: store.toggleMaximize
             )
-            .disabled(!store.canToggleFocus)
-            .accessibilityIdentifier("toggle-focus")
+            .disabled(!store.canToggleMaximize)
+            .accessibilityIdentifier("toggle-maximize")
             TitlebarButton(
                 systemName: "sidebar.left",
                 help: help(store.sidebarShown ? "Hide Sidebar" : "Show Sidebar", .toggleSidebar),
