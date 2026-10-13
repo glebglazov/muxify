@@ -82,6 +82,12 @@ class ClientTerminal(unittest.TestCase):
         self.pane_command(pane, 'command -v muxify > ' + shlex.quote(str(result)))
         cli = wait(lambda: result.read_text().strip(), 'Pane did not resolve muxify')
         self.assertEqual(pathlib.Path(cli).resolve(), (sandbox.app/'Contents/Resources/bin/muxify').resolve())
+        variables = sandbox.root/'bin-variables'
+        self.pane_command(pane, 'printf \'%s\\n%s\\n\' "$GHOSTTY_BIN_DIR" "$PATH" > ' + shlex.quote(str(variables)))
+        bin_dir, path = wait(lambda: variables.read_text().splitlines(), 'Pane did not report its PATH')
+        self.assertEqual(pathlib.Path(bin_dir).resolve(), (sandbox.app/'Contents/Resources/bin').resolve())
+        app_executables = (sandbox.app/'Contents/MacOS').resolve()
+        self.assertNotIn(app_executables, [pathlib.Path(entry).resolve() for entry in path.split(':') if entry], path)
         self.pane_command(pane, 'muxify --help > ' + shlex.quote(str(sandbox.root/'cli-help')))
         help_text = wait(lambda: (sandbox.root/'cli-help').read_text().strip(), 'bundled CLI did not return help')
         self.assertIn('usage: muxify browser open', help_text)
@@ -91,6 +97,23 @@ class ClientTerminal(unittest.TestCase):
         self.assertEqual(pathlib.Path(paths[0]).resolve(), (sandbox.app/'Contents/Resources/ghostty').resolve())
         self.assertEqual(pathlib.Path(paths[1]).resolve(), (sandbox.app/'Contents/Resources/terminfo').resolve())
         self.assertTrue((pathlib.Path(paths[1])/'78/xterm-ghostty').is_file())
+
+    def test_muxify_in_a_pane_never_runs_the_app_on_a_server_that_an_older_build_started(self):
+        sandbox = self.sandbox
+        # Before the bundled CLI, libghostty gave the tmux client Contents/MacOS in PATH. A client that is
+        # not attached gives its PATH to the Pane that new-session makes, and APFS ignores case.
+        app_executables = str(sandbox.app/'Contents/MacOS')
+        sandbox.tmux('new-session', '-d', '-s', 'older-build', '-c', str(sandbox.root),
+                     env=dict(PATH='/usr/bin:/bin:' + app_executables))
+        self.addCleanup(sandbox.tmux, 'kill-session', '-t', 'older-build')
+        pane = sandbox.tmux('display-message', '-p', '-t', 'older-build:', '#{pane_id}')
+
+        result = sandbox.root/'older-build-muxify'
+        self.pane_command(pane, 'printf \'%s\\n%s\\n\' "$PATH" "$(command -v muxify)" > ' + shlex.quote(str(result)))
+        path, cli = wait(lambda: (lambda lines: lines if len(lines) == 2 else None)(result.read_text().split('\n')[:2]),
+                         'Pane did not resolve muxify')
+        self.assertIn(app_executables, path.split(':'), 'the Pane did not get the older build\'s PATH')
+        self.assertEqual(cli, '', 'muxify resolved to the app in Contents/MacOS: %s' % os.listdir(app_executables))
 
     def test_check_follows_the_client_that_received_input(self):
         sandbox, fields, muxify_pid = self.sandbox, self.fields, self.muxify_pid

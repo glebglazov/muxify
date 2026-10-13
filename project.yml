@@ -53,6 +53,9 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Muxify
+        # APFS ignores case, so a Contents/MacOS/Muxify that reaches a Pane's
+        # PATH runs as `muxify`: a second app that never exits, not the CLI.
+        EXECUTABLE_NAME: MuxifyApp
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         PRODUCT_BUNDLE_IDENTIFIER: dev.muxify.shell

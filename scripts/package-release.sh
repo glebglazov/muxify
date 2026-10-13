@@ -49,7 +49,7 @@ mkdir -p "$DIST"
 codesign --verify --deep --strict "$APP"
 # Consume all diagnostic output: grep -q can give codesign SIGPIPE under pipefail.
 codesign -dv "$APP" 2>&1 | grep '^Signature=adhoc$' >/dev/null
-[ "$(lipo -archs "$APP/Contents/MacOS/Muxify")" = arm64 ]
+[ "$(lipo -archs "$APP/Contents/MacOS/MuxifyApp")" = arm64 ]
 for notice in Ghostty Yams libyaml; do
   [ -s "$APP/Contents/Resources/ThirdPartyNotices/$notice.txt" ] || {
     echo "Missing bundled license notices: $notice" >&2; exit 1;

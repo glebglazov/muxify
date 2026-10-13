@@ -57,7 +57,7 @@ class Sandbox:
         self.name = root.parent.name
         self.root = root
         self.app = self.root/'Muxify.app'
-        self.binary = self.app/'Contents/MacOS/Muxify'
+        self.binary = self.app/'Contents/MacOS/MuxifyApp'
         self.driver_dir = self.root/'driver'
         self.bundle_id = 'dev.muxify.verify.%s.%s' % (self.name, root.name)
         self.pid = None
@@ -190,8 +190,9 @@ class Sandbox:
         # -f /dev/null keeps the user's tmux config and hooks out of the sandbox server.
         return [self.tmux_binary, '-S', str(self.socket), '-f', '/dev/null', *args]
 
-    def tmux(self, *args):
-        return subprocess.check_output(self._tmux_command(args), env=self.env, text=True).strip()
+    def tmux(self, *args, env=None):
+        """`env` adds to the sandbox environment, for a command whose client environment matters."""
+        return subprocess.check_output(self._tmux_command(args), env=dict(self.env, **(env or {})), text=True).strip()
 
     def tmux_ok(self, *args):
         return subprocess.run(self._tmux_command(args), env=self.env, capture_output=True, text=True)

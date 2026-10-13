@@ -37,8 +37,9 @@ final class TerminalSurfaceView: NSView {
         config.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 2)
         config.context = GHOSTTY_SURFACE_CONTEXT_WINDOW
 
-        // libghostty otherwise appends Contents/MacOS, where a case-insensitive
-        // lookup of `muxify` starts the GUI instead of the bundled CLI.
+        // libghostty otherwise appends Contents/MacOS and points GHOSTTY_BIN_DIR
+        // there. That folder holds only the app, so the tmux client, and a
+        // server it starts, would not have the bundled CLI.
         let environment = ["PATH", "GHOSTTY_BIN_DIR"].compactMap { key -> (String, String)? in
             ProcessInfo.processInfo.environment[key].map { (key, $0) }
         }
