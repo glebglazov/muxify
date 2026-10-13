@@ -24,6 +24,7 @@ import uuid
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DEBUG_APP = REPO/'build/Build/Products/Debug/Muxify.app'
+AX_WAKE_SOURCE = REPO/'scripts/verify/ax_wake.swift'
 LSREGISTER = ('/System/Library/Frameworks/CoreServices.framework/Frameworks/'
               'LaunchServices.framework/Support/lsregister')
 BASE = pathlib.Path('/tmp/muxify-verify')
@@ -228,6 +229,7 @@ class Sandbox:
                 if word == 'ready' and self._runs_app(int(pid)):
                     self.pid = int(pid)
                     (self.root/'app.pid').write_text(pid)
+                    self._wake_accessibility(deadline)
                     return self.pid
             except (FileNotFoundError, ValueError):
                 pass
@@ -236,6 +238,23 @@ class Sandbox:
             time.sleep(.1)
         raise AssertionError('app did not report ready (%s); app.log tail:\n%s'
                              % ('running' if self._app_running() else 'exited', self.log_tail()))
+
+    def _wake_accessibility(self, deadline):
+        """Asks for the app's windows as an outside accessibility client, then waits until the driver sees the
+        SwiftUI elements. Without that request SwiftUI gives the driver an App Window with no elements."""
+        helper = BASE/('ax-wake-%d' % AX_WAKE_SOURCE.stat().st_mtime_ns)
+        if not helper.exists():
+            building = helper.with_name(helper.name + '.' + uuid.uuid4().hex)
+            built = subprocess.run(['swiftc', '-O', '-o', str(building), str(AX_WAKE_SOURCE)], capture_output=True, text=True)
+            assert built.returncode == 0, 'swiftc could not build %s:\n%s' % (AX_WAKE_SOURCE, built.stderr)
+            building.replace(helper)
+        while True:
+            woke = subprocess.run([str(helper), str(self.pid)], capture_output=True, text=True)
+            if any(row.get('accessibilityIdentifier') for row in self.driver('dump')['rows']):
+                return
+            assert time.monotonic() < deadline, ('the driver sees no SwiftUI elements: ax_wake exit %d %s'
+                                                 % (woke.returncode, woke.stderr.strip()))
+            time.sleep(.2)
 
     def restart_app(self, args=()):
         """Stops the app and starts it again on the same tmux server, state and defaults, as a relaunch does."""

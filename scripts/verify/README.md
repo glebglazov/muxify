@@ -76,6 +76,12 @@ Checks run while the user works. A check must not take the keyboard focus, the m
 
 Commit a check that must stay true with the feature that it checks. Keep a one-off probe in the run directory. Do not commit it.
 
+## Accessibility permission
+
+SwiftUI makes the accessibility tree of an App Window only after an accessibility client outside the app asks for it. Before that, the driver sees an App Window with no elements. So `Sandbox.launch` runs `ax_wake.swift`, which asks the app for its windows, and then waits until the driver sees the elements. `Sandbox.launch` compiles it with `swiftc` once into `/tmp/muxify-verify/`.
+
+The terminal that runs the checks must have the Accessibility permission in System Settings > Privacy & Security > Accessibility. Without it, `launch` stops with the message "the driver sees no SwiftUI elements" and the reason.
+
 ## Sandbox guarantees
 
 A `Sandbox` gives each run its own root, tmux server, Config, state and app copy. `Sandbox.tmux` always names the sandbox socket with `-S`, so it cannot reach the default tmux server. The app copy has a bundle id for that run only. The Debug-only `TestDriver` (`Sources/Muxify/App/TestDriver.swift`) refuses to start if `TMUX` is set or if `TMUX_TMPDIR` is outside the sandbox. `teardown` stops only the processes that the sandbox started, by PID: the app, its tmux clients, the tmux server and each process whose command line or environment names the sandbox directory.
