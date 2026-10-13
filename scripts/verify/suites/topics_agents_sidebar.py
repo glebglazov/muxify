@@ -218,3 +218,32 @@ class TopicsAgentsSidebar(TopicsSidebar):
         wait(lambda: self.pane_active(first), 'pressing pane-%s did not make it the active Pane' % first, seconds=10)
         s.wait_rows(lambda rs: s.row('pane-' + first, rs).get('accessibilityValue') == 'active',
                     'the Pane row icon does not follow the active Pane')
+
+    def marked_agent(self, name, status, unread):
+        """An Agent in its own Topic, split beside a shell, with Pane rows on and another Window of the Session selected,
+        so its card is open and its Window is never read. Returns the Agent's Pane."""
+        s = self.s
+        self.write_topic(name, name, self.beta)
+        sid, window, pane = self.agent_session(name, topic=name, status=status, unread=unread)
+        self.split(window)
+        other = s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', sid + ':', '-c', str(self.beta), SHELL)
+        self.select_window(other)
+        self.addCleanup(self.set_show_panes, False, 'pane-' + pane)
+        self.set_show_panes(True, 'pane-' + pane)
+        return pane
+
+    def test_a_failed_unread_agent_shows_the_failed_mark_on_its_pane_row_and_its_topic_card(self):
+        pane = self.marked_agent('marks-failed', 'failed', unread=True)
+        card = 'topic-marks-failed'
+        latency, rs = self.rows_until(lambda rs: 'failed' in self.s.row('pane-' + pane, rs).get('accessibilityValue', '')
+                                      and 'failed' in self.describe(card, rs))
+        self.assertIsNotNone(latency, 'no failed mark: %s; %s' % (self.describe('pane-' + pane, rs), self.describe(card, rs)))
+
+    def test_a_read_done_agent_has_no_mark_on_its_pane_row_or_its_topic_card(self):
+        pane = self.marked_agent('marks-read-done', 'done', unread=False)
+        card = 'topic-marks-read-done'
+        # The Agents row shows once the app has read the Agent, so the absence below is not a read that is late.
+        rs = self.wait_agents('Agents · marks-read-done', [pane], [], 'the read, done Agent is not listed')
+        rs = self.s.wait_rows(lambda rs: self.s.has('pane-' + pane, rs), 'no Pane row for the read, done Agent')
+        self.assertEqual(self.s.row('pane-' + pane, rs).get('accessibilityValue', ''), '', self.describe('pane-' + pane, rs))
+        self.assertNotIn('done', self.describe(card, rs).split(' | ')[1], 'the card shows a mark')

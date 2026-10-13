@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from scripts.verify.sandbox import Sandbox
+from scripts.verify.sandbox import Sandbox, wait
 
 
 class WindowPartsSidebar(unittest.TestCase):
@@ -106,3 +106,21 @@ class WindowPartsSidebar(unittest.TestCase):
         self.config.write_text("sidebar:\n  formats:\n    window:\n      title: 'Parts Window'\n      left: null\n      right: null\n")
         rs = self.s.wait_rows(lambda rs: self.label(rs) == 'Parts Window', 'null did not restore native parts')
         self.assertEqual(self.label(rs), 'Parts Window')
+
+    def test_a_terminal_bell_shows_as_a_bell_symbol(self):
+        s = self.s
+        sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'parts-bell', '/bin/zsh -f')
+        self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
+        # A bell in a Window that is not its Session's current Window sets the Window's bell flag.
+        window = s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', sid + ':',
+                        "sh -c 'sleep 1; printf \"\\a\"; exec sleep 600'")
+        wait(lambda: s.tmux('display-message', '-p', '-t', window, '#{window_bell_flag}') == '1', 'tmux saw no bell')
+        self.show_mode('sessions')
+        card = 'session-' + sid
+        s.wait_rows(lambda rs: s.has(card, rs), 'no card for the Session with the bell')
+        if 'expanded' not in s.row(card).get('accessibilityValue', ''):
+            s.act('press', card)
+        key = 'window-bell-' + window
+        rs = s.wait_rows(lambda rs: s.has(key, rs), 'the Window row shows no bell')
+        bell = s.row(key, rs)
+        self.assertEqual((bell.get('accessibilityRole'), bell.get('accessibilityLabel')), ('AXImage', 'Bell'), json.dumps(bell))
