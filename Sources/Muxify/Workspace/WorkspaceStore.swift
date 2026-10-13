@@ -22,6 +22,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var wakeToastDismiss: DispatchWorkItem?
     @ObservationIgnored private var unreadVisit: String?
     @ObservationIgnored private var explicitReadVisits = AgentReadVisits()
+    @ObservationIgnored private var readGeneration = 0
+    @ObservationIgnored private var pendingReads = 0
 
     private(set) var newTopicFailure: String?
     /// When each Topic, Session and Project was last looked at; the lists rank by it.
@@ -1091,6 +1093,10 @@ final class WorkspaceStore {
         browsers.removeAll()
         consumingOpen.removeAll()
         agentStatuses.removeAll()
+        unreadVisit = nil
+        explicitReadVisits = AgentReadVisits()
+        readGeneration += 1
+        pendingReads = 0
         windows = []
         agents = []
         palette.close(restoringFocus: false)
@@ -1161,7 +1167,7 @@ final class WorkspaceStore {
     // MARK: - Polling
 
     func refresh(attachIfNeeded: Bool = false) {
-        guard let connection, !isTransitioning, !changingTopic else { return }
+        guard let connection, !isTransitioning, !changingTopic, pendingReads == 0 else { return }
         // A closed remote master cannot be polled. Its foreground owner reports
         // a final snapshot; a new attachment owns all subsequent operations.
         guard !isRemote || surface != nil else { return }
@@ -1172,6 +1178,7 @@ final class WorkspaceStore {
         isRefreshing = true
         let current = generation
         let topicGeneration = topicEditGeneration
+        let readGeneration = self.readGeneration
         let records = topicWatcher.records
         let remote = isRemote
         let commandLines = paneCommandLines
@@ -1191,7 +1198,7 @@ final class WorkspaceStore {
                 self.isRefreshing = false
                 switch result {
                 case .success(let snapshot):
-                    guard topicGeneration == self.topicEditGeneration, !self.changingTopic else {
+                    guard topicGeneration == self.topicEditGeneration, readGeneration == self.readGeneration, !self.changingTopic else {
                         self.refresh()
                         return
                     }
@@ -1466,27 +1473,66 @@ final class WorkspaceStore {
         select(pane.window)
     }
 
-    /// Entering a Topic reads its Agents; staying in a Window reads that Window.
+    enum MarkReadTarget {
+        case topic(String)
+        case session(String)
+        case window(String)
+        case pane(String)
+    }
+
+    var currentReadTarget: MarkReadTarget? {
+        if let id = activeTopicID { return .topic(id) }
+        return selectedWindow.map { .session($0.sessionID) }
+    }
+
+    private func unreadAgents(in target: MarkReadTarget) -> [Agent] {
+        agents.filter { agent in
+            guard agent.unread else { return false }
+            switch target {
+            case .topic(let id): return windows.contains { $0.id == agent.windowID && $0.topicID == id }
+            case .session(let id): return agent.sessionID == id
+            case .window(let id): return agent.windowID == id
+            case .pane(let id): return agent.paneID == id
+            }
+        }
+    }
+
+    func canMarkRead(_ target: MarkReadTarget?) -> Bool {
+        guard let target, connection != nil, !isTransitioning, !isRemote || isConnected else { return false }
+        return !unreadAgents(in: target).isEmpty
+    }
+
+    func markRead(_ target: MarkReadTarget?) {
+        guard let target, canMarkRead(target) else { return }
+        let commands = unreadAgents(in: target).map { ["set-option", "-pqu", "-t", $0.paneID, Tmux.agentUnreadOption] }
+        readGeneration += 1
+        pendingReads += 1
+        runAsync(Array(commands.joined(separator: [";"]))) { [weak self] _ in
+            guard let self else { return }
+            self.pendingReads -= 1
+            self.readGeneration += 1
+            self.refresh()
+        }
+    }
+
+    /// Automatic reading follows visits; Manual Read consumes visits without clearing Agents.
     /// Persist changed Unread options before the next snapshot counts wake Notifications.
     private func updateUnread(_ panes: [TmuxPane]) -> Bool {
         let lookingAt = NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
         let visit = lookingAt.flatMap { id in windows.first { $0.id == id }?.topicID }
         let entering = lookingAt != unreadVisit ? visit : nil
         unreadVisit = lookingAt
-        let reading = Set(windows.filter { $0.id == lookingAt || (entering != nil && $0.topicID == entering) }.map(\.id))
+        let visited = Set(windows.filter { $0.id == lookingAt || (entering != nil && $0.topicID == entering) }.map(\.id))
             .union(explicitReadVisits.consume(in: windows))
         var commands: [[String]] = []
         for pane in panes {
-            let previous = agentStatuses[pane.id]
+            let change = AgentUnread.change(for: pane, previousStatus: agentStatuses[pane.id],
+                                            visited: visited.contains(pane.windowID), manualRead: config.notifications.manualRead)
             agentStatuses[pane.id] = pane.agentStatus
-            let isAgent = Agent.runs(in: pane)
-            if pane.unread {
-                if !isAgent || reading.contains(pane.windowID) {
-                    commands.append(["set-option", "-pqu", "-t", pane.id, Tmux.agentUnreadOption])
-                }
-            } else if isAgent, !reading.contains(pane.windowID), let previous, previous != pane.agentStatus,
-                      AgentStatus(rawValue: pane.agentStatus)?.needsAttention == true {
-                commands.append(["set-option", "-pq", "-t", pane.id, Tmux.agentUnreadOption, "1"])
+            if let unread = change {
+                commands.append(unread
+                    ? ["set-option", "-pq", "-t", pane.id, Tmux.agentUnreadOption, "1"]
+                    : ["set-option", "-pqu", "-t", pane.id, Tmux.agentUnreadOption])
             }
         }
         let live = Set(panes.map(\.id))
@@ -1934,6 +1980,7 @@ final class WorkspaceStore {
         case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
         case .toggleLock: toggleLockOfCurrentSession()
+        case .markRead: markRead(currentReadTarget)
         case .toggleSidebar: toggleSidebar()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)

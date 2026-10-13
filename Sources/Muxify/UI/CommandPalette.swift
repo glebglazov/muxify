@@ -126,6 +126,7 @@ final class CommandPalette {
         guard let item = row.pick.payload else { return [] }
         if flow != nil || item.kind == .command { return [.jumpTo] }
         var actions: [PaletteAction] = [.jumpTo]
+        if store?.canMarkRead(item.readTarget) == true { actions.append(.markRead) }
         switch item.ref {
         case .topic(let id, _):
             guard let store, !store.isRemote, let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return actions }
@@ -170,6 +171,7 @@ final class CommandPalette {
             case .agent: return "Jump to Agent"
             case .command: return "Run"
             }
+        case .markRead: return "Mark Read"
         case .newSession: return "New Session"
         case .copyFolder: return "Copy Path"
         case .copyTmuxTarget: return item.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"

@@ -159,12 +159,24 @@ Config changes its color.
 
 ```yaml
 notifications:
+  manual_read: true
   done_enabled: true
   failed_enabled: true
   blocked_enabled: true
 ```
 
-Set a key to `false` to turn off that type of Notification on every surface:
+Manual Read is on by default. A done, failed or blocked update becomes Unread
+even while you look at its Window. Visiting a Window or Topic does not clear it.
+**Mark Read** clears the Active Topic, or the current Session when there is no
+Active Topic. Its default shortcut is ⌘⇧R. A palette row also offers Mark Read
+for that Topic, Session, Window or Agent. A blocked mark stays until the Agent
+is no longer blocked.
+
+Set `manual_read: false` to restore automatic reading. Looking at a Window or
+entering its Topic clears Unread. Updates in the Window being viewed do not
+become Unread.
+
+Set a `*_enabled` key to `false` to turn off that type of Notification on every surface:
 cards, Pane rows, the Agents section, and the Command Palette's marks and
 status text. A wake message after a Snooze then does not count those Agents.
 Each key is `true` by default. A value that is not a boolean, or an unknown

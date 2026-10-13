@@ -67,6 +67,10 @@ import MuxifyCore
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleZen)?.shortcut)
                 .disabled(!topicsAvailable || store?.topics.topicsEnabled != true || store?.canToggleZenOfActiveTopic != true)
             Divider()
+            Button("Mark Read") { store?.markRead(store?.currentReadTarget) }
+                .keyboardShortcut(keybinds.firstTrigger(for: .markRead)?.shortcut)
+                .disabled(store?.canMarkRead(store?.currentReadTarget) != true)
+            Divider()
             Button("New Tab") { store?.browserCommand(opensBrowser: true) { $0.newTab() } }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(store == nil)

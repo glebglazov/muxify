@@ -17,6 +17,23 @@ final class ConfigTests: XCTestCase {
         try! KeyTrigger(string)
     }
 
+    func testManualReadDefaultsAndConfigurableShortcut() throws {
+        let defaults = try load("")
+        XCTAssertTrue(defaults.notifications.manualRead)
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+r")), .markRead)
+        XCTAssertTrue(Config.template.contains("#   manual_read: true"))
+        XCTAssertTrue(Config.template.contains("#   mark_read: cmd+shift+r"))
+        let custom = try load("notifications:\n  manual_read: false\nkeybindings:\n  mark_read: ctrl+alt+r")
+        XCTAssertFalse(custom.notifications.manualRead)
+        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+r")))
+        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r")), .markRead)
+        XCTAssertTrue(custom.problems.isEmpty)
+        let invalid = try load("notifications:\n  manual_read: sometimes")
+        XCTAssertTrue(invalid.notifications.manualRead)
+        XCTAssertEqual(invalid.problems.map(\.message), ["notifications.manual_read: expected a boolean"])
+        XCTAssertNil(try load("keybindings:\n  mark_read: []").keybinds.firstTrigger(for: .markRead))
+    }
+
     func testMuxifyConfigChoosesTheConfigFileElseTheXDGPath() {
         func path(_ environment: [String: String]) -> String { MuxifyPaths(environment: environment, home: "/Users/me").configFile.path }
         XCTAssertEqual(path([:]), "/Users/me/.config/muxify/config.yaml")

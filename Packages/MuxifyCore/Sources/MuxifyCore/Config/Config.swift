@@ -62,6 +62,7 @@ public struct Config: Equatable {
     }
 
     public struct Notifications: Equatable {
+        public var manualRead = true
         public var doneEnabled = true
         public var failedEnabled = true
         public var blockedEnabled = true
@@ -276,6 +277,7 @@ public struct Config: Equatable {
         #   terminal: { hold: true }
         #
         # notifications:
+        #   manual_read: true
         #   done_enabled: true
         #   failed_enabled: true
         #   blocked_enabled: true
@@ -613,7 +615,7 @@ private struct ConfigReader {
 
     public mutating func readNotifications(_ node: Node) {
         for (name, key, value) in entries(of: node, "notifications") {
-            guard ["done_enabled", "failed_enabled", "blocked_enabled"].contains(name) else {
+            guard ["manual_read", "done_enabled", "failed_enabled", "blocked_enabled"].contains(name) else {
                 problem(at: key, "unknown key \"notifications.\(name)\"")
                 continue
             }
@@ -622,6 +624,7 @@ private struct ConfigReader {
                 continue
             }
             switch name {
+            case "manual_read": config.notifications.manualRead = enabled
             case "done_enabled": config.notifications.doneEnabled = enabled
             case "failed_enabled": config.notifications.failedEnabled = enabled
             default: config.notifications.blockedEnabled = enabled

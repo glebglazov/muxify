@@ -1,9 +1,26 @@
 import AppKit
 import MuxifyCore
 
+extension PaletteItem {
+    var readTarget: WorkspaceStore.MarkReadTarget? {
+        switch ref {
+        case .topic(let id, _): return .topic(id)
+        case .session(let session): return .session(session.id)
+        case .window(let window): return .window(window.id)
+        case .agent(let agent): return .pane(agent.paneID)
+        case .project, .choice, .command: return nil
+        }
+    }
+}
+
 extension CommandPalette {
     func performRowAction(_ action: PaletteAction, item: PaletteItem) {
         guard let store else { return }
+        if action == .markRead {
+            close()
+            store.markRead(item.readTarget)
+            return
+        }
         if case .topic(let id, _) = item.ref,
            let topic = store.topicWatcher.records.first(where: { $0.id == id }) {
             switch action {

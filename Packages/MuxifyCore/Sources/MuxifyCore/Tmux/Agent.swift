@@ -19,7 +19,7 @@ public enum AgentKind: String, CaseIterable, Codable, Sendable {
 public enum AgentStatus: String, Codable, Sendable {
     case working, blocked, done, failed
 
-    /// Reaching this Status while you aren't looking makes the Agent unread.
+    /// Reaching this Status makes the Agent Unread unless automatic reading applies.
     public var needsAttention: Bool { self != .working }
 }
 
@@ -30,7 +30,7 @@ public struct Agent: Identifiable, Hashable {
     public let kind: AgentKind
     /// nil until the Agent has run a turn.
     public let status: AgentStatus?
-    /// It finished or got blocked while you weren't looking at its Window.
+    /// A done, failed or blocked update that has not been marked read.
     public let unread: Bool
     public let windowID: String
     public let sessionID: String
