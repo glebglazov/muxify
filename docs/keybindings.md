@@ -38,6 +38,10 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `select_window_9` | ⌘9 | Select the ninth Window, not the last one |
 | `select_next_window` | Unbound | Select the next Window, wrapping to the first |
 | `select_prev_window` | Unbound | Select the previous Window, wrapping to the last |
+| `select_next_session` | Unbound | Go to the next Session the Sidebar shows, wrapping to the first. In Topics mode, only the Active Topic's Sessions take part; for No Topic, the No Topic Sessions |
+| `select_prev_session` | Unbound | Go to the previous Session the Sidebar shows, wrapping to the last. In Topics mode, only the Active Topic's Sessions take part |
+| `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Locked Sessions take part in their place; No Topic and Snoozed Topics do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
+| `select_prev_topic` | Unbound | Go to the Topic above in the Topics list, wrapping to the last |
 
 The default [Command Palettes](configuration.md#command-palettes) are
 **Commands** on ⌘⇧P and **Go to…** on ⌘P. `open_switcher` is gone.
@@ -48,6 +52,12 @@ Tab, Add a Project, Snooze Topic, Settle Topic, Lock Session or Unlock Session, 
 or End Zen. These use the
 current item and appear when that item is available. Back returns from an input
 step to the Commands search.
+
+Commands also lists Show Next Session, Show Previous Session, Show Next Topic
+and Show Previous Topic. They do what `select_next_session`,
+`select_prev_session`, `select_next_topic` and `select_prev_topic` do: Show Next
+Topic goes to the Topic below in the Topics list. Each row shows its configured
+shortcut.
 
 Commands also lists the layout and Focus actions: Maximize or Restore, Maximize
 Terminal, Maximize Browser, Focus Terminal, Focus Browser, and Show or Hide for
@@ -134,9 +144,13 @@ keybindings:
   select_window_7: cmd+7
   select_window_8: cmd+8
   select_window_9: cmd+9
-  # These two actions are unbound by default.
+  # These actions are unbound by default.
   select_next_window: ctrl+cmd+right
   select_prev_window: ctrl+cmd+left
+  select_next_session: ctrl+cmd+down
+  select_prev_session: ctrl+cmd+up
+  select_next_topic: ctrl+alt+cmd+down
+  select_prev_topic: ctrl+alt+cmd+up
 ```
 
 Triggers use Ghostty-style names: `cmd`, `ctrl`, `alt` (Option), and `shift`,

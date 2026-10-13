@@ -318,6 +318,10 @@ public struct Config: Equatable {
         #   # ninth Windows in the current Session, not their tmux indices.
         #   # select_next_window and select_prev_window wrap within the Session
         #   # and have no keybindings until you assign them.
+        #   # select_next_session and select_prev_session step through the
+        #   # Sessions the Sidebar shows: in Topics mode, those of the Active
+        #   # Topic. select_next_topic and select_prev_topic go to the Topic
+        #   # below or above in the Topics list. All four wrap and are unbound.
         #   # The defaults:
         \(spell(ConfigAction.defaultSpelling, indent: "   "))
         #   # While a Command Palette is open, these act instead:

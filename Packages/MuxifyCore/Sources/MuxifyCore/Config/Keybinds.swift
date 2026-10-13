@@ -60,6 +60,10 @@ public enum ConfigAction: String, KeybindAction {
     case selectWindow9 = "select_window_9"
     case selectNextWindow = "select_next_window"
     case selectPrevWindow = "select_prev_window"
+    case selectNextSession = "select_next_session"
+    case selectPrevSession = "select_prev_session"
+    case selectNextTopic = "select_next_topic"
+    case selectPrevTopic = "select_prev_topic"
 
     public static let defaultSpelling: KeyValuePairs<ConfigAction, [String]> = [
         .newAppWindow: ["cmd+n"],
@@ -109,6 +113,10 @@ public enum ConfigAction: String, KeybindAction {
         .selectWindow9: ["cmd+9"],
         .selectNextWindow: [],
         .selectPrevWindow: [],
+        .selectNextSession: [],
+        .selectPrevSession: [],
+        .selectNextTopic: [],
+        .selectPrevTopic: [],
     ]
 
     public static let defaultTriggers = parse(defaultSpelling)

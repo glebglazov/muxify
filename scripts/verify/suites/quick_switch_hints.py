@@ -201,6 +201,37 @@ class QuickSwitchHints(unittest.TestCase):
         self.press_when_bound('⌃W')
         self.s.wait_shown(self.first)
 
+    def press_when_bound(self, symbol):
+        wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'],
+             symbol + ' is not bound from the Config')
+
+    def test_topic_step_goes_to_the_row_below_and_wraps(self):
+        self.configure(keybindings='  select_next_topic: ctrl+alt+j\n  select_prev_topic: ctrl+alt+k\n')
+        self.press_when_bound('⌃⌥J')
+        self.s.wait_rows(lambda rows: self.value('empty-topic-title', rows) == 'Dormant Topic',
+                         'the Topic below the Pinned Topic is not shown')
+        self.input('Press ⌃⌥J')
+        self.s.wait_shown(self.first)
+        self.input('Press ⌃⌥K')
+        self.s.wait_rows(lambda rows: self.value('empty-topic-title', rows) == 'Dormant Topic',
+                         'the Topic above the first row did not wrap to the last row')
+
+    def test_session_step_in_topics_mode_stays_in_the_active_topic(self):
+        session, window = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id} #{window_id}',
+                                      '-s', 'topic-steps', '-c', str(self.s.root), '/bin/zsh -f').split()
+        self.addCleanup(self.s.tmux, 'kill-session', '-t', session)
+        self.s.tmux('set-option', '-t', session, '@muxify_topic', 'first')
+        self.s.wait_rows(lambda rows: self.s.has('topic-window-' + window, rows), 'the second Session is not in the Topic')
+        self.configure(keybindings='  select_next_session: ctrl+alt+n\n  select_prev_session: ctrl+alt+p\n')
+        self.press_when_bound('⌃⌥N')
+        self.s.wait_shown(window)
+        self.input('Press ⌃⌥N')
+        self.s.wait_shown(self.first)
+        self.input('Press ⌃⌥P')
+        self.s.wait_shown(window)
+        self.input('Press ⌃⌥P')
+        self.s.wait_shown(self.first)
+
 
 if __name__ == '__main__':
     unittest.main()

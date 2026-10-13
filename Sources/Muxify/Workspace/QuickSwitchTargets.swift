@@ -38,6 +38,26 @@ extension ConfigAction {
         default: nil
         }
     }
+
+    var step: (level: StepLevel, direction: StepDirection)? {
+        switch self {
+        case .selectNextWindow: (.window, .next)
+        case .selectPrevWindow: (.window, .previous)
+        case .selectNextSession: (.session, .next)
+        case .selectPrevSession: (.session, .previous)
+        case .selectNextTopic: (.topic, .next)
+        case .selectPrevTopic: (.topic, .previous)
+        default: nil
+        }
+    }
+}
+
+enum StepLevel {
+    case window, session, topic
+}
+
+enum StepDirection {
+    case next, previous
 }
 
 enum QuickSwitchTarget: Hashable {
@@ -60,6 +80,10 @@ struct QuickSwitchTargets {
     let cards: [QuickSwitchTarget]
     let windows: [QuickSwitchTarget]
     let tabs: [QuickSwitchTarget]
+    /// The Sessions a Session step goes through: every Session in Sessions mode, the Active Topic's in Topics mode.
+    let sessions: [QuickSwitchTarget]
+    /// The rows of the Topics list, Locked Sessions included, in either Sidebar mode.
+    let topics: [QuickSwitchTarget]
 
     func target(for selection: QuickSwitchSelection) -> QuickSwitchTarget? {
         let targets: [QuickSwitchTarget]
@@ -72,25 +96,58 @@ struct QuickSwitchTargets {
         guard (1...9).contains(position), position <= targets.count else { return nil }
         return targets[position - 1]
     }
+
+    /// Wraps at both ends. Without `current` in the list, next starts at the first target and previous at the last.
+    func step(_ level: StepLevel, _ direction: StepDirection, from current: QuickSwitchTarget?) -> QuickSwitchTarget? {
+        let targets = switch level {
+        case .window: windows
+        case .session: sessions
+        case .topic: topics
+        }
+        guard !targets.isEmpty else { return nil }
+        guard let index = current.flatMap(targets.firstIndex(of:)) else {
+            return direction == .next ? targets.first : targets.last
+        }
+        let offset = direction == .next ? 1 : -1
+        return targets[(index + offset + targets.count) % targets.count]
+    }
 }
 
 extension QuickSwitchTargets {
     init(model: TopicsModel, sessions: [SessionGroup], windows: [TmuxWindow], tabIDs: [UUID]) {
-        let cards: [QuickSwitchTarget]
-        if model.mode == .topics {
-            // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
-            // A Locked Session's card is numbered by its place among the Topics.
-            cards = model.rows.compactMap { row in
-                switch row.id {
-                case .topic(let id): return .topic(id)
-                case .locked(let id): return .locked(id)
-                case .noTopic: return nil
-                }
-            }
-        } else {
-            cards = sessions.map { .session($0.id) }
+        // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
+        // A Locked Session's card is numbered by its place among the Topics.
+        let topics = model.rows.compactMap(\.id.quickSwitchTarget)
+        let allSessions = sessions.map { QuickSwitchTarget.session($0.id) }
+        let scopedSessions = model.mode == .topics ? Self.sessions(of: model) : allSessions
+        self.init(cards: model.mode == .topics ? topics : allSessions, windows: windows.map { .window($0.id) },
+                  tabs: tabIDs.map { .tab($0) }, sessions: scopedSessions, topics: topics)
+    }
+
+    /// The Sessions the Active Topic's card shows. No Topic has no card, so it gives its Sessions that have no
+    /// Locked Session card of their own.
+    private static func sessions(of model: TopicsModel) -> [QuickSwitchTarget] {
+        let shown: [TopicsModel.Session]
+        switch model.activeTopic {
+        case nil: shown = []
+        case .noTopic:
+            let carded = Set(model.rows.flatMap(\.sessions).map(\.id.session))
+            shown = model.noTopicSessions.filter { !carded.contains($0.id.session) }
+        case let active?:
+            // A Snoozed Topic the user went to has its card in the Snoozed group, not in the rows.
+            shown = (model.rows + model.groups.flatMap(\.topics)).first { $0.id == active }?.sessions ?? []
         }
-        self.init(cards: cards, windows: windows.map { .window($0.id) }, tabs: tabIDs.map { .tab($0) })
+        return shown.filter { !$0.windows.isEmpty }.map { .session($0.id.session) }
+    }
+}
+
+extension TopicGroupID {
+    var quickSwitchTarget: QuickSwitchTarget? {
+        switch self {
+        case .topic(let id): .topic(id)
+        case .locked(let id): .locked(id)
+        case .noTopic: nil
+        }
     }
 }
 
@@ -119,7 +176,24 @@ extension WorkspaceStore {
     }
 
     func quickSwitch(_ selection: QuickSwitchSelection) {
-        guard let target = quickSwitchTargets.target(for: selection) else { return }
+        if let target = quickSwitchTargets.target(for: selection) { go(to: target) }
+    }
+
+    /// Where a step goes from the selected Window, its Session or the Active Topic's row.
+    func stepTarget(_ level: StepLevel, _ direction: StepDirection) -> QuickSwitchTarget? {
+        let current: QuickSwitchTarget? = switch level {
+        case .window: selectedWindow.map { .window($0.id) }
+        case .session: selectedWindow.map { .session($0.sessionID) }
+        case .topic: topics.activeTopic?.quickSwitchTarget
+        }
+        return quickSwitchTargets.step(level, direction, from: current)
+    }
+
+    func step(_ level: StepLevel, _ direction: StepDirection) {
+        if let target = stepTarget(level, direction) { go(to: target) }
+    }
+
+    private func go(to target: QuickSwitchTarget) {
         switch target {
         case .topic(let id): goToTopic(.topic(id))
         case .locked(let id): goToTopic(.locked(id))

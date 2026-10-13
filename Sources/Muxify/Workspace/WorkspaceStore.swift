@@ -1415,8 +1415,8 @@ final class WorkspaceStore {
         switchClient(to: Target(window), onFailure: onFailure)
     }
 
-    /// Shared by Muxify keybinds and Ghostty's tab actions. Only the selected
-    /// Session's Windows participate, in the same order as the Sidebar.
+    /// Ghostty's numbered and last tab actions. Only the selected Session's
+    /// Windows participate, in the same order as the Sidebar.
     private func navigateWindows(_ navigation: WindowNavigation) {
         guard let current = selectedWindow else { return }
         let siblings = quickSwitchWindows
@@ -1946,8 +1946,9 @@ final class WorkspaceStore {
              .selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5,
              .selectTab6, .selectTab7, .selectTab8, .selectTab9:
             if let selection = action.quickSwitchSelection { quickSwitch(selection) }
-        case .selectNextWindow: navigateWindows(.next)
-        case .selectPrevWindow: navigateWindows(.previous)
+        case .selectNextWindow, .selectPrevWindow, .selectNextSession, .selectPrevSession,
+             .selectNextTopic, .selectPrevTopic:
+            if let step = action.step { self.step(step.level, step.direction) }
         }
     }
 
@@ -2096,8 +2097,8 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
 
     func ghosttyGotoTab(_ tab: Int32) {
         switch tab {
-        case GHOSTTY_GOTO_TAB_PREVIOUS.rawValue: navigateWindows(.previous)
-        case GHOSTTY_GOTO_TAB_NEXT.rawValue: navigateWindows(.next)
+        case GHOSTTY_GOTO_TAB_PREVIOUS.rawValue: step(.window, .previous)
+        case GHOSTTY_GOTO_TAB_NEXT.rawValue: step(.window, .next)
         case GHOSTTY_GOTO_TAB_LAST.rawValue: navigateWindows(.last)
         default: navigateWindows(.position(Int(tab)))
         }

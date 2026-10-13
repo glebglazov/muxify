@@ -26,6 +26,10 @@ enum PaletteCommand: String, CaseIterable {
     case hideTerminal = "Hide Terminal"
     case showBrowser = "Show Browser"
     case hideBrowser = "Hide Browser"
+    case nextSession = "Show Next Session"
+    case previousSession = "Show Previous Session"
+    case nextTopic = "Show Next Topic"
+    case previousTopic = "Show Previous Topic"
     case newAppWindow = "New Muxify Window"
     case newWindow = "New tmux Window"
     case newSession = "New tmux Session"
@@ -65,6 +69,10 @@ enum PaletteCommand: String, CaseIterable {
         case .showSidebar, .hideSidebar: .toggleSidebar
         case .showTerminal, .hideTerminal: .toggleTerminal
         case .showBrowser, .hideBrowser: .toggleBrowser
+        case .nextSession: .selectNextSession
+        case .previousSession: .selectPrevSession
+        case .nextTopic: .selectNextTopic
+        case .previousTopic: .selectPrevTopic
         default: nil
         }
     }
@@ -97,6 +105,9 @@ extension CommandPalette {
             case .zen: return canChangeTopics && hasOpenTopic && store.topicWatcher.zen == nil && store.topics.mode == .topics
             case .endZen: return !store.isRemote && !store.changingTopic && store.topicWatcher.zen != nil
             case .installExtensions: return !store.isRemote
+            case .nextSession, .previousSession, .nextTopic, .previousTopic:
+                guard let step = command.keybinding?.step else { return false }
+                return store.stepTarget(step.level, step.direction) != nil
             case .closeTab, .nextTab, .previousTab: return store.currentBrowser?.activeTab != nil
             case .back: return store.currentBrowser?.activeTab?.canGoBack == true
             case .forward: return store.currentBrowser?.activeTab?.canGoForward == true
@@ -159,6 +170,8 @@ extension CommandPalette {
         case .zen: store.toggleZenOfActiveTopic(keepingHistory: true)
         case .endZen: store.endZen()
         case .lockSession, .unlockSession: store.toggleLockOfCurrentSession()
+        case .nextSession, .previousSession, .nextTopic, .previousTopic:
+            if let step = command.keybinding?.step { store.step(step.level, step.direction) }
         case .newAppWindow: store.onNewAppWindow?()
         case .newWindow: store.newWindow()
         case .newSession: store.newSession()

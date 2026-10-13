@@ -540,9 +540,10 @@ final class ConfigTests: XCTestCase {
         ])
     }
 
-    func testNextAndPreviousWindowActionsAreUnboundByDefault() throws {
+    func testNextAndPreviousStepActionsAreUnboundByDefault() throws {
         let config = try load([:])
-        for action in [ConfigAction.selectNextWindow, .selectPrevWindow] {
+        for action in [ConfigAction.selectNextWindow, .selectPrevWindow, .selectNextSession, .selectPrevSession,
+                       .selectNextTopic, .selectPrevTopic] {
             XCTAssertEqual(config.keybinds.triggers[action], [])
             XCTAssertNil(config.keybinds.firstTrigger(for: action))
         }
@@ -563,6 +564,23 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.keybinds.firstTrigger(for: .selectNextWindow), trigger("ctrl+cmd+right"))
         XCTAssertEqual(config.keybinds.firstTrigger(for: .selectPrevWindow), trigger("ctrl+cmd+left"))
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1")), .selectWindow1)
+        XCTAssertEqual(config.problems, [])
+    }
+
+    func testNextAndPreviousSessionAndTopicActionsAcceptBindings() throws {
+        let config = try load("""
+        keybindings:
+          select_next_session: ctrl+cmd+down
+          select_prev_session: ctrl+cmd+up
+          select_next_topic: [ctrl+alt+cmd+down, cmd+1]
+          select_prev_topic: ctrl+alt+cmd+up
+        """)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+down")), .selectNextSession)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+up")), .selectPrevSession)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+alt+cmd+down")), .selectNextTopic)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1")), .selectNextTopic)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+alt+cmd+up")), .selectPrevTopic)
+        XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow1))
         XCTAssertEqual(config.problems, [])
     }
 
