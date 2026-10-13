@@ -16,17 +16,34 @@ The Topic records and plans, the Config and the tmux runner are in the
 `MuxifyCore` package in `Packages/MuxifyCore`. The app and the command line tool
 both link it, so both read and change Topics with the same code.
 
-### Agent indicators
+### Agent marks
 
-The Command Palette's Agent indicators are separate gray
-square pixels on a three-by-three square perimeter, 10×10 pt overall, light
-up clockwise in discrete steps to mean working. The blocks are 3 pt on Retina
-displays and 2 pt on 1× displays, keeping a physical pixel between blocks.
-A blue dot means an Unread completion, and an orange dot means blocked or failed
-(even when Unread). A read, done Agent or one that has not run a turn has no
-indicator. Reduce Motion keeps the working pixel glyph static. Green is not an
-Agent Status color; these presentation rules do not change the Status or Unread
-pane options.
+`AgentMark` in `MuxifyCore` decides the one Agent mark an Agent shows, from its
+Status, its Unread flag, the `notifications` switches and whether its group is
+quiet (a Snoozed Topic, or No Topic while Zen is on). `TopicsModel` computes
+every mark once: `agentMarks` for each Agent by Pane ID, `Row.mark` for each
+Topic or Locked Session card, and `sessionMarks` for each Session card in
+Sessions mode. A group's mark is its strongest member's. A quiet group has no
+mark on its card; an Agent's own row there keeps only the Working mark. Do not
+decide a mark anywhere else.
+
+The app draws a mark in two views in `UI/AgentMarks.swift`, and each takes its
+color from `ui.agent_colors` through the `agentColors` environment value:
+
+- `AgentMarkView` is the mark of a row: a Pane row, an Agents row, a Command
+  Palette result and the badge on a Palette Agent's icon. A Notification is a
+  dot. The Working mark is `TerminalActivityIndicator`: eight square pixels on a
+  three-by-three perimeter, 10×10 pt overall, that light up clockwise in
+  discrete steps. The blocks are 3 pt on Retina displays and 2 pt on 1×
+  displays, with a physical pixel between blocks.
+- `AgentMarkSpine` is the 3 pt bar along a card's left edge. The Working mark's
+  bar fades in and out.
+
+`ui.pulse: false` and Reduce Motion keep every Working mark still. The
+`ContentView` sets the environment values once, and the Command Palette is an
+overlay inside it, so the Sidebar and the Palette always agree. A terminal bell
+is not an Agent mark: it is a gray `bell.fill` symbol. None of these rules
+changes the Status or Unread Pane options.
 
 ## Build
 

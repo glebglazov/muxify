@@ -133,18 +133,83 @@ at least 24 so the buttons fit. Changes apply live. Removing the setting restore
 the default; invalid values use the default and appear in the Config problems
 banner. A YAML syntax error keeps the last good Config.
 
-## Pulse
+## Agent marks
+
+An Agent mark is a Working mark or a Notification. Each kind has one meaning
+and one color on every Sidebar card, Pane row, Agents row and Command Palette
+result:
+
+| Agent | Mark | Default color |
+| --- | --- | --- |
+| Working | Working mark: pixels that step around a square on a row, a fading bar on a card | gray |
+| Done and Unread | Notification | blue |
+| Failed and Unread | Notification | red |
+| Blocked, read or Unread | Notification | orange |
+| Done or failed and read, or no Status yet | none | — |
+
+A card shows the strongest mark of its Agents: blocked, then failed, then
+done, then working. A Snoozed Topic, and No Topic while Zen is on, show no
+Notification on any surface, and their cards show no mark. An Agent's own Pane
+row and Command Palette result there still show its Working mark.
+
+A terminal bell is not an Agent mark. It shows as a gray bell symbol, and no
+Config changes its color.
+
+### Notifications
+
+```yaml
+notifications:
+  done_enabled: true
+  failed_enabled: true
+  blocked_enabled: true
+```
+
+Set a key to `false` to turn off that type of Notification on every surface:
+cards, Pane rows, the Agents section, and the Command Palette's marks and
+status text. A wake message after a Snooze then does not count those Agents.
+Each key is `true` by default. A value that is not a boolean, or an unknown
+key, appears in the Config problems banner.
+
+### Agent colors
+
+```yaml
+ui:
+  agent_colors:
+    working: gray
+    done: blue
+    blocked: orange
+    failed: red
+```
+
+These are the defaults. A value is a macOS system color name (`blue`,
+`orange`, `red`, `green`, `yellow`, `purple`, `pink`, `teal` or `gray`), which
+adapts to light and dark appearance, or a `#RRGGBB` value, which is the same in
+both. Put quotes around a `#RRGGBB` value, because YAML reads an unquoted `#`
+as the start of a comment:
+
+```yaml
+ui:
+  agent_colors:
+    done: '#3366ff'
+```
+
+A color applies to the Sidebar and the Command Palette at once. The Command
+Palette's terminal theme does not change Agent marks. Leave out a key to keep
+its default. An invalid value keeps the default, and it and an unknown key
+appear in the Config problems banner. Changes apply live.
+
+### Pulse
 
 ```yaml
 ui:
   pulse: false
 ```
 
-A working Agent's marks pulse: they fade in and out, without moving, in the
-Sidebar's card spines and Pane rows and the Agents section.
-`pulse: false` keeps every one of them still. The default is `true`. Reduce
-Motion in the macOS accessibility settings also keeps them still. A value that
-is not a boolean uses the default and appears in the Config problems banner.
+Every Working mark moves: on a row its pixels step around a square, and on a
+card its bar fades in and out. `pulse: false` keeps every Working mark still,
+in the Sidebar and in the Command Palette. The default is `true`. Reduce Motion
+in the macOS accessibility settings also keeps them still. A value that is not
+a boolean uses the default and appears in the Config problems banner.
 
 ## Sidebar typography
 
