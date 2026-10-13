@@ -24,6 +24,8 @@ public enum ConfigAction: String, KeybindAction {
     case settleTopic = "settle_topic"
     case toggleLock = "toggle_lock"
     case markRead = "mark_read"
+    case markUnread = "mark_unread"
+    case markAllRead = "mark_all_read"
     case toggleSidebar = "toggle_sidebar"
     case toggleTerminal = "toggle_terminal"
     case toggleBrowser = "toggle_browser"
@@ -76,6 +78,8 @@ public enum ConfigAction: String, KeybindAction {
         .settleTopic: [],
         .toggleLock: [],
         .markRead: ["cmd+shift+r"],
+        .markUnread: ["cmd+shift+u"],
+        .markAllRead: [],
         .snoozeTopic: ["alt+cmd+s"],
         .toggleZen: ["shift+alt+cmd+s"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
@@ -129,6 +133,7 @@ public enum ConfigAction: String, KeybindAction {
 public enum PaletteAction: String, KeybindAction {
     case jumpTo = "jump_to"
     case markRead = "mark_read"
+    case markUnread = "mark_unread"
     case newSession = "new_session"
     case selectNext = "select_next"
     case selectPrev = "select_prev"
@@ -166,6 +171,7 @@ public enum PaletteAction: String, KeybindAction {
     public static let defaultSpelling: KeyValuePairs<PaletteAction, [String]> = [
         .jumpTo: ["enter"],
         .markRead: [],
+        .markUnread: [],
         .newSession: ["cmd+enter"],
         .selectNext: ["down", "ctrl+j"],
         .selectPrev: ["up", "ctrl+k"],

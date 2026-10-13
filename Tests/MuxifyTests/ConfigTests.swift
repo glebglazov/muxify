@@ -34,6 +34,19 @@ final class ConfigTests: XCTestCase {
         XCTAssertNil(try load("keybindings:\n  mark_read: []").keybinds.firstTrigger(for: .markRead))
     }
 
+    func testUnreadAndAllReadBindingsCanBeRemappedOrDisabled() throws {
+        let defaults = try load("")
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+u")), .markUnread)
+        XCTAssertNil(defaults.keybinds.firstTrigger(for: .markAllRead))
+        XCTAssertTrue(Config.template.contains("#   mark_unread: cmd+shift+u"))
+        let custom = try load("keybindings:\n  mark_unread: ctrl+alt+u\n  mark_all_read: ctrl+alt+r\n  command_palette:\n    mark_unread: ctrl+u")
+        XCTAssertTrue(custom.problems.isEmpty)
+        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+u")), .markUnread)
+        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r")), .markAllRead)
+        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+u")))
+        XCTAssertNil(try load("keybindings:\n  mark_unread: []").keybinds.firstTrigger(for: .markUnread))
+    }
+
     func testMuxifyConfigChoosesTheConfigFileElseTheXDGPath() {
         func path(_ environment: [String: String]) -> String { MuxifyPaths(environment: environment, home: "/Users/me").configFile.path }
         XCTAssertEqual(path([:]), "/Users/me/.config/muxify/config.yaml")

@@ -2,7 +2,7 @@ import AppKit
 import MuxifyCore
 
 extension PaletteItem {
-    var readTarget: WorkspaceStore.MarkReadTarget? {
+    var readTarget: WorkspaceStore.ReadTarget? {
         switch ref {
         case .topic(let id, _): return .topic(id)
         case .session(let session): return .session(session.id)
@@ -16,9 +16,9 @@ extension PaletteItem {
 extension CommandPalette {
     func performRowAction(_ action: PaletteAction, item: PaletteItem) {
         guard let store else { return }
-        if action == .markRead {
+        if action == .markRead || action == .markUnread {
             close()
-            store.markRead(item.readTarget)
+            store.changeRead(action == .markRead ? .read : .unread, in: item.readTarget)
             return
         }
         if case .topic(let id, _) = item.ref,

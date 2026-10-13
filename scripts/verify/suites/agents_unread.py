@@ -46,16 +46,18 @@ class AgentsUnread(TopicsSidebar):
         self.s.act('set', 'palette-search', query)
         return self.s.wait_rows(lambda rs: self.s.has(key, rs), 'No palette row ' + key)
 
-    def mark_row(self, query, key, palette='Read targets'):
+    def mark_row(self, query, key, palette='Read targets', action='Mark Read'):
         self.search(palette, query, key)
-        wait(lambda: self.s.driver('action', key, 'Mark Read')['pressed'], 'Mark Read did not become available for ' + key)
-        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Mark Read did not close the palette')
+        wait(lambda: self.s.driver('action', key, action)['pressed'], action + ' did not become available for ' + key)
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), action + ' did not close the palette')
 
     def test_navigation_keeps_unread_and_command_reads_the_whole_topic_in_sessions_mode(self):
         self.write_topic('manual-topic', 'Manual topic', self.beta)
         _, first, one = self.agent_session('manual-one', topic='manual-topic', status='done', unread=True)
         _, _, two = self.agent_session('manual-two', topic='manual-topic', status='failed', unread=True)
         _, _, other = self.agent_session('manual-other', status='done', unread=True)
+        self.select_window(first)
+        self.s.wait_shown(first)
         self.find('topic-manual-topic')
         self.s.act('action', 'topic-manual-topic', 'Go to Topic')
         self.s.wait_shown(first)
@@ -120,9 +122,14 @@ class AgentsUnread(TopicsSidebar):
                     ';', 'set-option', '-p', '-t', pane, '@muxify_agent_status', 'done',
                     ';', 'set-option', '-p', '-t', pane, '@muxify_agent_unread', '1')
         _, _, other = self.agent_session('manual-loose-other', status='done', unread=True)
+        _, _, outside = self.agent_session('manual-loose-read', status='failed')
         self.mark_row('manual-loose-row', 'palette-row-session:' + sid)
         self.assert_read(pane)
         self.assertTrue(self.unread(other))
+        self.mark_row('manual-loose-row', 'palette-row-session:' + sid, action='Mark Unread')
+        self.assert_unread(pane)
+        self.assertTrue(self.unread(other))
+        self.assertFalse(self.unread(outside))
 
     def test_disabling_manual_read_restores_topic_visit_reading(self):
         self.configure('notifications:\n  manual_read: false\n')
@@ -132,6 +139,76 @@ class AgentsUnread(TopicsSidebar):
         self.find('topic-automatic-topic')
         self.s.act('action', 'topic-automatic-topic', 'Go to Topic')
         self.assert_read(one, two)
+
+    def assert_unread(self, *panes):
+        wait(lambda: all(self.unread(pane) for pane in panes), 'Agents stayed read')
+        time.sleep(2.2)
+        self.assertEqual([self.unread(pane) for pane in panes], [True] * len(panes))
+
+    def test_mark_unread_command_uses_active_topic_and_all_read_clears_environment(self):
+        self.write_topic('unread-topic', 'Unread topic', self.beta)
+        _, first, one = self.agent_session('unread-one', topic='unread-topic', status='done')
+        _, _, two = self.agent_session('unread-two', topic='unread-topic', status='failed')
+        _, _, working = self.agent_session('unread-working', topic='unread-topic', status='working')
+        _, _, other = self.agent_session('unread-other', status='blocked', unread=True)
+        _, _, outside = self.agent_session('unread-outside', status='done')
+        self.find('topic-unread-topic')
+        self.s.act('action', 'topic-unread-topic', 'Go to Topic')
+        self.s.wait_shown(first)
+        key = 'palette-row-command-Mark Unread'
+        rows = self.search('Commands', 'Mark Unread', key)
+        self.assertIn('⇧⌘U', self.describe(key, rows))
+        self.s.act('press', key)
+        self.assert_unread(one, two)
+        self.assertFalse(self.unread(working))
+        self.assertFalse(self.unread(outside))
+        key = 'palette-row-command-Mark All as Read'
+        self.search('Commands', 'Mark All as Read', key)
+        self.s.act('press', key)
+        self.assert_read(one, two, other)
+
+    def test_unread_row_targets_only_the_selected_agents(self):
+        self.write_topic('unread-rows', 'Unread rows', self.beta)
+        _, window, one = self.agent_session('unread-row-one', topic='unread-rows', status='blocked')
+        _, _, other = self.agent_session('unread-row-other', topic='unread-rows', status='done')
+        self.mark_row('claude', 'palette-row-agent:' + one, action='Mark Unread')
+        self.assert_unread(one)
+        self.assertFalse(self.unread(other))
+        self.mark_row('unread-row-one', 'palette-row-window:' + window, palette='Read windows')
+        self.assert_read(one)
+        self.mark_row('unread-row-one', 'palette-row-window:' + window, palette='Read windows', action='Mark Unread')
+        self.assert_unread(one)
+        self.assertFalse(self.unread(other))
+        self.mark_row('Unread rows', 'palette-row-topic-unread-rows', action='Mark Unread')
+        self.assert_unread(one, other)
+
+    def test_automatic_mark_unread_survives_until_next_visit(self):
+        self.configure('notifications:\n  manual_read: false\n')
+        _, window, pane = self.agent_session('unread-auto', status='done')
+        _, away, _ = self.agent_session('unread-away', status='working')
+        self.select_window(window)
+        self.s.wait_shown(window)
+        self.mark_row('unread-auto', 'palette-row-window:' + window, palette='Read windows', action='Mark Unread')
+        self.assert_unread(pane)
+        self.search('Read windows', 'unread-away', 'palette-row-window:' + away)
+        self.s.act('press', 'palette-row-window:' + away)
+        self.s.wait_shown(away)
+        self.search('Read windows', 'unread-auto', 'palette-row-window:' + window)
+        self.s.act('press', 'palette-row-window:' + window)
+        self.s.wait_shown(window)
+        self.assert_read(pane)
+
+    def test_remapped_unread_and_all_read_shortcuts_use_session_and_environment(self):
+        self.configure('keybindings:\n  mark_unread: ctrl+alt+u\n  mark_all_read: ctrl+alt+a\n')
+        _, window, pane = self.agent_session('unread-remap', status='done')
+        _, _, other = self.agent_session('unread-remap-other', status='working', unread=True)
+        self.select_window(window)
+        self.s.wait_shown(window)
+        self.s.wait_rows(lambda rs: self.s.has('agent-' + pane, rs), 'No Agent for Mark Unread')
+        self.s.act('action', 'quick-switch-input', 'Press ⌃⌥U')
+        self.assert_unread(pane)
+        self.s.act('action', 'quick-switch-input', 'Press ⌃⌥A')
+        self.assert_read(pane, other)
 
     def test_remapped_shortcut_runs_mark_read(self):
         self.configure('keybindings:\n  mark_read: ctrl+alt+r\n')

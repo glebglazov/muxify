@@ -24,6 +24,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var explicitReadVisits = AgentReadVisits()
     @ObservationIgnored private var readGeneration = 0
     @ObservationIgnored private var pendingReads = 0
+    private var readSnapshotPending = false
+    private var pendingReadNavigations: Set<UUID> = []
 
     private(set) var newTopicFailure: String?
     /// When each Topic, Session and Project was last looked at; the lists rank by it.
@@ -935,7 +937,7 @@ final class WorkspaceStore {
     @ObservationIgnored private var rememberedWindowID: String?
     @ObservationIgnored private var clientTTY: String?
     /// A click we sent to tmux that the next snapshots may not reflect yet.
-    @ObservationIgnored private var pendingSelection: (windowID: String, deadline: Date, readsOnArrival: Bool)?
+    private var pendingSelection: (windowID: String, deadline: Date, readsOnArrival: Bool)?
     /// A Session asked for by name (`muxify session open`) that the snapshot
     /// may not list yet: Muxify is just launching, or it was just created.
     @ObservationIgnored private var pendingSession: (name: String, deadline: Date)?
@@ -1097,6 +1099,8 @@ final class WorkspaceStore {
         explicitReadVisits = AgentReadVisits()
         readGeneration += 1
         pendingReads = 0
+        pendingReadNavigations.removeAll()
+        readSnapshotPending = false
         windows = []
         agents = []
         palette.close(restoringFocus: false)
@@ -1265,6 +1269,7 @@ final class WorkspaceStore {
         let agents = Agent.list(panes: snapshot.panes, windows: snapshot.windows, ordered: false)
         if self.agents != agents { self.agents = agents }
         if panes != snapshot.panes { panes = snapshot.panes }
+        readSnapshotPending = false
         if serverRunning != snapshot.serverRunning { serverRunning = snapshot.serverRunning }
         let ownTTY = clientTTY ?? (isRemote ? nil : surface?.ttyName)
         if !isRemote, surface?.processExited == false {
@@ -1473,22 +1478,24 @@ final class WorkspaceStore {
         select(pane.window)
     }
 
-    enum MarkReadTarget {
+    enum ReadTarget {
+        case environment
         case topic(String)
         case session(String)
         case window(String)
         case pane(String)
     }
 
-    var currentReadTarget: MarkReadTarget? {
+    var currentReadTarget: ReadTarget? {
         if let id = activeTopicID { return .topic(id) }
         return selectedWindow.map { .session($0.sessionID) }
     }
 
-    private func unreadAgents(in target: MarkReadTarget) -> [Agent] {
+    private func agents(for change: ReadChange, in target: ReadTarget) -> [Agent] {
         agents.filter { agent in
-            guard agent.unread else { return false }
+            guard change.applies(unread: agent.unread, status: agent.status) else { return false }
             switch target {
+            case .environment: return true
             case .topic(let id): return windows.contains { $0.id == agent.windowID && $0.topicID == id }
             case .session(let id): return agent.sessionID == id
             case .window(let id): return agent.windowID == id
@@ -1497,16 +1504,30 @@ final class WorkspaceStore {
         }
     }
 
-    func canMarkRead(_ target: MarkReadTarget?) -> Bool {
-        guard let target, connection != nil, !isTransitioning, !isRemote || isConnected else { return false }
-        return !unreadAgents(in: target).isEmpty
+    func canChangeRead(_ change: ReadChange, in target: ReadTarget?) -> Bool {
+        guard let target, connection != nil, !isTransitioning, !isRemote || isConnected,
+              pendingReads == 0, !readSnapshotPending, pendingReadNavigations.isEmpty, pendingSelection == nil else { return false }
+        return !agents(for: change, in: target).isEmpty
     }
 
-    func markRead(_ target: MarkReadTarget?) {
-        guard let target, canMarkRead(target) else { return }
-        let commands = unreadAgents(in: target).map { ["set-option", "-pqu", "-t", $0.paneID, Tmux.agentUnreadOption] }
+    func changeRead(_ change: ReadChange, in target: ReadTarget?) {
+        guard let target, canChangeRead(change, in: target) else { return }
+        // Apply earlier visits first so they cannot clear the new explicit mark.
+        var commands = unreadChanges(panes)
+        commands += agents(for: change, in: target).map { unreadCommand(change == .unread, paneID: $0.paneID) }
+        writeUnread(commands)
+    }
+
+    private func unreadCommand(_ unread: Bool, paneID: String) -> [String] {
+        unread
+            ? ["set-option", "-pq", "-t", paneID, Tmux.agentUnreadOption, "1"]
+            : ["set-option", "-pqu", "-t", paneID, Tmux.agentUnreadOption]
+    }
+
+    private func writeUnread(_ commands: [[String]]) {
         readGeneration += 1
         pendingReads += 1
+        readSnapshotPending = true
         runAsync(Array(commands.joined(separator: [";"]))) { [weak self] _ in
             guard let self else { return }
             self.pendingReads -= 1
@@ -1515,35 +1536,36 @@ final class WorkspaceStore {
         }
     }
 
-    /// Automatic reading follows visits; Manual Read consumes visits without clearing Agents.
-    /// Persist changed Unread options before the next snapshot counts wake Notifications.
-    private func updateUnread(_ panes: [TmuxPane]) -> Bool {
+    private func unreadChanges(_ panes: [TmuxPane]) -> [[String]] {
         let lookingAt = NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
-        let visit = lookingAt.flatMap { id in windows.first { $0.id == id }?.topicID }
-        let entering = lookingAt != unreadVisit ? visit : nil
+        let entering = lookingAt != unreadVisit
+        let topic = entering ? lookingAt.flatMap { id in windows.first { $0.id == id }?.topicID } : nil
         unreadVisit = lookingAt
-        let visited = Set(windows.filter { $0.id == lookingAt || (entering != nil && $0.topicID == entering) }.map(\.id))
+        let visited = Set(windows.filter { (entering && $0.id == lookingAt) || (topic != nil && $0.topicID == topic) }.map(\.id))
             .union(explicitReadVisits.consume(in: windows))
         var commands: [[String]] = []
         for pane in panes {
+            let reading: AgentReading = visited.contains(pane.windowID) ? .visiting : pane.windowID == lookingAt ? .viewing : .away
             let change = AgentUnread.change(for: pane, previousStatus: agentStatuses[pane.id],
-                                            visited: visited.contains(pane.windowID), manualRead: config.notifications.manualRead)
+                                            reading: reading, manualRead: config.notifications.manualRead)
             agentStatuses[pane.id] = pane.agentStatus
-            if let unread = change {
-                commands.append(unread
-                    ? ["set-option", "-pq", "-t", pane.id, Tmux.agentUnreadOption, "1"]
-                    : ["set-option", "-pqu", "-t", pane.id, Tmux.agentUnreadOption])
-            }
+            if let unread = change { commands.append(unreadCommand(unread, paneID: pane.id)) }
         }
         let live = Set(panes.map(\.id))
         agentStatuses = agentStatuses.filter { live.contains($0.key) }
+        return commands
+    }
+
+    /// Persist Unread before the next snapshot counts wake Notifications.
+    private func updateUnread(_ panes: [TmuxPane]) -> Bool {
+        let commands = unreadChanges(panes)
         guard !commands.isEmpty else { return false }
-        runAsync(Array(commands.joined(separator: [";"]))) { [weak self] _ in self?.refresh() }
+        writeUnread(commands)
         return true
     }
 
     private func switchClient(to target: Target, onFailure: ((Error) -> Void)? = nil) {
-        guard !isTransitioning, !isRemote || isConnected else { return }
+        guard connection != nil, !isTransitioning, !isRemote || isConnected else { return }
         let previousWindowID = selectedWindowID
         let previousTopicSelection = topicSelection
         selectedWindowID = target.windowID
@@ -1555,18 +1577,21 @@ final class WorkspaceStore {
             return
         }
         clientTTY = tty
+        let navigation = UUID()
+        pendingReadNavigations.insert(navigation)
         runAsync(["switch-client", "-c", tty, "-t", target.tmuxTarget]) { [weak self] result in
+            guard let self, self.pendingReadNavigations.remove(navigation) != nil else { return }
             if case .failure(let error) = result {
-                if self?.pendingSelection?.windowID == target.windowID {
-                    self?.pendingSelection = nil
-                    self?.selectedWindowID = previousWindowID
-                    self?.topicSelection = previousTopicSelection
+                if self.pendingSelection?.windowID == target.windowID {
+                    self.pendingSelection = nil
+                    self.selectedWindowID = previousWindowID
+                    self.topicSelection = previousTopicSelection
                 }
                 onFailure?(error)
-            } else if let self {
+            } else {
                 self.explicitReadVisits.enter(windowID: target.windowID, windows: self.windows)
             }
-            self?.refresh()
+            self.refresh()
         }
     }
 
@@ -1980,7 +2005,9 @@ final class WorkspaceStore {
         case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
         case .toggleLock: toggleLockOfCurrentSession()
-        case .markRead: markRead(currentReadTarget)
+        case .markRead: changeRead(.read, in: currentReadTarget)
+        case .markUnread: changeRead(.unread, in: currentReadTarget)
+        case .markAllRead: changeRead(.read, in: .environment)
         case .toggleSidebar: toggleSidebar()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)

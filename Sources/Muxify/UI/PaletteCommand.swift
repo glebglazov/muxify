@@ -4,6 +4,8 @@ import MuxifyCore
 enum PaletteCommand: String, CaseIterable {
     case newTopic = "New Topic"
     case markRead = "Mark Read"
+    case markUnread = "Mark Unread"
+    case markAllRead = "Mark All as Read"
     case movePane = "Move Pane"
     case moveWindow = "Move Window"
     case moveSession = "Move Session"
@@ -54,6 +56,8 @@ enum PaletteCommand: String, CaseIterable {
         switch self {
         case .newTopic: .newTopic
         case .markRead: .markRead
+        case .markUnread: .markUnread
+        case .markAllRead: .markAllRead
         case .movePane: .movePane
         case .moveWindow: .moveWindow
         case .moveSession: .moveSession
@@ -97,7 +101,9 @@ extension CommandPalette {
         let hasOpenTopic = store.topicWatcher.records.contains { $0.id == store.activeTopicID && $0.settledAt == nil }
         return PaletteCommand.allCases.filter { command in
             switch command {
-            case .markRead: return store.canMarkRead(store.currentReadTarget)
+            case .markRead: return store.canChangeRead(.read, in: store.currentReadTarget)
+            case .markUnread: return store.canChangeRead(.unread, in: store.currentReadTarget)
+            case .markAllRead: return store.canChangeRead(.read, in: .environment)
             case .newTopic: return !store.isRemote && !store.changingTopic
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
@@ -162,7 +168,9 @@ extension CommandPalette {
         default: close(restoringFocus: false)
         }
         switch command {
-        case .markRead: store.markRead(store.currentReadTarget)
+        case .markRead: store.changeRead(.read, in: store.currentReadTarget)
+        case .markUnread: store.changeRead(.unread, in: store.currentReadTarget)
+        case .markAllRead: store.changeRead(.read, in: .environment)
         case .newTopic: store.presentNewTopic(keepingHistory: true)
         case .movePane: store.presentMovePane(nil, keepingHistory: true)
         case .movePaneWithTab: store.presentMovePane(nil, includesTab: true, keepingHistory: true)

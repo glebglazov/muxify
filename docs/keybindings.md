@@ -17,6 +17,8 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic or a Locked Session, or in Sessions mode, it only ends Zen |
 | `settle_topic` | Unbound | Settle the Active Topic, then open the Next Topic |
 | `mark_read` | ⌘⇧R | Clear Unread for the Active Topic, or the current Session when there is no Active Topic |
+| `mark_unread` | ⌘⇧U | Mark eligible Agents Unread in the Active Topic, or the current Session when there is no Active Topic |
+| `mark_all_read` | Unbound | Clear Unread in the Active Environment |
 | `toggle_lock` | Unbound | Lock the current Session, which must be in No Topic, or Unlock it while it is Locked |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
@@ -48,7 +50,9 @@ The default [Command Palettes](configuration.md#command-palettes) are
 **Commands** on ⌘⇧P and **Go to…** on ⌘P. `open_switcher` is gone.
 A Config that still names it shows a problem.
 
-Commands also lists Mark Read when the Active Topic or current Session has Unread Agents.
+Commands lists Mark Read when the Active Topic or current Session has Unread Agents.
+It lists Mark Unread when that target has read Agents with done, failed or blocked Status.
+Mark All as Read clears Unread in the Active Environment and appears when it has Unread Agents.
 
 Commands also lists Move Pane, Move Window, Move Session, Move Pane with Active
 Tab, Add a Project, Snooze Topic, Settle Topic, Lock Session or Unlock Session, and Zen
