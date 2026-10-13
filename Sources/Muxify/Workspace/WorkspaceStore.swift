@@ -643,7 +643,7 @@ final class WorkspaceStore {
 
     /// The service on the Local server, with the Projects as git reported them last.
     func topicService() -> TopicService {
-        TopicService(paths: topicWatcher.store.paths, server: .local, projects: projects, sessionOrder: topicConfig.sessionOrder)
+        TopicService(paths: topicWatcher.store.paths, server: .local, projects: projects, sessionOrder: topicConfig.sessionOrder, insertPosition: topicConfig.insertPosition)
     }
 
     private func present(_ response: TopicResponse, as presentation: TopicPresentation, invocation: UUID) {

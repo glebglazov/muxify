@@ -173,7 +173,7 @@ final class TopicEditTests: XCTestCase {
         XCTAssertEqual(edit.record?.slug, "untitled-1")
         XCTAssertEqual(edit.record?.homeProject, game.path)
         XCTAssertEqual(edit.record?.createdAt, "1970-01-01T00:00:00Z")
-        XCTAssertEqual(edit.record?.order, -1)
+        XCTAssertNil(edit.record?.order)
         XCTAssertEqual(edit.record?.sessions, [.object(["project_path": .string(game.path)])])
         XCTAssertEqual(edit.commands, [
             .newTopicSession(name: "game/untitled-1", directory: game.path),

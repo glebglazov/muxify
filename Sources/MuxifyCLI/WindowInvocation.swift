@@ -43,7 +43,7 @@ extension WindowInvocation {
     func run() async throws {
         let config = try await ConfigProjects.load(paths.configFile)
         // No client: no terminal switches to the moved Window.
-        let response = TopicService(paths: paths, server: .local, projects: config.projects, sessionOrder: config.topics.sessionOrder)
+        let response = TopicService(paths: paths, server: .local, projects: config.projects, sessionOrder: config.topics.sessionOrder, insertPosition: config.topics.insertPosition)
             .handle(TopicRequest(.move(to: .topic(.named(topic))), target: target, caller: caller.map(TopicCaller.pane)))
         try TopicInvocation.report(response, output: output)
     }

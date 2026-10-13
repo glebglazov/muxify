@@ -59,6 +59,33 @@ class TopicsCardsSidebar(TopicsSidebar):
     def client_windows(self):
         return self.s.tmux('list-clients', '-F', '#{window_id}').split()
 
+    def test_new_topics_go_below_locked_sessions_by_default(self):
+        self.write_topic('insert-existing', 'Existing', self.beta, order=0)
+        sid = self.new_session('insert-lock', self.beta)
+        self.s.tmux('set-option', '-t', sid, '@muxify_lock', '2')
+        self.find('locked-' + sid)
+        record = self.create_topic('Inserted below Lock')
+        key = 'topic-' + record['id']
+        rs = self.s.wait_rows(lambda rs: self.s.has(key, rs) and self.s.has('locked-' + sid, rs)
+                             and frame(self.s.row('locked-' + sid, rs))[1] > frame(self.s.row(key, rs))[1],
+                             'the new Topic is not below the Locked Session')
+        self.assertGreater(record['order'], 2)
+        self.assertGreater(frame(self.s.row('locked-' + sid, rs))[1], frame(self.s.row(key, rs))[1])
+
+    def test_top_config_puts_a_new_topic_below_pinned_topics(self):
+        self.write_topic('insert-pin', 'Pinned', self.beta, order=0, pinned=True)
+        self.write_topic('insert-top', 'Existing', self.beta, order=0)
+        self.addCleanup(self.s.act, 'press', 'Reload Config')
+        self.addCleanup(self.config.write_text, self.config_text)
+        self.config.write_text(self.config_text + '  insert_position: top\n')
+        self.s.act('press', 'Reload Config')
+        record = self.create_topic('Inserted at top')
+        key = 'topic-' + record['id']
+        expected = ['topic-insert-pin', key, 'topic-insert-top']
+        rs = self.s.wait_rows(lambda rs: [row for row in self.topic_rows(rs) if row in expected] == expected,
+                             'the new Topic is not first below the Pinned Topics')
+        self.assertEqual([row for row in self.topic_rows(rs) if row in expected], expected)
+
     def test_window_moved_to_topic_keeps_its_panes_agent_and_browser(self):
         s = self.s
         self.write_topic('move-target', 'Move target', self.alpha, created_at='2026-10-07T00:00:00Z', order=0,
@@ -368,7 +395,7 @@ class TopicsCardsSidebar(TopicsSidebar):
             self.s.act('press', key)
         self.s.wait_rows(lambda rs: not self.expanded(key, rs), key + ' did not collapse')
 
-    def test_pinning_a_lower_topic_moves_its_card_to_the_top_and_a_new_topic_goes_below_it(self):
+    def test_pinning_a_lower_topic_moves_it_to_the_top_and_a_new_topic_goes_last(self):
         s = self.s
         self.write_topic('pin-upper', 'Pin upper', self.beta, order=-1000)
         self.write_topic('pin-lower', 'Pin lower', self.beta, order=1000)
@@ -386,8 +413,8 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.assertIs(self.records()['pin-lower'].get('pinned'), True)
 
         key = 'topic-' + self.create_topic('Pin newcomer')['id']
-        rs = s.wait_rows(lambda rs: above('topic-pin-lower', key, rs) and above(key, 'topic-pin-upper', rs),
-                         'the new Topic is not between the Pinned Topic and the other Topic')
+        rs = s.wait_rows(lambda rs: above('topic-pin-lower', 'topic-pin-upper', rs) and above('topic-pin-upper', key, rs),
+                         'the new Topic is not below the Pinned Topic and the other Topic')
         self.assertEqual(self.topic_rows(rs)[0], 'topic-pin-lower', 'Topic rows %s' % self.topic_rows(rs))
 
     def test_snoozed_group_lists_snoozed_topic_with_its_live_windows_and_unsnooze_returns_it(self):
@@ -548,7 +575,8 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_pressing_a_dormant_topic_card_reopens_it_without_the_reopen_choice(self):
         s = self.s
-        self.write_topic('click-dormant', 'Click dormant', self.alpha, sessions=[dict(project_path=str(self.alpha), windows=[
+        self.write_topic('dormant-first', 'First', self.beta, order=0)
+        self.write_topic('click-dormant', 'Click dormant', self.alpha, order=1, sessions=[dict(project_path=str(self.alpha), windows=[
             dict(directory=str(self.alpha), name='edit'), dict(directory=str(self.alpha), name='logs')])])
         self.find('topic-click-dormant')
         s.act('press', 'topic-click-dormant')
@@ -558,6 +586,7 @@ class TopicsCardsSidebar(TopicsSidebar):
              'Reopen did not create the remembered Windows')
         s.wait_shown('=alpha/click-dormant:')
         self.assertFalse(s.has('reopen-choice-reopen'), 'going to the Dormant Topic showed the Reopen choice')
+        self.assertEqual(self.records()['click-dormant']['order'], 1, 'Reopen moved the Dormant Topic')
 
     def test_reopen_keeps_browser_tabs_in_the_window_and_the_topic_record(self):
         s = self.s

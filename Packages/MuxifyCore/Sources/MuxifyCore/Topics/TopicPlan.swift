@@ -120,7 +120,7 @@ public struct TopicPlan: Sendable {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let slug = TopicNaming.slug(title: title, project: project, records: records, sessionNames: sessionNames)
         sessionName = project.name + "/" + slug
-        var record = TopicRecord(newTopic: id, title: title, slug: slug, records: records, now: now)
+        var record = TopicRecord(newTopic: id, title: title, slug: slug, now: now)
         record.homeProject = project.path
         record.sessions = [.object(["project_path": .string(project.path)])]
         self.record = record
@@ -135,10 +135,9 @@ public struct TopicPlan: Sendable {
 }
 
 extension TopicRecord {
-    /// An open Topic, first among the Topics that are not Pinned, with no Session and no Home Project yet.
-    public init(newTopic id: String, title: String, slug: String, records: [TopicRecord], now: Date) {
+    /// An open Topic with no Session or Home Project. The transaction gives it a place in the list.
+    public init(newTopic id: String, title: String, slug: String, now: Date) {
         self.init(id: id, title: title.isEmpty ? nil : title, slug: slug)
         createdAt = ISO8601DateFormatter().string(from: now)
-        order = TopicOrder.firstOrder(in: records.map(TopicListEntry.topic), pinned: false)
     }
 }

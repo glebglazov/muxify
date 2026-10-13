@@ -101,6 +101,21 @@ An entry that cannot apply appears in the Config problems banner. So does the
 old `projects:` list, `projects_aliases` and `sessions.paths`, with the key that
 replaces them. Muxify does not read them.
 
+## Position of new and returning Topics
+
+```yaml
+topics:
+  insert_position: bottom
+```
+
+`bottom` (the default) puts a new Topic below all Topics and Locked Sessions
+that are not Pinned. `top` puts it first below the Pinned Topics.
+Reopen and Start Fresh use this position when a Settled Topic returns.
+A Pinned Settled Topic returns at the chosen end of the Pinned Topics.
+A Dormant Topic keeps its place, including when it is Pinned.
+A Topic made from a Locked Session takes that Lock's place.
+An unknown value uses `bottom` and appears in the Config problems banner.
+
 ## Order of a Topic's Sessions
 
 ```yaml

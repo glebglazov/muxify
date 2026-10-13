@@ -190,7 +190,7 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(moved.first { $0.id == "b" }?.snoozedUntil, "never")
         XCTAssertEqual(moved.first { $0.id == "b" }?.unknownFields["external"], .bool(true))
         try store.write { try $0.create(record("new", order: nil)) }
-        XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["new", "a", "c", "b"])
+        XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["a", "c", "b", "new"])
     }
 
     func testCreationNormalizesExtremeRanksAndAFailedPreflightWritesNothing() throws {
@@ -203,7 +203,7 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), before)
         XCTAssertThrowsError(try store.write { try $0.move(.topic("a"), to: .after(.topic("missing"))) })
         XCTAssertEqual(try Data(contentsOf: file), before)
-        try store.write { try $0.create(record("new", order: nil)) }
+        try store.write { try $0.create(record("new", order: nil), insertPosition: .top) }
         XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["new", "a"])
         XCTAssertTrue(try records(store).allSatisfy { $0.order?.isFinite == true })
     }
@@ -217,7 +217,7 @@ final class TopicStoreTests: XCTestCase {
             return transaction.locks
         }
         XCTAssertEqual(left, [], "the Topic takes the place of the Lock, which ends")
-        XCTAssertEqual(try shown(store), ["other", "a", "new", "b"], "a Topic from no Lock goes first, as always")
+        XCTAssertEqual(try shown(store), ["a", "new", "b", "other"], "a Topic from no Lock uses the configured end")
     }
 
     func testALockGoesLastAndALockedSessionKeepsItsPlace() throws {
@@ -253,10 +253,10 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: paths.state.path).filter { $0.hasPrefix(".topics-") }, [])
     }
 
-    func testApplyingANewTopicPutsItFirst() throws {
+    func testApplyingANewTopicPutsItLast() throws {
         try seed(record("a", order: 0))
         try TopicStore(paths: paths).write { try $0.apply(TopicRecordChange(before: nil, after: record("new", order: nil))) }
-        XCTAssertEqual(TopicOrder.sorted(try records(TopicStore(paths: paths)).map(TopicListEntry.topic)).records.map(\.id), ["new", "a"])
+        XCTAssertEqual(TopicOrder.sorted(try records(TopicStore(paths: paths)).map(TopicListEntry.topic)).records.map(\.id), ["a", "new"])
     }
 
     private func shown(_ store: TopicStore) throws -> [String] { TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id) }
@@ -308,7 +308,7 @@ final class TopicStoreTests: XCTestCase {
         let plan = TopicPlan(title: "Planned", project: Project(path: "/work/app", name: "app"), records: try records(store),
                              sessionNames: [], id: "planned")
         try store.write { try $0.apply(TopicRecordChange(before: nil, after: plan.record)) }
-        XCTAssertEqual(try shown(store), ["p", "planned", "new", "a"])
+        XCTAssertEqual(try shown(store), ["p", "a", "new", "planned"])
     }
 
     func testAPinIsSavedAsPinnedAndSurvivesSettleAndReopen() throws {
@@ -334,7 +334,72 @@ final class TopicStoreTests: XCTestCase {
         let reopen = try TopicReopenPlan(topic: settled, records: try records(store), windows: [], projects: [],
                                          existingDirectories: []).edit
         try store.write { try $0.apply(TopicRecordChange(before: settled, after: XCTUnwrap(reopen.savedCompletionRecord))) }
-        XCTAssertEqual(try shown(store), ["t", "p", "a"], "Reopen brings the Topic back Pinned, first among the Pinned Topics")
+        XCTAssertEqual(try shown(store), ["p", "t", "a"], "Reopen brings the Topic back last among the Pinned Topics")
+    }
+
+    func testInsertionPlacesTopicsAroundLocksAndNormalizesBothExtremeEnds() throws {
+        for position in TopicInsertPosition.allCases {
+            let edge: Double = position == .top ? -.greatestFiniteMagnitude : .greatestFiniteMagnitude
+            var pinned = record("p", order: 0)
+            pinned.isPinned = true
+            var transaction = TopicTransaction(records: [pinned, record("a", order: edge)], zen: nil, topics: paths.topics)
+            transaction.locks = [SessionLock(sessionID: "$1", order: edge)]
+            let moved = try transaction.create(record("new", order: nil), insertPosition: position)
+            let shown = TopicOrder.sorted(transaction.records.map(TopicListEntry.topic) + transaction.locks.map(TopicListEntry.lock))
+            let expected: [TopicListID] = position == .top
+                ? [.topic("p"), .topic("new"), .lock(sessionID: "$1"), .topic("a")]
+                : [.topic("p"), .lock(sessionID: "$1"), .topic("a"), .topic("new")]
+            XCTAssertEqual(shown.map(\.id), expected)
+            XCTAssertTrue(shown.allSatisfy { $0.order?.isFinite == true })
+            XCTAssertEqual(moved, transaction.locks)
+        }
+    }
+
+    func testReopenAndStartFreshPlaceOnlySettledTopicsAtTheConfiguredEnd() throws {
+        for position in TopicInsertPosition.allCases {
+            for pinned in [false, true] {
+                for settled in [false, true] {
+                    for remembered in [false, true] {
+                        for choice: TopicReopening.Choice in [.reopen, .startFresh] {
+                            var first = record("first", order: 0), last = record("last", order: 2)
+                            first.isPinned = pinned
+                            last.isPinned = pinned
+                            var topic = record("returning", order: 1)
+                            topic.isPinned = pinned
+                            topic.settledAt = settled ? "2026-10-01T00:00:00Z" : nil
+                            if remembered { topic.homeProject = "/work/app" }
+                            let initial = [first, topic, last]
+                            let plan = try TopicReopenPlan(topic: topic, records: initial, windows: [], projects: [],
+                                                          existingDirectories: [], choice: choice).edit
+                            var transaction = TopicTransaction(records: initial, zen: nil, topics: paths.topics)
+                            if let saved = plan.savedCompletionRecord {
+                                try transaction.apply(TopicRecordChange(before: topic, after: saved), insertPosition: position)
+                            }
+                            let expected = !settled ? ["first", "returning", "last"]
+                                : position == .top ? ["returning", "first", "last"] : ["first", "last", "returning"]
+                            XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), expected)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testReopenUsesCurrentPinAndDoesNotMoveAnAlreadyReopenedTopicAgain() throws {
+        var settled = record("returning", order: 1)
+        settled.settledAt = "2026-10-01T00:00:00Z"
+        var reopened = settled
+        reopened.settledAt = nil
+        var current = settled
+        current.isPinned = true
+        var pinned = record("p", order: 0)
+        pinned.isPinned = true
+        var transaction = TopicTransaction(records: [pinned, current, record("a", order: 0)], zen: nil, topics: paths.topics)
+        let change = TopicRecordChange(before: settled, after: reopened)
+        try transaction.apply(change, insertPosition: .bottom)
+        XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
+        try transaction.apply(change, insertPosition: .top)
+        XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
     }
 
     func testAWriteThatChangesNothingWritesNoFile() throws {

@@ -10,18 +10,20 @@ public struct TopicService: Sendable {
     public let projects: [Project]
     /// `topics.session_order` in the Config, which places a new Session in a Topic the user ordered.
     public let sessionOrder: SessionOrder
+    public let insertPosition: TopicInsertPosition
     private let store: TopicStore
     private let editLockTimeout: TimeInterval
 
-    public init(paths: MuxifyPaths, server: TmuxServer = .local, projects: [Project] = [], sessionOrder: SessionOrder = .oldestFirst) {
-        self.init(paths: paths, server: server, projects: projects, sessionOrder: sessionOrder, editLockTimeout: 10)
+    public init(paths: MuxifyPaths, server: TmuxServer = .local, projects: [Project] = [], sessionOrder: SessionOrder = .oldestFirst, insertPosition: TopicInsertPosition = .bottom) {
+        self.init(paths: paths, server: server, projects: projects, sessionOrder: sessionOrder, insertPosition: insertPosition, editLockTimeout: 10)
     }
 
-    init(paths: MuxifyPaths, server: TmuxServer, projects: [Project], sessionOrder: SessionOrder = .oldestFirst, editLockTimeout: TimeInterval) {
+    init(paths: MuxifyPaths, server: TmuxServer, projects: [Project], sessionOrder: SessionOrder = .oldestFirst, insertPosition: TopicInsertPosition = .bottom, editLockTimeout: TimeInterval) {
         self.paths = paths
         self.server = server
         self.projects = projects
         self.sessionOrder = sessionOrder
+        self.insertPosition = insertPosition
         self.editLockTimeout = editLockTimeout
         store = TopicStore(paths: paths)
     }
@@ -117,7 +119,7 @@ public struct TopicService: Sendable {
             if let record = edit.record {
                 let locks = SessionLock.locks(in: snapshot.windows, records: records)
                 let moved = try store.write(locks: locks) { transaction -> [SessionLock] in
-                    try transaction.apply(TopicRecordChange(before: read, after: record), replacingLockOf: planned.replacedLockOf)
+                    try transaction.apply(TopicRecordChange(before: read, after: record), insertPosition: insertPosition, replacingLockOf: planned.replacedLockOf)
                 }
                 commands += moved.map { .tmux($0.setOption) }
                 phase = .recordSaved
@@ -128,7 +130,11 @@ public struct TopicService: Sendable {
             switch edit.completion {
             case .save(let record):
                 let before = edit.record ?? records.first { $0.id == record.id }
-                try store.write { try $0.apply(TopicRecordChange(before: before, after: record)) }
+                let locks = SessionLock.locks(in: server.snapshot().windows, records: try store.read().records)
+                let moved = try store.write(locks: locks) {
+                    try $0.apply(TopicRecordChange(before: before, after: record), insertPosition: insertPosition)
+                }
+                try executor.run(moved.map { .tmux($0.setOption) }, client: client)
             case .forget(let id):
                 try store.write { try $0.forget(id) }
             case nil: break
@@ -161,7 +167,7 @@ public struct TopicService: Sendable {
                 home = TopicLocation(of: pane.window, record: Self.record(of: pane.window, in: records), projects: projects).project
             } else {
                 let slug = TopicNaming.slug(title: title, project: nil, records: records, sessionNames: [])
-                let record = TopicRecord(newTopic: UUID().uuidString.lowercased(), title: title, slug: slug, records: records, now: Date())
+                let record = TopicRecord(newTopic: UUID().uuidString.lowercased(), title: title, slug: slug, now: Date())
                 return Planned(edit: TopicEdit(record: record, commands: [], selection: .emptyTopic(record.id)))
             }
             let plan = TopicPlan(title: title, project: home, records: records,

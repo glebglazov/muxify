@@ -203,10 +203,10 @@ public struct TopicTransaction {
 
     private var entries: [TopicListEntry] { records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) }
 
-    /// Adds a new Topic first among the Topics with its pin, or in the place of the Lock of `lockedSessionID`, which
+    /// Adds a new Topic at the chosen end of its part, or in the place of the Lock of `lockedSessionID`, which
     /// then ends. A file of that name that is not a valid record is not replaced.
     @discardableResult
-    public mutating func create(_ record: TopicRecord, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLock] {
+    public mutating func create(_ record: TopicRecord, insertPosition: TopicInsertPosition = .bottom, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLock] {
         _ = try TopicStore.encoded(record)
         guard !FileManager.default.fileExists(atPath: topics.appendingPathComponent(record.id + ".json").path) else {
             throw CocoaError(.fileWriteFileExists)
@@ -216,7 +216,7 @@ public struct TopicTransaction {
             placed.order = locks.remove(at: index).order
             return put([.topic(placed)])
         }
-        return put(TopicOrder.prepending(record, in: entries))
+        return put(TopicOrder.inserting(record, at: insertPosition, in: entries))
     }
 
     public mutating func update(_ id: String, _ mutate: (inout TopicRecord) throws -> Void) throws {
@@ -232,10 +232,10 @@ public struct TopicTransaction {
     /// the plan ran stays. When two writers change one key, the last write wins for that key. A Topic that is
     /// not on disk is created only when the plan read no previous record, as `create` does.
     @discardableResult
-    public mutating func apply(_ change: TopicRecordChange, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLock] {
+    public mutating func apply(_ change: TopicRecordChange, insertPosition: TopicInsertPosition = .bottom, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLock] {
         guard let current = records.first(where: { $0.id == change.after.id }) else {
             guard change.before == nil else { throw Failure.topicUnavailable(change.after.id) }
-            return try create(change.after, replacingLockOf: lockedSessionID)
+            return try create(change.after, insertPosition: insertPosition, replacingLockOf: lockedSessionID)
         }
         let before = try change.before.map(Self.fields) ?? [:]
         let after = try Self.fields(change.after)
@@ -245,6 +245,9 @@ public struct TopicTransaction {
         }
         let record = try JSONDecoder().decode(TopicRecord.self, from: JSONEncoder().encode(merged))
         _ = try TopicStore.encoded(record)
+        if current.settledAt != nil, record.settledAt == nil {
+            return put(TopicOrder.inserting(record, at: insertPosition, in: entries))
+        }
         return put([.topic(record)])
     }
 

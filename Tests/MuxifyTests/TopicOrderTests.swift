@@ -96,9 +96,10 @@ final class TopicOrderTests: XCTestCase {
         let moved = applying(try TopicOrder.moving(.topic("c"), to: .before(.topic("a")), in: original), to: original)
         let plan = TopicPlan(title: "New", project: Project(path: "/work/app", name: "app"),
                              records: moved.records, sessionNames: [], id: "new")
-        XCTAssertEqual(shown(moved + [.topic(plan.record)]), ["new", "c", "a", "b"])
+        let placed = applying(TopicOrder.inserting(plan.record, at: .top, in: moved), to: moved)
+        XCTAssertEqual(shown(placed), ["new", "c", "a", "b"])
         let extreme = [record("a", order: -.greatestFiniteMagnitude), record("b", order: .greatestFiniteMagnitude)].map(TopicListEntry.topic)
-        let inserted = applying(TopicOrder.prepending(record("new", order: nil), in: extreme), to: extreme)
+        let inserted = applying(TopicOrder.inserting(record("new", order: nil), at: .top, in: extreme), to: extreme)
         XCTAssertEqual(shown(inserted), ["new", "a", "b"])
         XCTAssertTrue(inserted.allSatisfy { $0.order?.isFinite == true })
         let bottom = applying(try TopicOrder.moving(.topic("a"), to: .after(.topic("b")), in: extreme), to: extreme)
@@ -116,7 +117,7 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(shown(locked), ["p", "a", "lock:$1", "b", "lock:$2"])
         let moved = applying(try TopicOrder.moving(.lock(sessionID: "$2"), to: .before(.topic("p")), in: locked), to: locked)
         XCTAssertEqual(shown(moved), ["p", "lock:$2", "a", "lock:$1", "b"], "a Lock is never Pinned, so it stays below the Pinned Topics")
-        let prepended = applying(TopicOrder.prepending(record("new", order: nil), in: moved), to: moved)
+        let prepended = applying(TopicOrder.inserting(record("new", order: nil), at: .top, in: moved), to: moved)
         XCTAssertEqual(shown(prepended), ["p", "new", "lock:$2", "a", "lock:$1", "b"], "a new Topic goes before the Locks too")
     }
 

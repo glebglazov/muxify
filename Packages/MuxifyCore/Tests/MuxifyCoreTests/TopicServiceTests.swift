@@ -266,10 +266,10 @@ final class TopicServiceTests: XCTestCase {
         _ = try change(service().handle(TopicRequest(.create(title: "Second", project: project.path))))
         let locked = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
         XCTAssertNil(locked.topicID)
-        XCTAssertEqual(try topicList(), ["Second", "First", "lock:notes"])
+        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"])
         _ = try change(service().handle(TopicRequest(.create(title: "Third", project: nil))))
         _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["Third", "Second", "First", "lock:notes"], "a Locked Session keeps its place")
+        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes", "Third"], "a Locked Session keeps its place")
 
         let inTopic = try failure(service().handle(TopicRequest(.lock, target: .sessionName("game/second"))))
         XCTAssertEqual(inTopic.kind, .sessionInTopic)
@@ -277,7 +277,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try failure(service().handle(TopicRequest(.lock, target: .sessionName("missing")))).kind, .sourceUnavailable)
 
         _ = try change(service().handle(TopicRequest(.unlock, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["Third", "Second", "First"])
+        XCTAssertEqual(try topicList(), ["First", "Second", "Third"])
         XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]), "")
     }
 
@@ -288,17 +288,34 @@ final class TopicServiceTests: XCTestCase {
         _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
         _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("chores"))))
         _ = try change(service().handle(TopicRequest(.create(title: "Second", project: nil))))
-        XCTAssertEqual(try topicList(), ["Second", "First", "lock:notes", "lock:chores"])
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "lock:chores", "Second"])
 
         let notes = try XCTUnwrap(SessionID(rawValue: server.snapshot().windows.first { $0.sessionName == "notes" }!.sessionID))
         let created = try change(service().handle(TopicRequest(.move(to: .newTopic(title: "Notes work")), target: .session(notes))))
         XCTAssertTrue(created.created)
-        XCTAssertEqual(try topicList(), ["Second", "First", "Notes work", "lock:chores"], "the new Topic takes the Lock's place")
+        XCTAssertEqual(try topicList(), ["First", "Notes work", "lock:chores", "Second"], "the new Topic takes the Lock's place")
 
         let chores = try XCTUnwrap(SessionID(rawValue: server.snapshot().windows.first { $0.sessionName == "chores" }!.sessionID))
         _ = try change(service().handle(TopicRequest(.move(to: .topic(.named("Second"))), target: .session(chores))))
-        XCTAssertEqual(try topicList(), ["Second", "First", "Notes work"], "the Topic that the Session moves to keeps its place")
+        XCTAssertEqual(try topicList(), ["First", "Notes work", "Second"], "the Topic that the Session moves to keeps its place")
         XCTAssertTrue(server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
+    }
+
+    func testTopInsertionAndReturningTopicsUseTheConfiguredEndAmongLocks() throws {
+        let top = TopicService(paths: paths, server: server, projects: [project], insertPosition: .top)
+        _ = try change(top.handle(TopicRequest(.create(title: "First", project: nil))))
+        let returning = try XCTUnwrap(change(top.handle(TopicRequest(.create(title: "Returning", project: nil)))).topicID)
+        XCTAssertEqual(try topicList(), ["Returning", "First"])
+        try server.run(["new-session", "-d", "-s", "notes", "-c", project.path])
+        try server.run(["set-option", "-t", "notes", SessionLock.option, String(Double.greatestFiniteMagnitude)])
+        try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
+        _ = try change(service().handle(TopicRequest(.reopen, target: .topic(.id(returning)))))
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "Returning"])
+        let lockOrder = try XCTUnwrap(Double(server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]).trimmingCharacters(in: .whitespacesAndNewlines)))
+        XCTAssertLessThan(lockOrder, Double.greatestFiniteMagnitude, "Reopen must save normalized Lock ranks to tmux")
+        try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
+        _ = try change(top.handle(TopicRequest(.startFresh, target: .topic(.id(returning)))))
+        XCTAssertEqual(try topicList(), ["Returning", "First", "lock:notes"])
     }
 
     func testAFailureSaysHowFarTheRequestGot() throws {

@@ -226,7 +226,7 @@ extension TopicInvocation {
         } else {
             let config = try await ConfigProjects.load(paths.configFile)
             let projects = config.projects
-            let service = TopicService(paths: paths, server: .local, projects: projects, sessionOrder: config.topics.sessionOrder)
+            let service = TopicService(paths: paths, server: .local, projects: projects, sessionOrder: config.topics.sessionOrder, insertPosition: config.topics.insertPosition)
             // No client: no terminal switches to the result, because a command changes what the user sees only
             // when they ask for it.
             response = service.handle(TopicRequest(try request(projects: projects, service: service), target: target,

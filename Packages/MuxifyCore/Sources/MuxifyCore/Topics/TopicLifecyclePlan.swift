@@ -244,7 +244,6 @@ struct TopicReopenPlan {
         let reopening = try TopicReopening(topic: topic, records: records, windows: windows, projects: projects,
                                            existingDirectories: existingDirectories, choice: choice)
         guard let slug = reopening.slug, let home = reopening.sessions.first else {
-            // Nothing to create. A Settled Topic goes back to the top of its part of the Topics list; an open one stays where it is.
             var reopened: TopicRecord?
             if topic.settledAt != nil {
                 var record = topic
@@ -252,7 +251,6 @@ struct TopicReopenPlan {
                                                excludingTopicID: topic.id)
                 record.settledAt = nil
                 record.snoozedUntil = nil
-                record.order = TopicOrder.firstOrder(in: TopicListEntry.all(records: records, windows: windows), pinned: topic.isPinned)
                 reopened = record
             }
             edit = TopicEdit(record: nil, commands: [], selection: .emptyTopic(topic.id), completion: reopened.map(TopicEdit.Completion.save))
@@ -284,7 +282,6 @@ struct TopicReopenPlan {
         var reopened = topic
         reopened.slug = slug
         reopened.settledAt = nil
-        reopened.order = TopicOrder.firstOrder(in: TopicListEntry.all(records: records, windows: windows), pinned: topic.isPinned)
         edit = TopicEdit(record: topic, commands: commands, selection: .sessionName(home.name), completion: .save(reopened))
     }
 }

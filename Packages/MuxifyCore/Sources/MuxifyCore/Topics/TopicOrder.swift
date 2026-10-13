@@ -111,6 +111,10 @@ extension Array where Element == TopicListEntry {
     }
 }
 
+public enum TopicInsertPosition: String, CaseIterable, Sendable {
+    case top, bottom
+}
+
 public enum TopicPlacement: Equatable, Sendable {
     case before(TopicListID)
     case after(TopicListID)
@@ -180,17 +184,14 @@ public enum TopicOrder {
         return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != pinned && $0.id != source.id })
     }
 
-    /// The order that puts an entry first among the entries with its pin.
-    public static func firstOrder(in entries: [TopicListEntry], pinned: Bool) -> Double? {
-        rank(between: nil, and: sorted(entries).first { $0.isPinned == pinned }.map(rank))
-    }
-
-    /// Puts a new Topic first among the entries with its pin.
-    public static func prepending(_ record: TopicRecord, in entries: [TopicListEntry]) -> [TopicListEntry] {
-        let original = sorted(entries)
+    /// Places a new or returning Topic at the chosen end of the entries with its pin.
+    public static func inserting(_ record: TopicRecord, at position: TopicInsertPosition, in entries: [TopicListEntry]) -> [TopicListEntry] {
+        let original = sorted(entries).filter { $0.id != .topic(record.id) }
         let source = TopicListEntry.topic(record)
-        let zone = [source] + original.filter { $0.isPinned == record.isPinned }
-        return placing(source, at: 0, in: zone, others: original.filter { $0.isPinned != record.isPinned })
+        var zone = original.filter { $0.isPinned == record.isPinned }
+        let index = position == .top ? 0 : zone.count
+        zone.insert(source, at: index)
+        return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != record.isPinned })
     }
 
     /// Locks the Session last among the entries that are not Pinned.

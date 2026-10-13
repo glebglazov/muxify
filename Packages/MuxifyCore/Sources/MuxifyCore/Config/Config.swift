@@ -59,6 +59,7 @@ public struct Config: Equatable {
         public var snoozePresets = SnoozePreset.defaults
         public var titleCommandFallbacks: [String] = []
         public var sessionOrder = SessionOrder.oldestFirst
+        public var insertPosition = TopicInsertPosition.bottom
     }
 
     public struct Notifications: Equatable {
@@ -303,6 +304,9 @@ public struct Config: Equatable {
         #   # oldest_first or newest_first. Once you move a Session, the Topic
         #   # keeps your order, and a new Session goes to this order's end.
         #   session_order: oldest_first
+        #   # New and returning Settled Topics go at the bottom or top of their
+        #   # part of the list. Dormant Topics keep their place.
+        #   insert_position: bottom
         #
         # keybindings:
         #   # An action maps to one trigger or a list of them, spelled as in
@@ -542,6 +546,12 @@ private struct ConfigReader {
             switch name {
             case "snooze_presets": readSnoozePresets(value)
             case "title_command_fallbacks": readTitleCommands(value)
+            case "insert_position":
+                guard value.tag == Tag(.str), let position = value.string.flatMap(TopicInsertPosition.init(rawValue:)) else {
+                    problem(at: value, "topics.insert_position: expected bottom or top")
+                    continue
+                }
+                config.topics.insertPosition = position
             case "session_order":
                 guard value.tag == Tag(.str), let order = value.string.flatMap(SessionOrder.init(rawValue:)) else {
                     problem(at: value, "topics.session_order: expected oldest_first or newest_first")

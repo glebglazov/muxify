@@ -59,7 +59,7 @@ final class NewTopicTests: XCTestCase {
         XCTAssertEqual(plan.sessionName, "game/fix-links")
         XCTAssertEqual(plan.record.title, "Fix links")
         XCTAssertEqual(plan.record.homeProject, "/work/game")
-        XCTAssertEqual(plan.record.order, -5)
+        XCTAssertNil(plan.record.order)
         XCTAssertEqual(plan.record.createdAt, "1970-01-01T00:00:00Z")
         XCTAssertEqual(plan.record.sessions, [.object(["project_path": .string("/work/game")])])
         XCTAssertEqual(plan.commands, [
@@ -89,12 +89,12 @@ final class NewTopicTests: XCTestCase {
         var previous = TopicRecord(id: "previous", slug: "fix-links")
         previous.order = 2
         let slug = TopicNaming.slug(title: "Fix links", project: nil, records: [previous], sessionNames: [])
-        let topic = TopicRecord(newTopic: "new", title: "Fix links", slug: slug, records: [previous], now: Date(timeIntervalSince1970: 0))
+        let topic = TopicRecord(newTopic: "new", title: "Fix links", slug: slug, now: Date(timeIntervalSince1970: 0))
         XCTAssertEqual(topic.slug, "fix-links-2", "an open Topic already uses the slug")
         XCTAssertEqual(topic.title, "Fix links")
         XCTAssertNil(topic.homeProject)
         XCTAssertEqual(topic.sessions, [])
-        XCTAssertEqual(topic.order, 1)
+        XCTAssertNil(topic.order)
         XCTAssertEqual(topic.createdAt, "1970-01-01T00:00:00Z")
 
         let added = try TopicProjectPlan(topic: topic, project: project, workingCopy: .homeProject, windows: [], projects: [project]).edit
@@ -110,7 +110,7 @@ final class NewTopicTests: XCTestCase {
     func testAnEmptyTopicTheUserLooksAtIsTheActiveTopicUntilItHasAWindow() {
         var config = Config()
         config.projects = [project]
-        let topic = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", records: [], now: Date())
+        let topic = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", now: Date())
         func window(topic: String?) -> TmuxWindow {
             TmuxWindow(id: "@1", sessionID: "$1", sessionName: "game", index: 0, name: "shell", paneTitle: "", path: "/work/game",
                        command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
@@ -141,7 +141,7 @@ final class NewTopicTests: XCTestCase {
     }
 
     func testReopeningATopicWithNoSessionShowsItAndOnlyASettledOneMoves() throws {
-        let open = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", records: [], now: Date())
+        let open = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", now: Date())
         let shown = try TopicReopenPlan(topic: open, records: [open], windows: [], projects: [project], existingDirectories: []).edit
         XCTAssertEqual(shown.commands, [])
         XCTAssertEqual(shown.selection, .emptyTopic("empty"))
@@ -159,7 +159,7 @@ final class NewTopicTests: XCTestCase {
             return XCTFail("Reopen must save the Topic")
         }
         XCTAssertNil(record.settledAt)
-        XCTAssertEqual(record.order, -1)
+        XCTAssertNil(record.order)
     }
 
     func testTopicsUseConfiguredProjectLabel() {

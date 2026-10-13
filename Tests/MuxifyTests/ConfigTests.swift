@@ -919,6 +919,17 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testTopicInsertPosition() throws {
+        XCTAssertEqual(try load("").topics.insertPosition, .bottom)
+        XCTAssertEqual(try load("topics:\n  insert_position: top").topics.insertPosition, .top)
+        XCTAssertEqual(try load("topics:\n  insert_position: bottom").topics.insertPosition, .bottom)
+        for value in ["middle", "true", "1", "[]"] {
+            let bad = try load("topics:\n  insert_position: " + value)
+            XCTAssertEqual(bad.topics.insertPosition, .bottom)
+            XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.insert_position: expected bottom or top")])
+        }
+    }
+
     func testTopicSessionOrderTakesOldestOrNewestFirstAndReportsAnythingElse() throws {
         XCTAssertEqual(try load("").topics.sessionOrder, .oldestFirst)
         XCTAssertEqual(try load("topics:\n  session_order: newest_first").topics.sessionOrder, .newestFirst)
