@@ -22,6 +22,7 @@ public enum ConfigAction: String, KeybindAction {
     case snoozeTopic = "snooze_topic"
     case toggleZen = "toggle_zen"
     case settleTopic = "settle_topic"
+    case toggleLock = "toggle_lock"
     case toggleSidebar = "toggle_sidebar"
     case toggleTerminal = "toggle_terminal"
     case toggleBrowser = "toggle_browser"
@@ -68,6 +69,7 @@ public enum ConfigAction: String, KeybindAction {
         .moveSession: ["cmd+shift+m"],
         .addProjectToTopic: ["cmd+shift+a"],
         .settleTopic: [],
+        .toggleLock: [],
         .snoozeTopic: ["alt+cmd+s"],
         .toggleZen: ["shift+alt+cmd+s"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
@@ -141,6 +143,9 @@ public enum PaletteAction: String, KeybindAction {
     case newWindow = "new_window"
     case revealFolder = "reveal_folder"
     case killWindow = "kill_window"
+    case killSession = "kill_session"
+    case lockSession = "lock_session"
+    case unlockSession = "unlock_session"
     case choosePane = "choose_pane"
     case chooseWindow = "choose_window"
     case chooseSession = "choose_session"
@@ -173,6 +178,9 @@ public enum PaletteAction: String, KeybindAction {
         .newWindow: [],
         .revealFolder: [],
         .killWindow: [],
+        .killSession: [],
+        .lockSession: [],
+        .unlockSession: [],
         .choosePane: ["alt+1"],
         .chooseWindow: ["alt+2"],
         .chooseSession: ["alt+3"],

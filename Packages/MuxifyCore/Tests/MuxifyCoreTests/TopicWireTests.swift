@@ -39,6 +39,13 @@ final class TopicWireTests: XCTestCase {
         XCTAssertNil(old.expectedSessionIDs)
     }
 
+    func testLockRequestsNameTheirSessionByName() throws {
+        try assertRoundTrip(TopicRequest(.lock, target: .sessionName("notes")),
+                            #"{"command":{"lock":{}},"target":{"session_name":"notes"},"version":1}"#)
+        try assertRoundTrip(TopicRequest(.unlock, target: .session(SessionID(rawValue: "$3")!)),
+                            #"{"command":{"unlock":{}},"target":{"session":"$3"},"version":1}"#)
+    }
+
     func testRequests() throws {
         let pane = PaneID(rawValue: "%12")!
         try assertRoundTrip(TopicRequest(.forget(choices: [], worktrees: ["/trees/fix"]), target: .topic(.id("fix"))),

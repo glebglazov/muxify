@@ -184,13 +184,13 @@ final class TopicStoreTests: XCTestCase {
                 record.unknownFields["external"] = .bool(true)
             }
         }
-        try store.write { try $0.move("c", to: .before("b")) }
+        try store.write { try $0.move(.topic("c"), to: .before(.topic("b"))) }
         let moved = try records(TopicStore(paths: paths))
-        XCTAssertEqual(TopicOrder.sorted(moved).map(\.id), ["a", "c", "b"])
+        XCTAssertEqual(TopicOrder.sorted(moved.map(TopicListEntry.topic)).records.map(\.id), ["a", "c", "b"])
         XCTAssertEqual(moved.first { $0.id == "b" }?.snoozedUntil, "never")
         XCTAssertEqual(moved.first { $0.id == "b" }?.unknownFields["external"], .bool(true))
         try store.write { try $0.create(record("new", order: nil)) }
-        XCTAssertEqual(TopicOrder.sorted(try records(store)).map(\.id), ["new", "a", "c", "b"])
+        XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["new", "a", "c", "b"])
     }
 
     func testCreationNormalizesExtremeRanksAndAFailedPreflightWritesNothing() throws {
@@ -201,11 +201,33 @@ final class TopicStoreTests: XCTestCase {
         let before = try Data(contentsOf: file)
         XCTAssertThrowsError(try store.write { try $0.create(record("../invalid", order: nil)) })
         XCTAssertEqual(try Data(contentsOf: file), before)
-        XCTAssertThrowsError(try store.write { try $0.move("a", to: .after("missing")) })
+        XCTAssertThrowsError(try store.write { try $0.move(.topic("a"), to: .after(.topic("missing"))) })
         XCTAssertEqual(try Data(contentsOf: file), before)
         try store.write { try $0.create(record("new", order: nil)) }
-        XCTAssertEqual(TopicOrder.sorted(try records(store)).map(\.id), ["new", "a"])
+        XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["new", "a"])
         XCTAssertTrue(try records(store).allSatisfy { $0.order?.isFinite == true })
+    }
+
+    func testANewTopicFromALockedSessionTakesTheLocksPlace() throws {
+        let store = TopicStore(paths: paths)
+        try seed(record("a", order: 0), record("b", order: 1))
+        let left = try store.write(locks: [SessionLock(sessionID: "$4", order: 0.5)]) { transaction -> [SessionLock] in
+            try transaction.create(record("new", order: nil), replacingLockOf: "$4")
+            try transaction.create(record("other", order: nil), replacingLockOf: "$9")
+            return transaction.locks
+        }
+        XCTAssertEqual(left, [], "the Topic takes the place of the Lock, which ends")
+        XCTAssertEqual(try shown(store), ["other", "a", "new", "b"], "a Topic from no Lock goes first, as always")
+    }
+
+    func testALockGoesLastAndALockedSessionKeepsItsPlace() throws {
+        let store = TopicStore(paths: paths)
+        try seed(record("a", order: 0), record("b", order: 1))
+        let locks = [SessionLock(sessionID: "$1", order: 0.5)]
+        let added = try store.write(locks: locks) { transaction -> [SessionLock] in
+            transaction.lock("$2") + transaction.lock("$1")
+        }
+        XCTAssertEqual(added, [SessionLock(sessionID: "$2", order: 2)])
     }
 
     func testCreationDoesNotReplaceAnUnreadableTopicFile() throws {
@@ -225,19 +247,19 @@ final class TopicStoreTests: XCTestCase {
             if writes.next() == 2 { throw CocoaError(.fileWriteUnknown) }
             try data.write(to: url, options: .atomic)
         }
-        XCTAssertThrowsError(try failing.write { try $0.move("c", to: .before("b")) })
+        XCTAssertThrowsError(try failing.write { try $0.move(.topic("c"), to: .before(.topic("b"))) })
         XCTAssertEqual(writes.count, 2)
-        XCTAssertEqual(TopicOrder.sorted(try records(failing)).map(\.id), ["a", "b", "c"])
+        XCTAssertEqual(TopicOrder.sorted(try records(failing).map(TopicListEntry.topic)).records.map(\.id), ["a", "b", "c"])
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: paths.state.path).filter { $0.hasPrefix(".topics-") }, [])
     }
 
     func testApplyingANewTopicPutsItFirst() throws {
         try seed(record("a", order: 0))
         try TopicStore(paths: paths).write { try $0.apply(TopicRecordChange(before: nil, after: record("new", order: nil))) }
-        XCTAssertEqual(TopicOrder.sorted(try records(TopicStore(paths: paths))).map(\.id), ["new", "a"])
+        XCTAssertEqual(TopicOrder.sorted(try records(TopicStore(paths: paths)).map(TopicListEntry.topic)).records.map(\.id), ["new", "a"])
     }
 
-    private func shown(_ store: TopicStore) throws -> [String] { TopicOrder.sorted(try records(store)).map(\.id) }
+    private func shown(_ store: TopicStore) throws -> [String] { TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id) }
 
     func testPinPutsATopicLastAmongPinnedTopicsAndUnpinFirstAmongTheOthers() throws {
         let store = TopicStore(paths: paths)
@@ -268,11 +290,11 @@ final class TopicStoreTests: XCTestCase {
         first.isPinned = true
         second.isPinned = true
         try seed(first, second, record("a", order: 0), record("b", order: 1), record("c", order: 2))
-        try store.write { try $0.move("b", to: .before("p1")) }
+        try store.write { try $0.move(.topic("b"), to: .before(.topic("p1"))) }
         XCTAssertEqual(try shown(store), ["p1", "p2", "b", "a", "c"], "an anchor among the Pinned Topics puts the Topic first among the others")
-        try store.write { try $0.move("p1", to: .after("c")) }
+        try store.write { try $0.move(.topic("p1"), to: .after(.topic("c"))) }
         XCTAssertEqual(try shown(store), ["p2", "p1", "b", "a", "c"], "an anchor below the Pinned Topics puts the Topic last among them")
-        try store.write { try $0.move("a", to: .after("p1")) }
+        try store.write { try $0.move(.topic("a"), to: .after(.topic("p1"))) }
         XCTAssertEqual(try shown(store), ["p2", "p1", "a", "b", "c"])
         XCTAssertEqual(try records(store).filter(\.isPinned).map(\.id).sorted(), ["p1", "p2"], "a move never pins or unpins")
     }

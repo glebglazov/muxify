@@ -48,8 +48,8 @@ final class TopicWatcher {
 
     /// Writes through the store and reads the result at once, so the Sidebar does not wait for the timer.
     @discardableResult
-    func write<T>(_ body: (inout TopicTransaction) throws -> T) throws -> T {
+    func write<T>(locks: [SessionLock] = [], _ body: (inout TopicTransaction) throws -> T) throws -> T {
         defer { reload() }
-        return try store.write(body)
+        return try store.write(locks: locks, body)
     }
 }

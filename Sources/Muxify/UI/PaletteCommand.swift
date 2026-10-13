@@ -10,6 +10,8 @@ enum PaletteCommand: String, CaseIterable {
     case addProject = "Add a Project"
     case snoozeTopic = "Snooze Topic"
     case settleTopic = "Settle Topic"
+    case lockSession = "Lock Session"
+    case unlockSession = "Unlock Session"
     case zen = "Zen"
     case endZen = "End Zen"
     case maximize = "Maximize"
@@ -53,6 +55,7 @@ enum PaletteCommand: String, CaseIterable {
         case .snoozeTopic: .snoozeTopic
         case .settleTopic: .settleTopic
         case .zen, .endZen: .toggleZen
+        case .lockSession, .unlockSession: .toggleLock
         case .newAppWindow: .newAppWindow
         case .maximize, .restore: .toggleMaximize
         case .maximizeTerminal: .toggleMaximizeTerminal
@@ -88,7 +91,10 @@ extension CommandPalette {
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
             case .addProject, .snoozeTopic, .settleTopic: return canChangeTopics && hasOpenTopic
-            case .zen: return canChangeTopics && hasOpenTopic && store.topicWatcher.zen == nil
+            case .lockSession, .unlockSession:
+                guard canChangeTopics, let id = store.selectedWindow?.sessionID, let locked = store.lockState(ofSession: id) else { return false }
+                return locked == (command == .unlockSession)
+            case .zen: return canChangeTopics && hasOpenTopic && store.topicWatcher.zen == nil && store.topics.mode == .topics
             case .endZen: return !store.isRemote && !store.changingTopic && store.topicWatcher.zen != nil
             case .installExtensions: return !store.isRemote
             case .closeTab, .nextTab, .previousTab: return store.currentBrowser?.activeTab != nil
@@ -152,6 +158,7 @@ extension CommandPalette {
         case .settleTopic: store.presentSettleTopic(keepingHistory: true)
         case .zen: store.toggleZenOfActiveTopic(keepingHistory: true)
         case .endZen: store.endZen()
+        case .lockSession, .unlockSession: store.toggleLockOfCurrentSession()
         case .newAppWindow: store.onNewAppWindow?()
         case .newWindow: store.newWindow()
         case .newSession: store.newSession()

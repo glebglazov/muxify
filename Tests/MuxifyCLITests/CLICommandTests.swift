@@ -252,6 +252,29 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
+    func testSessionLockTakesTheNamedSessionOrTheCallersSession() throws {
+        let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let outside = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: inside, home: "/home/me")
+        let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
+        XCTAssertEqual(try CLICommand(arguments: ["session", "lock"], environment: inside),
+                       .sessionLock(SessionInvocation(locked: true, target: nil, caller: caller, output: .text, paths: paths)))
+        XCTAssertEqual(try CLICommand(arguments: ["session", "unlock", "--session", "my notes", "--json"], environment: outside),
+                       .sessionLock(SessionInvocation(locked: false, target: .sessionName("my notes"), caller: nil, output: .json, paths: paths)))
+        XCTAssertEqual(try CLICommand(arguments: ["session", "lock", "--help"], environment: [:]), .help)
+        let errors: [([String], [String: String], String)] = [
+            (["session", "lock", "notes"], inside, CLICommand.usage),
+            (["session", "lock", "--session"], inside, CLICommand.usage),
+            (["session", "lock"], outside, "not inside tmux; name the Session with --session <name>"),
+        ]
+        for (arguments, environment, message) in errors {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: environment), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+                XCTAssertEqual(error.localizedDescription, message, "\(arguments)")
+            }
+        }
+    }
+
     func testAgentListTakesTheFiltersAndJson() throws {
         let environment = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: environment, home: "/home/me")

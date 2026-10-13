@@ -11,10 +11,22 @@ final class TopicOrderTests: XCTestCase {
         return record
     }
 
-    private func applying(_ edits: [TopicRecord], to records: [TopicRecord]) -> [TopicRecord] {
-        records.map { record in edits.first { $0.id == record.id } ?? record }
-            + edits.filter { edit in !records.contains { $0.id == edit.id } }
+    private func applying(_ edits: [TopicListEntry], to entries: [TopicListEntry]) -> [TopicListEntry] {
+        entries.map { entry in edits.first { $0.id == entry.id } ?? entry }
+            + edits.filter { edit in !entries.contains { $0.id == edit.id } }
     }
+
+    /// Each entry's Topic id, or `lock:` and its Session ID.
+    private func ids(_ entries: [TopicListEntry]) -> [String] {
+        entries.map {
+            switch $0.id {
+            case .topic(let id): return id
+            case .lock(let sessionID): return "lock:" + sessionID
+            }
+        }
+    }
+
+    private func shown(_ entries: [TopicListEntry]) -> [String] { ids(TopicOrder.sorted(entries)) }
 
     func testDropPlacementFollowsTheHalfOfTheCardUnderTheDrag() {
         let frames = ["a": CGRect(x: 0, y: 0, width: 200, height: 40),
@@ -30,68 +42,90 @@ final class TopicOrderTests: XCTestCase {
     }
 
     func testMovesUseOnlyTheMovedRankWhenThereIsAFiniteGap() throws {
-        let records = [record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3)]
+        let entries = [record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3)].map(TopicListEntry.topic)
         let cases: [(String, TopicPlacement, [String])] = [
-            ("a", .after("d"), ["b", "c", "d", "a"]),
-            ("d", .before("a"), ["d", "a", "b", "c"]),
-            ("d", .after("b"), ["a", "b", "d", "c"]),
-            ("a", .before("c"), ["b", "a", "c", "d"]),
+            ("a", .after(.topic("d")), ["b", "c", "d", "a"]),
+            ("d", .before(.topic("a")), ["d", "a", "b", "c"]),
+            ("d", .after(.topic("b")), ["a", "b", "d", "c"]),
+            ("a", .before(.topic("c")), ["b", "a", "c", "d"]),
         ]
-        for (source, placement, ids) in cases {
-            let edits = try TopicOrder.moving(source, to: placement, in: records)
-            XCTAssertEqual(edits.map(\.id), [source])
-            XCTAssertEqual(TopicOrder.sorted(applying(edits, to: records)).map(\.id), ids)
-            var original = records.first { $0.id == source }!
+        for (source, placement, expected) in cases {
+            let edits = try TopicOrder.moving(.topic(source), to: placement, in: entries)
+            XCTAssertEqual(ids(edits), [source])
+            XCTAssertEqual(shown(applying(edits, to: entries)), expected)
+            var original = entries.records.first { $0.id == source }!
             original.order = edits[0].order
-            XCTAssertEqual(edits[0], original)
+            XCTAssertEqual(edits.records[0], original)
             XCTAssertTrue(edits[0].order!.isFinite)
         }
-        XCTAssertTrue(try TopicOrder.moving("a", to: .before("a"), in: records).isEmpty)
-        XCTAssertTrue(try TopicOrder.moving("a", to: .before("b"), in: records).isEmpty)
-        XCTAssertTrue(try TopicOrder.moving("d", to: .after("c"), in: records).isEmpty)
+        XCTAssertTrue(try TopicOrder.moving(.topic("a"), to: .before(.topic("a")), in: entries).isEmpty)
+        XCTAssertTrue(try TopicOrder.moving(.topic("a"), to: .before(.topic("b")), in: entries).isEmpty)
+        XCTAssertTrue(try TopicOrder.moving(.topic("d"), to: .after(.topic("c")), in: entries).isEmpty)
     }
 
     func testEqualAbsentAndExhaustedRanksNormalizeOnlyOpenRecords() throws {
         let cases: [[Double?]] = [[0, 0, 0, 0], [nil, nil, nil, nil], [0, 1, Double(1).nextUp, 2]]
         for ranks in cases {
-            let records = zip(["a", "b", "c", "d"], ranks).map { record($0, order: $1) }
-            let edits = try TopicOrder.moving("d", to: .before("c"), in: records)
-            let reordered = applying(edits, to: records)
-            XCTAssertEqual(TopicOrder.sorted(reordered).map(\.id), ["a", "b", "d", "c"])
+            let entries = zip(["a", "b", "c", "d"], ranks).map { TopicListEntry.topic(record($0, order: $1)) }
+            let reordered = applying(try TopicOrder.moving(.topic("d"), to: .before(.topic("c")), in: entries), to: entries)
+            XCTAssertEqual(shown(reordered), ["a", "b", "d", "c"])
             XCTAssertTrue(reordered.allSatisfy { $0.order?.isFinite == true })
-            for old in records {
+            for old in entries.records {
                 var expected = old
-                expected.order = reordered.first { $0.id == old.id }!.order
-                XCTAssertEqual(reordered.first { $0.id == old.id }, expected)
+                expected.order = reordered.records.first { $0.id == old.id }!.order
+                XCTAssertEqual(reordered.records.first { $0.id == old.id }, expected)
             }
         }
         var settled = record("settled", order: -100)
         settled.settledAt = "1970-01-01T00:00:00Z"
         var snoozed = record("b", order: 0)
         snoozed.snoozedUntil = "never"
-        let records = [record("a", order: 0), snoozed, record("c", order: 0), settled]
-        let edits = try TopicOrder.moving("c", to: .before("b"), in: records)
-        XCTAssertEqual(TopicOrder.sorted(applying(edits, to: records)).map(\.id), ["a", "c", "b"])
-        XCTAssertFalse(edits.contains { $0.id == "settled" })
-        XCTAssertEqual(applying(edits, to: records).first { $0.id == "settled" }, settled)
-        XCTAssertThrowsError(try TopicOrder.moving("settled", to: .before("a"), in: records))
-        XCTAssertThrowsError(try TopicOrder.moving("a", to: .before("settled"), in: records))
-        XCTAssertThrowsError(try TopicOrder.moving("missing", to: .before("a"), in: records))
-        XCTAssertThrowsError(try TopicOrder.moving("a", to: .after("missing"), in: records))
+        let entries = [record("a", order: 0), snoozed, record("c", order: 0), settled].map(TopicListEntry.topic)
+        let edits = try TopicOrder.moving(.topic("c"), to: .before(.topic("b")), in: entries)
+        XCTAssertEqual(shown(applying(edits, to: entries)), ["a", "c", "b"])
+        XCTAssertFalse(ids(edits).contains("settled"))
+        XCTAssertEqual(applying(edits, to: entries).records.first { $0.id == "settled" }, settled)
+        XCTAssertThrowsError(try TopicOrder.moving(.topic("settled"), to: .before(.topic("a")), in: entries))
+        XCTAssertThrowsError(try TopicOrder.moving(.topic("a"), to: .before(.topic("settled")), in: entries))
+        XCTAssertThrowsError(try TopicOrder.moving(.topic("missing"), to: .before(.topic("a")), in: entries))
+        XCTAssertThrowsError(try TopicOrder.moving(.topic("a"), to: .after(.topic("missing")), in: entries))
     }
 
     func testNewTopicIsFirstAfterMovesAndAtFiniteLimits() throws {
-        let original = [record("a", order: 0), record("b", order: 1), record("c", order: 2)]
-        let moved = applying(try TopicOrder.moving("c", to: .before("a"), in: original), to: original)
+        let original = [record("a", order: 0), record("b", order: 1), record("c", order: 2)].map(TopicListEntry.topic)
+        let moved = applying(try TopicOrder.moving(.topic("c"), to: .before(.topic("a")), in: original), to: original)
         let plan = TopicPlan(title: "New", project: Project(path: "/work/app", name: "app"),
-                             records: moved, sessionNames: [], id: "new")
-        XCTAssertEqual(TopicOrder.sorted(moved + [plan.record]).map(\.id), ["new", "c", "a", "b"])
-        let extreme = [record("a", order: -.greatestFiniteMagnitude), record("b", order: .greatestFiniteMagnitude)]
+                             records: moved.records, sessionNames: [], id: "new")
+        XCTAssertEqual(shown(moved + [.topic(plan.record)]), ["new", "c", "a", "b"])
+        let extreme = [record("a", order: -.greatestFiniteMagnitude), record("b", order: .greatestFiniteMagnitude)].map(TopicListEntry.topic)
         let inserted = applying(TopicOrder.prepending(record("new", order: nil), in: extreme), to: extreme)
-        XCTAssertEqual(TopicOrder.sorted(inserted).map(\.id), ["new", "a", "b"])
+        XCTAssertEqual(shown(inserted), ["new", "a", "b"])
         XCTAssertTrue(inserted.allSatisfy { $0.order?.isFinite == true })
-        let bottom = applying(try TopicOrder.moving("a", to: .after("b"), in: extreme), to: extreme)
-        XCTAssertEqual(TopicOrder.sorted(bottom).map(\.id), ["b", "a"])
+        let bottom = applying(try TopicOrder.moving(.topic("a"), to: .after(.topic("b")), in: extreme), to: extreme)
+        XCTAssertEqual(shown(bottom), ["b", "a"])
         XCTAssertTrue(bottom.allSatisfy { $0.order?.isFinite == true })
+    }
+
+    func testALockGoesLastAmongTheUnpinnedEntriesAndMovesAsAnUnpinnedTopic() throws {
+        var pinned = record("p", order: 9)
+        pinned.isPinned = true
+        let entries = [pinned, record("a", order: 0), record("b", order: 1)].map(TopicListEntry.topic)
+            + [.lock(SessionLock(sessionID: "$1", order: 0.5))]
+        XCTAssertEqual(shown(entries), ["p", "a", "lock:$1", "b"])
+        let locked = applying(TopicOrder.appendingLock(of: "$2", in: entries), to: entries)
+        XCTAssertEqual(shown(locked), ["p", "a", "lock:$1", "b", "lock:$2"])
+        let moved = applying(try TopicOrder.moving(.lock(sessionID: "$2"), to: .before(.topic("p")), in: locked), to: locked)
+        XCTAssertEqual(shown(moved), ["p", "lock:$2", "a", "lock:$1", "b"], "a Lock is never Pinned, so it stays below the Pinned Topics")
+        let prepended = applying(TopicOrder.prepending(record("new", order: nil), in: moved), to: moved)
+        XCTAssertEqual(shown(prepended), ["p", "new", "lock:$2", "a", "lock:$1", "b"], "a new Topic goes before the Locks too")
+    }
+
+    func testARenumberGivesTheLocksTheirNewOrderToo() throws {
+        let entries = [record("a", order: 0), record("b", order: Double(0).nextUp)].map(TopicListEntry.topic)
+            + [.lock(SessionLock(sessionID: "$1", order: 2))]
+        let edits = try TopicOrder.moving(.lock(sessionID: "$1"), to: .before(.topic("b")), in: entries)
+        XCTAssertEqual(shown(applying(edits, to: entries)), ["a", "lock:$1", "b"])
+        XCTAssertEqual(edits.locks.map(\.sessionID), ["$1"])
+        XCTAssertTrue(edits.allSatisfy { $0.order?.isFinite == true })
     }
 }

@@ -46,7 +46,7 @@ final class TopicNavigationTests: XCTestCase {
         var selection = TopicSelection()
         visit("@1", topic: "a", selection: &selection)
         visit("@2", topic: "b", selection: &selection)
-        let edits = try TopicOrder.moving("d", to: .before("c"), in: records)
+        let edits = try TopicOrder.moving(.topic("d"), to: .before(.topic("c")), in: records.map(TopicListEntry.topic)).records
         let updated = records.map { record in edits.first { $0.id == record.id } ?? record }
         let result = model(updated, [window("@1", topic: "a"), window("@2", topic: "b")], selection)
         XCTAssertEqual(result.rows.map(\.id), [.topic("a"), .topic("b"), .topic("d"), .topic("c")])

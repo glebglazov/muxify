@@ -131,13 +131,16 @@ final class CommandPalette {
             guard let store, !store.isRemote, let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return actions }
             if topic.settledAt == nil {
                 actions += topic.snoozedUntil == nil ? [.snoozeTopic] : [.unsnoozeTopic]
-                actions += [.startZen, .settleTopic, .addProjectToTopic, .rename, .suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
+                // Zen starts only in Topics mode; while it is on, the action ends it.
+                actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
+                actions += [.settleTopic, .addProjectToTopic, .rename, .suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
             }
             if topic.settledAt != nil || !store.windows.contains(where: { $0.topicID == id }) { actions += [.reopenTopic, .startTopicFresh] }
             actions += [.forgetTopic]
         case .session(let session):
             if store?.isRemote == false { actions += [.move]; if session.windows.first?.topicID != nil { actions += [.removeFromTopic] } }
-            actions += [.newWindow]
+            if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
+            actions += [.rename, .newWindow, .killSession]
         case .window(let window):
             if store?.isRemote == false { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
             actions += [.rename, .newWindow, .killWindow]
@@ -188,6 +191,9 @@ final class CommandPalette {
         case .newWindow: return "New Window"
         case .revealFolder: return "Reveal in Finder"
         case .killWindow: return "Kill Window"
+        case .killSession: return "Kill Session"
+        case .lockSession: return "Lock"
+        case .unlockSession: return "Unlock"
         default: return action.rawValue
         }
     }

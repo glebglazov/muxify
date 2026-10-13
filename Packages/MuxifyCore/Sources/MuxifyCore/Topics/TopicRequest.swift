@@ -59,15 +59,21 @@ public enum TopicRef: Codable, Hashable, Sendable {
 public enum TopicTarget: Codable, Hashable, Sendable {
     case topic(TopicRef)
     case session(SessionID)
+    /// The Session with exactly this tmux name.
+    case sessionName(String)
     case window(WindowID)
     case pane(PaneID)
 
-    private enum CodingKeys: String, CodingKey { case topic, session, window, pane }
+    private enum CodingKeys: String, CodingKey {
+        case topic, session, window, pane
+        case sessionName = "session_name"
+    }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         if let topic = try values.decodeIfPresent(TopicRef.self, forKey: .topic) { self = .topic(topic) }
         else if let session = try values.decodeIfPresent(SessionID.self, forKey: .session) { self = .session(session) }
+        else if let name = try values.decodeIfPresent(String.self, forKey: .sessionName) { self = .sessionName(name) }
         else if let window = try values.decodeIfPresent(WindowID.self, forKey: .window) { self = .window(window) }
         else { self = .pane(try values.decode(PaneID.self, forKey: .pane)) }
     }
@@ -77,6 +83,7 @@ public enum TopicTarget: Codable, Hashable, Sendable {
         switch self {
         case .topic(let topic): try values.encode(topic, forKey: .topic)
         case .session(let session): try values.encode(session, forKey: .session)
+        case .sessionName(let name): try values.encode(name, forKey: .sessionName)
         case .window(let window): try values.encode(window, forKey: .window)
         case .pane(let pane): try values.encode(pane, forKey: .pane)
         }
@@ -188,9 +195,14 @@ public enum TopicCommand: Codable, Hashable, Sendable {
     case moveSession(to: TopicSessionPlacement)
     /// The target Topic lists its Sessions by when tmux created them again, in the Config's order.
     case sortSessions
+    /// Locks the target No Topic Session: it gets a card last among the Topics that are not Pinned (ADR 0018).
+    /// A Locked Session stays where it is.
+    case lock
+    /// Ends the Lock of the target Session. A Session that is not Locked does not change.
+    case unlock
 
     private enum CodingKeys: String, CodingKey {
-        case list, show, create, extract, settle, forget, move, rename, reopen
+        case list, show, create, extract, settle, forget, move, rename, reopen, lock, unlock
         case startFresh = "start_fresh"
         case moveSession = "move_session"
         case sortSessions = "sort_sessions"
@@ -296,6 +308,7 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let topicAmbiguous = Kind(rawValue: "topic_ambiguous")
         public static let sourceHasNoTopic = Kind(rawValue: "source_has_no_topic")
         public static let sourceUnavailable = Kind(rawValue: "source_unavailable")
+        public static let sessionInTopic = Kind(rawValue: "session_in_topic")
         public static let noTarget = Kind(rawValue: "no_target")
         public static let unsupported = Kind(rawValue: "unsupported")
         public static let projectUnavailable = Kind(rawValue: "project_unavailable")

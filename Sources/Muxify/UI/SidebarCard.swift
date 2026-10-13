@@ -129,6 +129,8 @@ struct CardHeader<Details: View>: View {
     let isOpen: Bool
     let status: AgentStatus?
     var isPinned = false
+    /// A Locked Session's card shows a lock where a Pinned Topic's card shows its pin.
+    var isLocked = false
     var hintTarget: QuickSwitchTarget? = nil
     @Environment(\.quickSwitchHints) private var hints
     /// Words for the accessibility value after the open state, such as "Dormant".
@@ -151,7 +153,9 @@ struct CardHeader<Details: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let hintTarget { CardHintSlot(target: hintTarget) }
                 Spacer(minLength: 0)
-                if isPinned { PinMark().opacity(hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1) }
+                // The Hint badge takes the mark's place while it shows.
+                let markOpacity: Double = hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1
+                if isPinned { PinMark().opacity(markOpacity) } else if isLocked { LockMark().opacity(markOpacity) }
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { titleLine = $0 }
             HStack(spacing: 5) { details() }
@@ -181,6 +185,13 @@ struct CardHeader<Details: View>: View {
 struct PinMark: View {
     var body: some View {
         Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+    }
+}
+
+/// The mark after a Locked Session's title.
+struct LockMark: View {
+    var body: some View {
+        Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.secondary)
     }
 }
 

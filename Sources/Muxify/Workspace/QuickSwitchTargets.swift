@@ -41,11 +41,13 @@ extension ConfigAction {
 }
 
 enum QuickSwitchTarget: Hashable {
-    case topic(String), session(String), window(String), tab(UUID), terminal
+    /// `locked` is a Locked Session's card in Topics mode, by Session ID.
+    case topic(String), locked(String), session(String), window(String), tab(UUID), terminal
 
     var accessibilityID: String {
         switch self {
         case .topic(let id): "hint-topic-" + id
+        case .locked(let id): "hint-locked-" + id
         case .session(let id): "hint-session-" + id
         case .window(let id): "hint-window-" + id
         case .tab(let id): "hint-tab-" + id.uuidString
@@ -77,9 +79,13 @@ extension QuickSwitchTargets {
         let cards: [QuickSwitchTarget]
         if model.mode == .topics {
             // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
+            // A Locked Session's card is numbered by its place among the Topics.
             cards = model.rows.compactMap { row in
-                if case .topic(let id) = row.id { return .topic(id) }
-                return nil
+                switch row.id {
+                case .topic(let id): return .topic(id)
+                case .locked(let id): return .locked(id)
+                case .noTopic: return nil
+                }
             }
         } else {
             cards = sessions.map { .session($0.id) }
@@ -116,6 +122,7 @@ extension WorkspaceStore {
         guard let target = quickSwitchTargets.target(for: selection) else { return }
         switch target {
         case .topic(let id): goToTopic(.topic(id))
+        case .locked(let id): goToTopic(.locked(id))
         case .session(let id): goToSession(id)
         case .window(let id):
             if let window = quickSwitchWindows.first(where: { $0.id == id }) { select(window) }

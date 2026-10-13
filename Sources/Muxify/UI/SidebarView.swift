@@ -91,9 +91,9 @@ private struct WorkSection: View {
 private struct TopicsSection: View {
     let store: WorkspaceStore
     let model: TopicsModel
-    @State private var drag: LongPressDrag<String> = .idle
-    /// Each Topic card's frame in the list, by Topic id, for the drop position of a drag.
-    @State private var cardFrames: [String: CGRect] = [:]
+    @State private var drag: LongPressDrag<TopicListID> = .idle
+    /// Each Topic and Locked card's frame in the list, for the drop position of a drag.
+    @State private var cardFrames: [TopicListID: CGRect] = [:]
     @State private var groupsHeight: CGFloat = 0
     /// The cards whose "N more…" the user pressed.
     @State private var showingAllRows: Set<TopicGroupID> = []
@@ -109,13 +109,24 @@ private struct TopicsSection: View {
                     // such as Homerow clicks its centre, on whichever card is there.
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(model.rows) { topic in
-                            let order = shownTopicIDs(pinned: topic.isPinned)
-                            TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
-                                      showsAllRows: showingAllRows.contains(topic.id),
-                                      onShowAllRows: { showingAllRows.insert(topic.id) },
-                                      drag: $drag, neighbors: neighbors(of: topic.id, in: order), rename: renameTopic,
-                                      onFrame: { id, frame in if drag.translation(of: id) == nil { cardFrames[id] = frame } },
-                                      placement: { id, y in DropPlacement.at(y, frames: cardFrames.filter { order.contains($0.key) }, dragging: id) })
+                            let order = orderedCardIDs(pinned: topic.isPinned)
+                            let onFrame = { (id: TopicListID, frame: CGRect) in if drag.translation(of: id) == nil { cardFrames[id] = frame } }
+                            let placement = { (id: TopicListID, y: CGFloat) in
+                                DropPlacement.at(y, frames: cardFrames.filter { order.contains($0.key) }, dragging: id)
+                            }
+                            if case .locked(let sessionID) = topic.id {
+                                LockedCard(store: store, row: topic, sessionID: sessionID, titles: model.titles,
+                                           holdsSelection: topic.id == model.activeTopic,
+                                           showsAllRows: showingAllRows.contains(topic.id),
+                                           onShowAllRows: { showingAllRows.insert(topic.id) },
+                                           drag: $drag, neighbors: neighbors(of: topic.id, in: order), onFrame: onFrame, placement: placement)
+                            } else {
+                                TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
+                                          showsAllRows: showingAllRows.contains(topic.id),
+                                          onShowAllRows: { showingAllRows.insert(topic.id) },
+                                          drag: $drag, neighbors: neighbors(of: topic.id, in: order), rename: renameTopic,
+                                          onFrame: onFrame, placement: placement)
+                            }
                         }
                         if let opened = model.openedNoTopicSession { noTopicCard(opened) }
                     }
@@ -201,18 +212,15 @@ private struct TopicsSection: View {
         .padding(.horizontal, 6).padding(.vertical, 4)
     }
 
-    /// The ids of the Pinned Topic cards, or of the others, in list order: a drag or Move Up and Move Down
-    /// reorders a card among these only.
-    private func shownTopicIDs(pinned: Bool) -> [String] {
-        model.rows.compactMap { row -> String? in
-            if case .topic(let id) = row.id, row.isPinned == pinned { return id }
-            return nil
-        }
+    /// The Pinned Topic cards, or the Topic and Locked cards that are not Pinned, in list order: a drag or Move Up
+    /// and Move Down reorders a card among these only.
+    private func orderedCardIDs(pinned: Bool) -> [TopicListID] {
+        model.rows.compactMap { row in row.isPinned == pinned ? row.id.listID : nil }
     }
 
-    private func neighbors(of id: TopicGroupID, in order: [String]) -> (above: String?, below: String?) {
-        guard case .topic(let id) = id, let index = order.firstIndex(of: id) else { return (nil, nil) }
-        return (index > 0 ? order[index - 1] : nil, index + 1 < order.count ? order[index + 1] : nil)
+    private func neighbors(of id: TopicGroupID, in order: [TopicListID]) -> CardNeighbors {
+        guard let id = id.listID, let index = order.firstIndex(of: id) else { return CardNeighbors(above: nil, below: nil) }
+        return CardNeighbors(above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil)
     }
 
     private func renameTopic(_ id: String, suggest: Bool = false) {
@@ -508,13 +516,12 @@ private struct TopicCard: View {
     let holdsSelection: Bool
     let showsAllRows: Bool
     let onShowAllRows: () -> Void
-    @Binding var drag: LongPressDrag<String>
-    /// The Topic cards right above and below this one, where Move Up and Move Down put it.
-    let neighbors: (above: String?, below: String?)
+    @Binding var drag: LongPressDrag<TopicListID>
+    let neighbors: CardNeighbors
     let rename: (String, Bool) -> Void
-    let onFrame: (String, CGRect) -> Void
+    let onFrame: (TopicListID, CGRect) -> Void
     /// Where this Topic, dragged to a height in `listSpace`, would land.
-    let placement: (String, CGFloat) -> DropPlacement<String>?
+    let placement: (TopicListID, CGFloat) -> DropPlacement<TopicListID>?
     @State private var sessionDrag: LongPressDrag<String> = .idle
     /// Each Session line's frame in the card, by Session ID, for the drop position of a Session drag.
     @State private var sessionFrames: [String: CGRect] = [:]
@@ -554,9 +561,9 @@ private struct TopicCard: View {
             }
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.listSpace)) } action: { frame in
-            if let namedTopicID { onFrame(namedTopicID, frame) }
+            if let listID { onFrame(listID, frame) }
         }
-        .longPressDragLook(namedTopicID ?? "", state: drag, lineOffset: 4)
+        .longPressDragLook(listID ?? .topic(""), state: drag, lineOffset: 4)
     }
 
     private var status: AgentStatus? { .shown(mark: topic.mark, working: topic.hasWorkingAgent) }
@@ -585,9 +592,9 @@ private struct TopicCard: View {
                    summary: formatted.summary, reservesCorner: true) {
             if topic.isDormant { Text("Dormant").font(.system(size: 10)).foregroundStyle(.secondary) }
         }
-        .longPressDrag(namedTopicID ?? "", state: $drag, in: Self.listSpace, isEnabled: namedTopicID != nil && !store.changingTopic,
-                       placement: { placement(namedTopicID ?? "", $0) }, onTap: press) { drop in
-            if let namedTopicID { store.moveTopic(namedTopicID, to: drop.topicPlacement) }
+        .longPressDrag(listID ?? .topic(""), state: $drag, in: Self.listSpace, isEnabled: listID != nil && !store.changingTopic,
+                       placement: { placement(listID ?? .topic(""), $0) }, onTap: press) { drop in
+            if let listID { store.moveTopic(listID, to: drop.topicPlacement) }
         }
         .takesFirstClick()
         .accessibilityAction(.default, press)
@@ -597,7 +604,7 @@ private struct TopicCard: View {
             if case .topic(let id) = topic.id {
                 Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
                 pinButton(id)
-                moveButtons(id)
+                CardMoveButtons(store: store, id: .topic(id), neighbors: neighbors)
                 if !store.topicConfig.titleCommandFallbacks.isEmpty {
                     Button("Suggest title from Agents") {
                         DispatchQueue.main.async { rename(id, true) }
@@ -650,7 +657,7 @@ private struct TopicCard: View {
                     .disabled(store.changingTopic)
                 Divider()
                 pinButton(id)
-                moveButtons(id)
+                CardMoveButtons(store: store, id: .topic(id), neighbors: neighbors)
             }
         }
     }
@@ -659,14 +666,6 @@ private struct TopicCard: View {
         Button(topic.isPinned ? "Unpin Topic" : "Pin Topic") { store.pinTopic(id, !topic.isPinned) }
             .accessibilityIdentifier("pin-topic")
             .disabled(store.changingTopic)
-    }
-
-    @ViewBuilder
-    private func moveButtons(_ id: String) -> some View {
-        Button("Move Up") { if let above = neighbors.above { store.moveTopic(id, to: .before(above)) } }
-            .disabled(neighbors.above == nil || store.changingTopic)
-        Button("Move Down") { if let below = neighbors.below { store.moveTopic(id, to: .after(below)) } }
-            .disabled(neighbors.below == nil || store.changingTopic)
     }
 
     /// A press on the Active Topic's header opens or closes its card; on another Topic's header it goes to that
@@ -688,6 +687,124 @@ private struct TopicCard: View {
         return nil
     }
 
+    private var listID: TopicListID? { topic.id.listID }
+}
+
+/// The Topic and Locked cards right above and below a card, among those with its pin.
+private struct CardNeighbors {
+    let above: TopicListID?
+    let below: TopicListID?
+}
+
+/// Move Up and Move Down of a Topic or Locked card: the Sidebar's own order change, which the palette does not show.
+private struct CardMoveButtons: View {
+    let store: WorkspaceStore
+    let id: TopicListID
+    let neighbors: CardNeighbors
+
+    var body: some View {
+        Button("Move Up") { if let above = neighbors.above { store.moveTopic(id, to: .before(above)) } }
+            .disabled(neighbors.above == nil || store.changingTopic)
+        Button("Move Down") { if let below = neighbors.below { store.moveTopic(id, to: .after(below)) } }
+            .disabled(neighbors.below == nil || store.changingTopic)
+    }
+}
+
+/// A Locked Session among the Topic cards (ADR 0018). It has a Topic card's shape and its place in the order, but it
+/// is a No Topic Session: its title and Summary come from the Session card Formats, its rows are its Windows with no
+/// Project heading, and it offers only what a Session can do.
+private struct LockedCard: View {
+    let store: WorkspaceStore
+    let row: TopicsModel.Row
+    let sessionID: String
+    let titles: [String: String]
+    let holdsSelection: Bool
+    let showsAllRows: Bool
+    let onShowAllRows: () -> Void
+    @Binding var drag: LongPressDrag<TopicListID>
+    let neighbors: CardNeighbors
+    let onFrame: (TopicListID, CGRect) -> Void
+    let placement: (TopicListID, CGFloat) -> DropPlacement<TopicListID>?
+
+    private var id: TopicListID { .lock(sessionID: sessionID) }
+    private var window: TmuxWindow? { row.sessions.first?.windows.first }
+    private var status: AgentStatus? { .shown(mark: row.mark, working: row.hasWorkingAgent) }
+
+    private var formatted: SidebarFormats.Text {
+        store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[sessionID])
+    }
+
+    var body: some View {
+        SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, status: status, viewport: TopicCard.viewport) {
+            header
+        } content: {
+            CardList(blocks: row.sessions.compactMap { session in
+                         guard case .live(let children) = session.contents else { return nil }
+                         return CardBlock(id: session.id.session, items: children.items)
+                     },
+                     identifier: row.id.accessibilityID, selectedWindowID: store.selectedWindowID,
+                     showsAll: showsAllRows, onShowAll: onShowAllRows) { _ in
+                EmptyView()
+            } row: { item in
+                TopicItemRow(store: store, item: item, titles: titles, isDimmed: false)
+            }
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TopicCard.listSpace)) } action: { onFrame(id, $0) }
+        .longPressDragLook(id, state: drag, lineOffset: 4)
+    }
+
+    private var header: some View {
+        CardHeader(title: formatted.title, isOpen: row.isExpanded, status: status, isLocked: true, hintTarget: .locked(sessionID),
+                   notes: ["Locked"], summary: formatted.summary) {
+            if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
+                Circle().fill(Color.orange).frame(width: 5, height: 5).accessibilityLabel("Bell")
+            }
+        }
+        .longPressDrag(id, state: $drag, in: TopicCard.listSpace, isEnabled: !store.changingTopic,
+                       placement: { placement(id, $0) }, onTap: press) { drop in
+            store.moveTopic(id, to: drop.topicPlacement)
+        }
+        .takesFirstClick()
+        .accessibilityAction(.default, press)
+        .accessibilityIdentifier(row.id.accessibilityID)
+        .accessibilityActions {
+            Button("Go to Session") { store.goToTopic(row.id) }
+            actions
+        }
+        .contextMenu {
+            Button("Go to Session") { store.goToTopic(row.id) }
+            Divider()
+            actions
+        }
+    }
+
+    /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Snooze, Pin, Forget or Zen.
+    @ViewBuilder
+    private var actions: some View {
+        Button("Unlock Session") { store.setLock(ofSession: sessionID, false) }
+            .disabled(store.changingTopic)
+        if let window {
+            Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }
+            Button("Move to Topic…") { store.palette.openMove(window, scope: .session) }
+                .disabled(store.changingTopic)
+            Button("New Topic from this Session") { store.palette.openMove(window, scope: .session) }
+                .disabled(store.changingTopic)
+            Button("Kill Session…", role: .destructive) { store.palette.begin(.confirm(PaletteConfirmation(.killSession(window)))) }
+        }
+        CardMoveButtons(store: store, id: id, neighbors: neighbors)
+    }
+
+    /// As on a Topic card: a press on the Active card opens or closes it; on another card it goes there.
+    private func press() {
+        guard !holdsSelection else {
+            store.updateTopicSelection()
+            withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(row.id, open: !row.isExpanded) }
+            return
+        }
+        store.updateTopicSelection()
+        withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(row.id, open: true) }
+        store.goToTopic(row.id)
+    }
 }
 
 /// The divider between Sessions and Agents; drag it to move the split.
@@ -850,9 +967,11 @@ private struct SessionCard<Row: View>: View {
         let isOpen = store.openSessionCards.contains(session.name)
         let isSnoozed = session.windows.first?.topicID.map { model.snoozedTopicIDs.contains($0) } ?? false
         let status = AgentStatus.shown(mark: model.sessionMarks[session.id], working: model.workingSessionIDs.contains(session.id))
+        let isLocked = model.lockedSessionIDs.contains(session.id)
         SidebarCard(isOpen: isOpen, holdsSelection: session.windows.contains { $0.id == store.selectedWindowID }, status: status,
                     viewport: viewport, restingOpacity: isSnoozed ? 0.45 : 1) {
-            CardHeader(title: formatted.title, isOpen: isOpen, status: status, hintTarget: .session(session.id), notes: isSnoozed ? ["snoozed"] : [],
+            CardHeader(title: formatted.title, isOpen: isOpen, status: status, isLocked: isLocked, hintTarget: .session(session.id),
+                       notes: (isSnoozed ? ["snoozed"] : []) + (isLocked ? ["Locked"] : []),
                        summary: formatted.summary) {
                 if isSnoozed { Text("snoozed").font(.system(size: 10)).foregroundStyle(.secondary) }
                 if let topicSession = model.topicSessions[session.id] {
@@ -868,6 +987,7 @@ private struct SessionCard<Row: View>: View {
             .accessibilityIdentifier(identifier)
             .accessibilityActions {
                 Button("Go to Session") { store.goToSession(session.id) }
+                lockButton
             }
             .contextMenu {
                 Button("Go to Session") { store.goToSession(session.id) }
@@ -875,6 +995,7 @@ private struct SessionCard<Row: View>: View {
                     Divider()
                     TopicMembershipMenu(store: store, source: .session(window))
                 }
+                lockButton
             }
         } content: {
             CardList(blocks: [CardBlock(id: session.id, items: model.sessionChildren[session.id]?.items ?? [])],
@@ -889,6 +1010,15 @@ private struct SessionCard<Row: View>: View {
 
     private var formatted: SidebarFormats.Text {
         store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id])
+    }
+
+    /// Only a No Topic Session of a Local App Window can be Locked.
+    @ViewBuilder
+    private var lockButton: some View {
+        if let locked = store.lockState(ofSession: session.id) {
+            Button(locked ? "Unlock Session" : "Lock Session") { store.setLock(ofSession: session.id, !locked) }
+                .disabled(store.changingTopic)
+        }
     }
 
     private func toggle() {

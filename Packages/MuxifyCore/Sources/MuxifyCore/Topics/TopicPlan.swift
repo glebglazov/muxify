@@ -139,6 +139,6 @@ extension TopicRecord {
     public init(newTopic id: String, title: String, slug: String, records: [TopicRecord], now: Date) {
         self.init(id: id, title: title.isEmpty ? nil : title, slug: slug)
         createdAt = ISO8601DateFormatter().string(from: now)
-        order = TopicOrder.firstOrder(in: records, pinned: false)
+        order = TopicOrder.firstOrder(in: records.map(TopicListEntry.topic), pinned: false)
     }
 }

@@ -16,6 +16,8 @@ enum PaletteText {
     case newTopic
     case renameTopic(TopicRecord)
     case renameWindow(TmuxWindow)
+    /// The Session of this Window.
+    case renameSession(TmuxWindow)
 }
 
 @MainActor @Observable
@@ -24,6 +26,8 @@ final class PaletteConfirmation {
         case settle(TopicRecord)
         case forget(TopicRecord)
         case killWindow(TmuxWindow)
+        /// The Session of this Window.
+        case killSession(TmuxWindow)
     }
     enum Choices {
         case loading
@@ -40,7 +44,7 @@ final class PaletteConfirmation {
 
     var requiresCommandReturn: Bool {
         switch target {
-        case .forget, .killWindow: return true
+        case .forget, .killWindow, .killSession: return true
         case .settle:
             guard case .ready(let sessions, _) = choices else { return true }
             return sessions.contains { $0.disposition == .kill }
@@ -62,11 +66,12 @@ enum PaletteFlow {
         case .addProject: "Search Projects"
         case .snooze, .zen: "Choose a preset or type 2h, 1300, fri 10:00"
         case .text(.renameWindow): "Window name"
+        case .text(.renameSession): "Session name"
         case .text: "Untitled"
         case .confirm(let draft):
             switch draft.target {
             case .settle: "Outcome note (optional)"
-            case .forget, .killWindow: "Review and confirm"
+            case .forget, .killWindow, .killSession: "Review and confirm"
             }
         }
     }
@@ -92,11 +97,13 @@ extension CommandPalette {
         case .text(.newTopic): return "New Topic"
         case .text(.renameTopic(let topic)): return "\(topicTitle(topic)) › Rename"
         case .text(.renameWindow(let window)): return "\(window.displayTitle) › Rename"
+        case .text(.renameSession(let window)): return "\(window.sessionName) › Rename"
         case .confirm(let draft):
             switch draft.target {
             case .settle(let topic): return "\(topicTitle(topic)) › Settle"
             case .forget(let topic): return "\(topicTitle(topic)) › Forget"
             case .killWindow(let window): return "\(window.displayTitle) › Kill Window"
+            case .killSession(let window): return "\(window.sessionName) › Kill Session"
             }
         }
     }
@@ -123,6 +130,7 @@ extension CommandPalette {
             case .settle(let topic): return nextTopicNote(topic.id)
             case .forget: return "This removes the Topic for good. It cannot be Reopened."
             case .killWindow: return "This stops every process in the Window."
+            case .killSession: return "This stops every process in the Session."
             }
         default: return nil
         }
@@ -140,7 +148,10 @@ extension CommandPalette {
             if case .ready = draft.choices { return true }
             return false
         }
-        if case .text(.renameWindow) = flow { return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        switch flow {
+        case .text(.renameWindow), .text(.renameSession): return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default: break
+        }
         return acceptsText || selected(in: results)?.pick.payload != nil
     }
 
@@ -248,6 +259,14 @@ extension CommandPalette {
                 rows.append(PickCandidate(id: "agent-" + agent.id, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
             }
         }
+        if case .killSession(let window) = draft.target {
+            let windows = store?.windows.filter { $0.sessionID == window.sessionID } ?? []
+            rows.append(choiceRow("kill-session", "Kill \(window.sessionName)",
+                                  detail: "\(windows.count) Windows · \(draft.reviewedPaneIDs?.count ?? 0) Panes", choice: .accept))
+            for agent in store?.agents.filter({ $0.sessionID == window.sessionID }) ?? [] {
+                rows.append(PickCandidate(id: "agent-" + agent.id, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
+            }
+        }
         return fixed(rows)
     }
 
@@ -257,7 +276,10 @@ extension CommandPalette {
         let forget: Bool
         switch draft.target {
         case .killWindow(let window):
-            loadKillWindow(window, draft: draft, submitting: false)
+            loadKill(window, session: false, draft: draft, submitting: false)
+            return
+        case .killSession(let window):
+            loadKill(window, session: true, draft: draft, submitting: false)
             return
         case .settle(let topic): target = .topic(.id(topic.id)); forget = false
         case .forget(let topic): target = .topic(.id(topic.id)); forget = true
@@ -284,17 +306,17 @@ extension CommandPalette {
         }
     }
 
-    private func loadKillWindow(_ window: TmuxWindow, draft: PaletteConfirmation, submitting: Bool) {
+    private func loadKill(_ window: TmuxWindow, session: Bool, draft: PaletteConfirmation, submitting: Bool) {
         guard let store else { return }
         let token = invocation
         let expected = submitting ? draft.reviewedPaneIDs : nil
         draft.choices = .loading
-        store.checkKillWindow(window, expectedPaneIDs: expected) { [weak self] result in
+        store.checkKill(window, session: session, expectedPaneIDs: expected) { [weak self] result in
             guard let self, self.invocation == token else { return }
             switch result {
             case .success(nil): self.close()
             case .success(.some(let impact)):
-                draft.target = .killWindow(impact.window)
+                draft.target = session ? .killSession(impact.window) : .killWindow(impact.window)
                 draft.reviewedPaneIDs = impact.paneIDs
                 draft.impactChanged = submitting
                 draft.choices = .ready([], [])
@@ -369,6 +391,10 @@ extension CommandPalette {
                 guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                 store.renameWindow(window, to: value)
                 close()
+            case .renameSession(let window):
+                guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                store.renameSession(window, to: value)
+                close()
             }
         case (.confirm(let draft), .session(let id)):
             guard case .ready(var sessions, let worktrees) = draft.choices,
@@ -391,7 +417,8 @@ extension CommandPalette {
             case .forget(let topic):
                 let removed = worktrees.filter { draft.removedWorktrees.contains($0.id) && $0.canRemove(sessions: sessions) }.map(\.id)
                 store.forgetTopic(topic.id, choices: sessions, worktrees: removed)
-            case .killWindow(let window): loadKillWindow(window, draft: draft, submitting: true)
+            case .killWindow(let window): loadKill(window, session: false, draft: draft, submitting: true)
+            case .killSession(let window): loadKill(window, session: true, draft: draft, submitting: true)
             }
         default: break
         }

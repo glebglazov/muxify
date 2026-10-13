@@ -49,13 +49,15 @@ public struct TopicStore: Sendable {
 
     /// Runs `body` on the files as they are now, under the exclusive record lock, and writes what it changed.
     /// The Zen record goes first when it is set and last when it is removed, so a Topic that Zen Snoozed is always
-    /// in it. One changed record replaces its file; several replace the whole folder at once.
+    /// in it. One changed record replaces its file; several replace the whole folder at once. `locks` are the Locked
+    /// Sessions as tmux has them now: a write that changes the order places the Topics among them.
     @discardableResult
-    public func write<T>(_ body: (inout TopicTransaction) throws -> T) throws -> T {
+    public func write<T>(locks: [SessionLock] = [], _ body: (inout TopicTransaction) throws -> T) throws -> T {
         try FileLock.withLock(paths.recordLock, .exclusive, rank: .record, timeout: lockTimeout) {
             removeOrphanStagingFolders()
             let contents = readFiles()
             var transaction = TopicTransaction(records: contents.records, zen: contents.zen, topics: paths.topics)
+            transaction.locks = locks
             let result = try body(&transaction)
             let changed = try transaction.records.filter { record in
                 let old = contents.records.first { $0.id == record.id }
@@ -178,6 +180,9 @@ public struct TopicStore: Sendable {
 public struct TopicTransaction {
     public private(set) var records: [TopicRecord]
     public var zen: ZenRecord?
+    /// The Locked Sessions, which share the records' order. A change of order that moves or renumbers them returns
+    /// the Locks it changed, and the caller writes them to tmux.
+    public internal(set) var locks: [SessionLock] = []
     private let topics: URL
 
     init(records: [TopicRecord], zen: ZenRecord?, topics: URL) {
@@ -196,13 +201,22 @@ public struct TopicTransaction {
         }
     }
 
-    /// Adds a new Topic first among the Topics with its pin. A file of that name that is not a valid record is not replaced.
-    public mutating func create(_ record: TopicRecord) throws {
+    private var entries: [TopicListEntry] { records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) }
+
+    /// Adds a new Topic first among the Topics with its pin, or in the place of the Lock of `lockedSessionID`, which
+    /// then ends. A file of that name that is not a valid record is not replaced.
+    @discardableResult
+    public mutating func create(_ record: TopicRecord, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLock] {
         _ = try TopicStore.encoded(record)
         guard !FileManager.default.fileExists(atPath: topics.appendingPathComponent(record.id + ".json").path) else {
             throw CocoaError(.fileWriteFileExists)
         }
-        put(TopicOrder.prepending(record, in: records))
+        if let index = locks.firstIndex(where: { $0.sessionID == lockedSessionID }) {
+            var placed = record
+            placed.order = locks.remove(at: index).order
+            return put([.topic(placed)])
+        }
+        return put(TopicOrder.prepending(record, in: entries))
     }
 
     public mutating func update(_ id: String, _ mutate: (inout TopicRecord) throws -> Void) throws {
@@ -216,12 +230,12 @@ public struct TopicTransaction {
     /// Writes what a plan changed from the record it read, onto the record as it is now: for each JSON key,
     /// `after` when it differs from `before`, else the value on disk. A Snooze that another writer set while
     /// the plan ran stays. When two writers change one key, the last write wins for that key. A Topic that is
-    /// not on disk is created only when the plan read no previous record.
-    public mutating func apply(_ change: TopicRecordChange) throws {
+    /// not on disk is created only when the plan read no previous record, as `create` does.
+    @discardableResult
+    public mutating func apply(_ change: TopicRecordChange, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLock] {
         guard let current = records.first(where: { $0.id == change.after.id }) else {
             guard change.before == nil else { throw Failure.topicUnavailable(change.after.id) }
-            try create(change.after)
-            return
+            return try create(change.after, replacingLockOf: lockedSessionID)
         }
         let before = try change.before.map(Self.fields) ?? [:]
         let after = try Self.fields(change.after)
@@ -231,13 +245,13 @@ public struct TopicTransaction {
         }
         let record = try JSONDecoder().decode(TopicRecord.self, from: JSONEncoder().encode(merged))
         _ = try TopicStore.encoded(record)
-        put([record])
+        return put([.topic(record)])
     }
 
     public mutating func forget(_ id: String, now: Date = Date()) throws {
         guard records.contains(where: { $0.id == id }) else { throw Failure.topicUnavailable(id) }
         if let currentZen = zen, currentZen.keptTopicID == id {
-            put(currentZen.end(records: records, now: now))
+            put(currentZen.end(records: records, now: now).map(TopicListEntry.topic))
             zen = nil
         } else {
             zen?.changes.removeAll { $0.topicID == id }
@@ -245,19 +259,35 @@ public struct TopicTransaction {
         records.removeAll { $0.id == id }
     }
 
-    public mutating func move(_ id: String, to placement: TopicPlacement) throws {
-        put(try TopicOrder.moving(id, to: placement, in: records))
+    @discardableResult
+    public mutating func move(_ id: TopicListID, to placement: TopicPlacement) throws -> [SessionLock] {
+        put(try TopicOrder.moving(id, to: placement, in: entries))
     }
 
-    public mutating func pin(_ id: String, _ pinned: Bool) throws {
-        put(try TopicOrder.pinning(id, pinned, in: records))
+    @discardableResult
+    public mutating func pin(_ id: String, _ pinned: Bool) throws -> [SessionLock] {
+        put(try TopicOrder.pinning(id, pinned, in: entries))
     }
 
-    private mutating func put(_ changed: [TopicRecord]) {
-        for record in changed {
+    /// Locks the Session last among the Topics that are not Pinned. A Session that is already Locked keeps its place.
+    @discardableResult
+    public mutating func lock(_ sessionID: String) -> [SessionLock] {
+        guard !locks.contains(where: { $0.sessionID == sessionID }) else { return [] }
+        return put(TopicOrder.appendingLock(of: sessionID, in: entries))
+    }
+
+    /// Returns the Locks among `changed`.
+    @discardableResult
+    private mutating func put(_ changed: [TopicListEntry]) -> [SessionLock] {
+        for record in changed.records {
             if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
             else { records.append(record) }
         }
+        for lock in changed.locks {
+            if let index = locks.firstIndex(where: { $0.sessionID == lock.sessionID }) { locks[index] = lock }
+            else { locks.append(lock) }
+        }
+        return changed.locks
     }
 
     private static func fields(_ record: TopicRecord) throws -> [String: JSONValue] {

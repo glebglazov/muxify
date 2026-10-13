@@ -1,14 +1,16 @@
 import MuxifyCore
 
-extension DropPlacement where ID == String {
-    /// The placement of a dragged Topic card, by Topic id, as the Topic order takes it.
+extension DropPlacement where ID == TopicListID {
+    /// The placement of a dragged Topic or Locked card, as the Topic order takes it.
     var topicPlacement: TopicPlacement {
         switch self {
         case .before(let id): return .before(id)
         case .after(let id): return .after(id)
         }
     }
+}
 
+extension DropPlacement where ID == String {
     /// The placement of a dragged Session line, by Session ID, as a Topic's Session order takes it.
     var sessionPlacement: TopicSessionPlacement? {
         switch self {

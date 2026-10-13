@@ -38,6 +38,14 @@ final class TopicRequestURLTests: XCTestCase {
                        TopicRequest(.move(to: .topic(.named("Fix reward"))), target: pane7))
     }
 
+    func testLockAndUnlockNameTheSession() throws {
+        XCTAssertEqual(try request("muxify://topic/lock?session=my%20notes"), TopicRequest(.lock, target: .sessionName("my notes")))
+        XCTAssertEqual(try request("muxify://topic/unlock?session=notes"), TopicRequest(.unlock, target: .sessionName("notes")))
+        XCTAssertThrowsError(try request("muxify://topic/lock?pane=%257"))
+        XCTAssertThrowsError(try request("muxify://topic/unlock?session=notes&pane=%257"))
+        XCTAssertThrowsError(try request("muxify://topic/lock?session="), "a Lock needs a Session name")
+    }
+
     func testRejectsMissingDuplicateAndUnknownInputs() {
         let invalid = [
             "muxify://topic/new?title=Fix", "muxify://topic/new?project=%2Fwork&pane=%257&title=",

@@ -14,8 +14,9 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `move_session` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
 | `add_project_to_topic` | ⌘⇧A | Open Add a Project for the Active Topic in the palette |
 | `snooze_topic` | ⌥⌘S | Snooze the Active Topic, then open the Next Topic |
-| `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic, it only ends Zen |
+| `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic or a Locked Session, or in Sessions mode, it only ends Zen |
 | `settle_topic` | Unbound | Settle the Active Topic, then open the Next Topic |
+| `toggle_lock` | Unbound | Lock the current Session, which must be in No Topic, or Unlock it while it is Locked |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser. It does nothing while the Browser is the only side shown |
@@ -43,7 +44,8 @@ The default [Command Palettes](configuration.md#command-palettes) are
 A Config that still names it shows a problem.
 
 Commands also lists Move Pane, Move Window, Move Session, Move Pane with Active
-Tab, Add a Project, Snooze Topic, Settle Topic, and Zen or End Zen. These use the
+Tab, Add a Project, Snooze Topic, Settle Topic, Lock Session or Unlock Session, and Zen
+or End Zen. These use the
 current item and appear when that item is available. Back returns from an input
 step to the Commands search.
 
@@ -96,6 +98,7 @@ keybindings:
   snooze_topic: alt+cmd+s
   toggle_zen: shift+alt+cmd+s
   settle_topic: []
+  toggle_lock: []
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
   toggle_terminal: cmd+j
   toggle_browser: cmd+b
@@ -218,7 +221,7 @@ conflict with the actions above:
 | `snooze_topic` | ⌃S | Open Snooze for the highlighted open, Dormant or Snoozed Topic |
 | `move` | Unbound | Open Move for the highlighted result |
 | `add_project_to_topic` | Unbound | Add a Project to the highlighted Topic |
-| `rename` | Unbound | Rename the highlighted Topic or Window |
+| `rename` | Unbound | Rename the highlighted Topic, Session or Window |
 | `suggest_topic_title` | ⌥S | In Rename or New Topic, type a title that the Agents suggest. On a highlighted Topic, rename it to that title |
 | `start_zen` | Unbound | Start Zen for the highlighted Topic. While Zen is on, end it |
 | `settle_topic` | Unbound | Settle the highlighted Topic |
@@ -232,6 +235,9 @@ conflict with the actions above:
 | `new_window` | Unbound | Create a Window in the highlighted Session |
 | `reveal_folder` | Unbound | Show the result's folder in Finder |
 | `kill_window` | Unbound | Confirm a kill of the highlighted Window |
+| `kill_session` | Unbound | Confirm a kill of the highlighted Session |
+| `lock_session` | Unbound | Lock the highlighted Session, which must be in No Topic |
+| `unlock_session` | Unbound | Unlock the highlighted Session |
 | `choose_pane` | ⌥1 | Select the Pane button in Move |
 | `choose_window` | ⌥2 | Select the Window button in Move |
 | `choose_session` | ⌥3 | Select the Session button in Move |

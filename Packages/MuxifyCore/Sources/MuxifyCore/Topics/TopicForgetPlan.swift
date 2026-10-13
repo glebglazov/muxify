@@ -44,10 +44,10 @@ struct TopicForgetPlan {
             result.disposition = choices.first { $0.id == session.id }?.disposition ?? session.disposition
             return result
         }
-        var commands = sessions.map { session -> TopicPlan.Command in
+        var commands = sessions.flatMap { session -> [TopicPlan.Command] in
             switch session.disposition {
-            case .kill: return .tmux(["kill-session", "-t", session.id])
-            case .keep: return .tmux(["set-option", "-u", "-t", session.id, "@muxify_topic"])
+            case .kill: return [.tmux(["kill-session", "-t", session.id])]
+            case .keep: return [.tmux(["set-option", "-u", "-t", session.id, "@muxify_topic"]), .tmux(SessionLock.unsetOption(session.id))]
             }
         }
         for tree in available.worktrees where tree.canRemove(sessions: sessions) && worktrees.contains(tree.id) {

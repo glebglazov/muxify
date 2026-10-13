@@ -37,7 +37,13 @@ public struct TopicService: Sendable {
         if case .list = request.command { return list() }
         if case .show = request.command { return show(request, client: client) }
         do {
-            return try FileLock.withLock(paths.editLock, .exclusive, rank: .edit, timeout: editLockTimeout) { edit(request, client: client) }
+            return try FileLock.withLock(paths.editLock, .exclusive, rank: .edit, timeout: editLockTimeout) {
+                switch request.command {
+                case .lock: return changeLock(request, locked: true, client: client)
+                case .unlock: return changeLock(request, locked: false, client: client)
+                default: return edit(request, client: client)
+                }
+            }
         } catch {
             return .failed(failure(error, phase: .nothingChanged))
         }
@@ -92,24 +98,33 @@ public struct TopicService: Sendable {
     private struct Planned {
         var edit: TopicEdit
         var shown: TopicChange.Shown?
+        /// The Locked Session whose place a new Topic takes.
+        var replacedLockOf: String? = nil
     }
 
     private func edit(_ request: TopicRequest, client: String?) -> TopicResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
             let records = try store.read().records
-            let planned = try plan(request, records: records, snapshot: server.snapshot(), client: client)
+            let snapshot = server.snapshot()
+            let planned = try plan(request, records: records, snapshot: snapshot, client: client)
             let edit = planned.edit
             try TopicWorktrees.check(edit.commands)
             if let new = edit.newWorktree { try TopicWorktrees.add(new.worktree, at: new.commit) }
             let read = edit.record.flatMap { record in records.first { $0.id == record.id } }
+            // A new Topic takes its place among the Locks too, and may renumber them.
+            var commands = edit.commands
             if let record = edit.record {
-                try store.write { try $0.apply(TopicRecordChange(before: read, after: record)) }
+                let locks = SessionLock.locks(in: snapshot.windows, records: records)
+                let moved = try store.write(locks: locks) { transaction -> [SessionLock] in
+                    try transaction.apply(TopicRecordChange(before: read, after: record), replacingLockOf: planned.replacedLockOf)
+                }
+                commands += moved.map { .tmux($0.setOption) }
                 phase = .recordSaved
             } else {
                 phase = .changesStarted
             }
-            try executor.run(edit.commands, client: client)
+            try executor.run(commands, client: client)
             switch edit.completion {
             case .save(let record):
                 let before = edit.record ?? records.first { $0.id == record.id }
@@ -134,7 +149,7 @@ public struct TopicService: Sendable {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show:
+        case .list, .show, .lock, .unlock:
             throw TopicRequestError.noTarget
         case .create(let title, let projectPath):
             let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -218,7 +233,7 @@ public struct TopicService: Sendable {
                                                projects: projects, clientTTY: client, order: sessionOrder)
             }
             return Planned(edit: TopicEdit(record: plan.record, commands: plan.commands, selection: selection),
-                           shown: WindowID(rawValue: moved.window.id).map { .window($0) })
+                           shown: WindowID(rawValue: moved.window.id).map { .window($0) }, replacedLockOf: plan.endedLockOf)
         case .removeFromTopic:
             if case .window = request.target {
                 let (pane, fresh) = try source()
@@ -278,6 +293,53 @@ public struct TopicService: Sendable {
         }
     }
 
+    /// Lock and Unlock change only the Session option and, when a Lock renumbers the list, the Topic records.
+    private func changeLock(_ request: TopicRequest, locked: Bool, client: String?) -> TopicResponse {
+        var phase = TopicFailure.Phase.nothingChanged
+        do {
+            let records = try store.read().records
+            let snapshot = server.snapshot()
+            let window = try noTopicSession(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
+            let commands: [TopicPlan.Command]
+            if locked {
+                let locks = SessionLock.locks(in: snapshot.windows, records: records)
+                let changed = try store.write(locks: locks) { $0.lock(window.sessionID) }
+                commands = changed.map { .tmux($0.setOption) }
+            } else {
+                commands = window.lockOrder == nil ? [] : [.tmux(SessionLock.unsetOption(window.sessionID))]
+            }
+            phase = .changesStarted
+            try executor.run(commands, client: client)
+            return .changed(TopicChange(topicID: nil))
+        } catch {
+            return .failed(failure(error, phase: phase))
+        }
+    }
+
+    /// The No Topic Session that the target names, or the Session of the caller's Pane.
+    private func noTopicSession(_ target: TopicTarget?, caller: TopicCaller?, records: [TopicRecord], snapshot: TmuxSnapshot,
+                                client: String?) throws -> TmuxWindow {
+        let found: TmuxWindow?
+        switch target {
+        case .session(let id)?: found = snapshot.windows.first { $0.sessionID == id.rawValue }
+        case .sessionName(let name)?:
+            guard let named = snapshot.windows.first(where: { $0.sessionName == name }) else {
+                throw TopicRequestError.sessionUnavailable(name)
+            }
+            found = named
+        case .topic?: throw TopicRequestError.noTarget
+        default:
+            guard let pane = paneRequest(target, caller: caller) else { throw TopicRequestError.noTarget }
+            let sessionID = try executor.pane(pane, in: snapshot, client: client).source.window.sessionID
+            found = snapshot.windows.first { $0.sessionID == sessionID }
+        }
+        guard let window = found else { throw TopicEditFailure.sourceUnavailable }
+        if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
+            throw TopicRequestError.sessionInTopic(session: window.sessionName, topic: TopicSummary(record: topic).label)
+        }
+        return window
+    }
+
     private func forgetTopic(_ target: TopicTarget?, caller: TopicCaller?, records: [TopicRecord],
                              snapshot: TmuxSnapshot, client: String?) throws -> TopicRecord {
         if case .topic(let ref)? = target { return try ref.resolve(in: records, open: false) }
@@ -289,7 +351,7 @@ public struct TopicService: Sendable {
         switch target {
         case .pane(let id)?: return .pane(id.rawValue)
         case .window(let id)?: return .window(id.rawValue)
-        case .topic?, .session?: return nil
+        case .topic?, .session?, .sessionName?: return nil
         case nil: break
         }
         switch caller {
@@ -385,6 +447,8 @@ public struct TopicService: Sendable {
             case .topicUnavailable: return .topicUnavailable
             case .topicAmbiguous: return .topicAmbiguous
             case .topicMembershipChanged: return .topicMembershipChanged
+            case .sessionUnavailable: return .sourceUnavailable
+            case .sessionInTopic: return .sessionInTopic
             case .baseUnavailable, .worktreeBaseMissing, .worktreeHasChanges: return .gitFailed
             }
         case let error as TopicEditFailure:
@@ -443,6 +507,8 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case baseUnavailable(ref: String, worktree: String)
     case worktreeBaseMissing(base: String, worktree: String)
     case worktreeHasChanges(String)
+    case sessionUnavailable(String)
+    case sessionInTopic(session: String, topic: String)
 
     public var description: String {
         switch self {
@@ -458,6 +524,9 @@ public enum TopicRequestError: Error, CustomStringConvertible {
             return "The Worktree \(worktree) and its branch are gone, and the repository does not have their base commit \(base). Muxify did not make the Worktree again."
         case .worktreeHasChanges(let worktree):
             return "The Worktree \(worktree) has uncommitted changes. Commit or remove them, or keep the Worktree."
+        case .sessionUnavailable(let name): return "No tmux Session has the name \(name)."
+        case .sessionInTopic(let session, let topic):
+            return "The Session \(session) is in the Topic \(topic). Only a No Topic Session can be Locked."
         }
     }
 }

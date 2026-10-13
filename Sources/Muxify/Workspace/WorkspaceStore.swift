@@ -220,7 +220,11 @@ final class WorkspaceStore {
     private func entryWindow(of id: TopicGroupID) -> TmuxWindow? {
         if id == .noTopic {
             let open = Set(topicWatcher.records.filter { $0.settledAt == nil }.map(\.id))
-            let members = windows.filter { $0.topicID.map { !open.contains($0) } ?? true }
+            let locked = Set(topics.rows.compactMap { row -> String? in
+                if case .locked(let sessionID) = row.id { return sessionID }
+                return nil
+            })
+            let members = windows.filter { ($0.topicID.map { !open.contains($0) } ?? true) && !locked.contains($0.sessionID) }
             if let last = members.first(where: { $0.id == topicSelection.lastWindowByGroup[.noTopic] }) { return last }
             return EntryWindow.ofSession(members)
         }
@@ -236,10 +240,11 @@ final class WorkspaceStore {
         alert.runModal()
     }
 
-    func moveTopic(_ id: String, to placement: TopicPlacement) {
+    func moveTopic(_ id: TopicListID, to placement: TopicPlacement) {
         guard !changingTopic else { return }
-        do { try topicWatcher.write { try $0.move(id, to: placement) } }
-        catch {
+        do {
+            writeLocks(try topicWatcher.write(locks: liveLocks) { try $0.move(id, to: placement) })
+        } catch {
             let alert = NSAlert()
             alert.messageText = "Could not move the Topic"
             alert.informativeText = "Some Topic positions may have been saved. The Sidebar shows the saved order. \(error)"
@@ -250,14 +255,41 @@ final class WorkspaceStore {
 
     func pinTopic(_ id: String, _ pinned: Bool) {
         guard !changingTopic else { return }
-        do { try topicWatcher.write { try $0.pin(id, pinned) } }
-        catch {
+        do {
+            writeLocks(try topicWatcher.write(locks: liveLocks) { try $0.pin(id, pinned) })
+        } catch {
             let alert = NSAlert()
             alert.messageText = pinned ? "Could not pin the Topic" : "Could not unpin the Topic"
             alert.informativeText = "Some Topic positions may have been saved. The Sidebar shows the saved order. \(error)"
             alert.addButton(withTitle: "OK")
             alert.runModal()
         }
+    }
+
+    /// The Locked Sessions as the last tmux read gives them. A change of the Topic order includes them (ADR 0018).
+    private var liveLocks: [SessionLock] { isRemote ? [] : SessionLock.locks(in: windows, records: topicWatcher.records) }
+
+    /// tmux keeps a Lock's order, so a change of order that moved or renumbered Locks writes them there.
+    private func writeLocks(_ locks: [SessionLock]) {
+        for lock in locks { runAsync(lock.setOption) { [weak self] _ in self?.refresh() } }
+    }
+
+    /// Whether the Session is Locked; nil when it cannot be: it is in an open Topic, or Topics are off or Remote.
+    func lockState(ofSession sessionID: String) -> Bool? {
+        guard !isRemote, topics.topicsEnabled, let window = windows.first(where: { $0.sessionID == sessionID }) else { return nil }
+        if let id = window.topicID, topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }) { return nil }
+        return topics.lockedSessionIDs.contains(sessionID)
+    }
+
+    /// Lock and Unlock go through the Topic service, as `muxify session lock` does (ADR 0010).
+    func setLock(ofSession sessionID: String, _ locked: Bool) {
+        guard lockState(ofSession: sessionID) != nil, let id = SessionID(rawValue: sessionID) else { return }
+        perform(TopicRequest(locked ? .lock : .unlock, target: .session(id)))
+    }
+
+    func toggleLockOfCurrentSession() {
+        guard let id = selectedWindow?.sessionID, let locked = lockState(ofSession: id) else { return }
+        setLock(ofSession: id, !locked)
     }
 
     func changeTopic(_ source: TopicMembershipPlan.Source, destination: TopicRecord? = nil, title: String = "") {
@@ -445,13 +477,13 @@ final class WorkspaceStore {
         if topicWatcher.zen != nil { endZen() } else { palette.begin(.zen(id), keepingHistory: keepingHistory) }
     }
 
-    /// The Zen menu item and the `toggle_zen` key keep the Active Topic. No Topic is not a Topic, so while it is
-    /// active they can only end Zen.
+    /// The Zen menu item and the `toggle_zen` key keep the Active Topic. No Topic and a Locked Session are not Topics,
+    /// and Zen starts only in Topics mode, so otherwise they can only end Zen.
     func toggleZenOfActiveTopic(keepingHistory: Bool = false) {
-        if let id = activeTopicID { toggleZen(keeping: id, keepingHistory: keepingHistory) } else { endZen() }
+        if let id = activeTopicID, topics.mode == .topics { toggleZen(keeping: id, keepingHistory: keepingHistory) } else { endZen() }
     }
 
-    var canToggleZenOfActiveTopic: Bool { topicWatcher.zen != nil || activeTopicID != nil }
+    var canToggleZenOfActiveTopic: Bool { topicWatcher.zen != nil || (activeTopicID != nil && topics.mode == .topics) }
 
     /// One write: the store puts the Zen record down before the Snoozes, so a Topic Snoozed by Zen is always in it.
     func startZen(keeping id: String, until deadline: SnoozeDeadline) {
@@ -1562,20 +1594,24 @@ final class WorkspaceStore {
         startSession(in: cwd, named: SessionResolver.sessionName((cwd as NSString).lastPathComponent, taken: Set(windows.map(\.sessionName))))
     }
 
-    func checkKillWindow(_ window: TmuxWindow, expectedPaneIDs: Set<String>?,
-                         completion: @escaping (Result<(window: TmuxWindow, paneIDs: Set<String>)?, Error>) -> Void) {
+    /// Kills the Window, or its whole Session with `session`, only while its Panes are the ones the user reviewed.
+    /// Otherwise the completion gets the Window and Panes as they are now, for the user to review again.
+    func checkKill(_ window: TmuxWindow, session: Bool, expectedPaneIDs: Set<String>?,
+                   completion: @escaping (Result<(window: TmuxWindow, paneIDs: Set<String>)?, Error>) -> Void) {
         guard let connection else { completion(.failure(TmuxError.notReady)); return }
         let current = generation
         Task {
             let result = await Task.detached { () -> Result<(window: TmuxWindow, paneIDs: Set<String>)?, Error> in
                 Result {
                     let snapshot = try connection.snapshot()
-                    guard let fresh = snapshot.windows.first(where: { $0.id == window.id && $0.sourceID == window.sourceID }) else {
-                        throw TmuxError.notReady
+                    let members = snapshot.windows.filter {
+                        $0.sourceID == window.sourceID && (session ? $0.sessionID == window.sessionID : $0.id == window.id)
                     }
-                    let paneIDs = Set(snapshot.panes.filter { $0.windowID == window.id }.map(\.id))
+                    guard let fresh = members.first(where: { $0.id == window.id }) ?? members.first else { throw TmuxError.notReady }
+                    let windowIDs = Set(members.map(\.id))
+                    let paneIDs = Set(snapshot.panes.filter { windowIDs.contains($0.windowID) }.map(\.id))
                     guard let expectedPaneIDs, expectedPaneIDs == paneIDs else { return (fresh, paneIDs) }
-                    _ = try connection.run(["kill-window", "-t", window.id])
+                    _ = try connection.run(session ? ["kill-session", "-t", window.sessionID] : ["kill-window", "-t", window.id])
                     return nil
                 }
             }.value
@@ -1583,6 +1619,11 @@ final class WorkspaceStore {
             completion(result)
             self.refresh()
         }
+    }
+
+    func renameSession(_ window: TmuxWindow, to name: String) {
+        guard windows.contains(where: { $0.sessionID == window.sessionID && $0.sourceID == window.sourceID }) else { return }
+        runAsync(["rename-session", "-t", window.sessionID, name]) { [weak self] _ in self?.refresh() }
     }
 
     func renameWindow(_ window: TmuxWindow, to name: String) {
@@ -1889,6 +1930,7 @@ final class WorkspaceStore {
         case .snoozeTopic: if !isRemote { presentSnoozeTopic() }
         case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
+        case .toggleLock: toggleLockOfCurrentSession()
         case .toggleSidebar: toggleSidebar()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)

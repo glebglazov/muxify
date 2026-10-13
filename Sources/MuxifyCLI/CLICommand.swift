@@ -6,6 +6,7 @@ enum CLICommand: Equatable {
     case browserAvailable(pane: String?)
     case browserOpen(window: String, urls: [String])
     case sessionOpen(name: String)
+    case sessionLock(SessionInvocation)
     case extensionsInstall
     case simulator(arguments: [String])
     case topic(TopicInvocation)
@@ -17,6 +18,8 @@ enum CLICommand: Equatable {
     usage: muxify browser open [--window <id>] <url>...
            muxify browser available
            muxify session open <session name>
+           muxify session lock [--session <name>] [--json]
+           muxify session unlock [--session <name>] [--json]
            muxify extensions install
            muxify simulator serve [--port <port>] [--origin <https://host>]
            muxify topic new ["title"] [--project <dir>] [--window <id> | --pane <id>] [--json]
@@ -38,6 +41,11 @@ enum CLICommand: Equatable {
                      --window <id>   open in another Window instead, e.g. --window @12
     session open   Shows the tmux Session in Muxify. The name may contain spaces,
                    quoted or not: muxify session open my project
+    session lock   Locks this Pane's tmux Session, or the Session that --session names:
+                   it keeps a card with a number in the Topics list, after the Topics
+                   that are not Pinned. Only a Session in No Topic can be Locked. A
+                   Locked Session stays where it is.
+    session unlock Ends the Lock. The Session stays, in No Topic.
     extensions install
                    Installs or updates Extensions for Agents configured under HOME.
     simulator serve  Serves Devices in any browser, independently of the desktop app.
@@ -139,6 +147,9 @@ enum CLICommand: Equatable {
                 if args.first == "--" { args = args.dropFirst() }
                 guard !args.isEmpty else { throw CLIError(Self.usage, exitCode: 2) }
                 self = .sessionOpen(name: args.joined(separator: " "))
+            case let verb? where verb == "lock" || verb == "unlock":
+                if args.contains(where: { $0 == "-h" || $0 == "--help" }) { self = .help; return }
+                self = .sessionLock(try SessionInvocation(locked: verb == "lock", arguments: args, environment: environment))
             default: throw CLIError(Self.usage, exitCode: 2)
             }
         default: throw CLIError(Self.usage, exitCode: 2)
@@ -212,6 +223,7 @@ enum CLICommand: Equatable {
         case .project(let invocation): try await invocation.run()
         case .agent(let invocation): try await invocation.run()
         case .window(let invocation): try await invocation.run()
+        case .sessionLock(let invocation): try invocation.run()
         }
         return 0
     }

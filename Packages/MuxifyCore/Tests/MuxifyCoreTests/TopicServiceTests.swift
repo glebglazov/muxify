@@ -249,6 +249,58 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertNil(again.topicID, "a second move changes nothing")
     }
 
+    /// The Topics list as the app orders it: Topic ids, and `lock:` with the Session name for a Locked Session.
+    private func topicList() throws -> [String] {
+        let windows = server.snapshot().windows
+        return TopicOrder.sorted(TopicListEntry.all(records: try records(), windows: windows)).map { entry in
+            switch entry {
+            case .topic(let record): return record.title ?? record.id
+            case .lock(let lock): return "lock:" + (windows.first { $0.sessionID == lock.sessionID }?.sessionName ?? "?")
+            }
+        }
+    }
+
+    func testLockPutsANoTopicSessionLastAmongTheTopicsAndUnlockEndsIt() throws {
+        try server.run(["new-session", "-d", "-s", "notes", "-c", project.path])
+        _ = try change(service().handle(TopicRequest(.create(title: "First", project: nil))))
+        _ = try change(service().handle(TopicRequest(.create(title: "Second", project: project.path))))
+        let locked = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
+        XCTAssertNil(locked.topicID)
+        XCTAssertEqual(try topicList(), ["Second", "First", "lock:notes"])
+        _ = try change(service().handle(TopicRequest(.create(title: "Third", project: nil))))
+        _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["Third", "Second", "First", "lock:notes"], "a Locked Session keeps its place")
+
+        let inTopic = try failure(service().handle(TopicRequest(.lock, target: .sessionName("game/second"))))
+        XCTAssertEqual(inTopic.kind, .sessionInTopic)
+        XCTAssertEqual(inTopic.phase, .nothingChanged)
+        XCTAssertEqual(try failure(service().handle(TopicRequest(.lock, target: .sessionName("missing")))).kind, .sourceUnavailable)
+
+        _ = try change(service().handle(TopicRequest(.unlock, target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["Third", "Second", "First"])
+        XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]), "")
+    }
+
+    func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
+        try server.run(["new-session", "-d", "-s", "notes", "-c", project.path])
+        try server.run(["new-session", "-d", "-s", "chores", "-c", tools.path])
+        _ = try change(service().handle(TopicRequest(.create(title: "First", project: nil))))
+        _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
+        _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("chores"))))
+        _ = try change(service().handle(TopicRequest(.create(title: "Second", project: nil))))
+        XCTAssertEqual(try topicList(), ["Second", "First", "lock:notes", "lock:chores"])
+
+        let notes = try XCTUnwrap(SessionID(rawValue: server.snapshot().windows.first { $0.sessionName == "notes" }!.sessionID))
+        let created = try change(service().handle(TopicRequest(.move(to: .newTopic(title: "Notes work")), target: .session(notes))))
+        XCTAssertTrue(created.created)
+        XCTAssertEqual(try topicList(), ["Second", "First", "Notes work", "lock:chores"], "the new Topic takes the Lock's place")
+
+        let chores = try XCTUnwrap(SessionID(rawValue: server.snapshot().windows.first { $0.sessionName == "chores" }!.sessionID))
+        _ = try change(service().handle(TopicRequest(.move(to: .topic(.named("Second"))), target: .session(chores))))
+        XCTAssertEqual(try topicList(), ["Second", "First", "Notes work"], "the Topic that the Session moves to keeps its place")
+        XCTAssertTrue(server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
+    }
+
     func testAFailureSaysHowFarTheRequestGot() throws {
         let unknown = try failure(service().handle(TopicRequest(.create(title: "X", project: "/nowhere"))))
         XCTAssertEqual(unknown.kind, .projectUnavailable)

@@ -3,12 +3,24 @@ import MuxifyCore
 
 enum TopicGroupID: Hashable {
     case topic(String)
+    /// A Locked Session, by Session ID: a No Topic Session with its own card among the Topics (ADR 0018).
+    case locked(String)
     case noTopic
 
     var accessibilityID: String {
         switch self {
         case .topic(let id): return "topic-\(id)"
+        case .locked(let sessionID): return "locked-\(sessionID)"
         case .noTopic: return "no-topic"
+        }
+    }
+
+    /// The card's place in the Topic order; No Topic has none.
+    var listID: TopicListID? {
+        switch self {
+        case .topic(let id): return .topic(id)
+        case .locked(let sessionID): return .lock(sessionID: sessionID)
+        case .noTopic: return nil
         }
     }
 }
@@ -111,8 +123,8 @@ struct TopicSelection: Equatable {
 
     /// No Topic has no card to open: the Topic list shows only the opened No Topic Session.
     private static func opening(_ activeTopic: TopicGroupID?) -> Set<TopicGroupID> {
-        if case .topic? = activeTopic, let activeTopic { return [activeTopic] }
-        return []
+        guard let activeTopic, activeTopic != .noTopic else { return [] }
+        return [activeTopic]
     }
 }
 
@@ -243,9 +255,9 @@ struct TopicsModel {
         var message: String { "\(title) woke. \(count) Agent\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") you." }
     }
 
-    /// The open Topics that are not Snoozed; `groups` lists the others. No Topic has no row.
+    /// The open Topics that are not Snoozed and the Locked Sessions, in one order; `groups` lists the others.
+    /// No Topic has no row. While Zen is on, the Locked Sessions have no row either.
     let rows: [Row]
-    /// Every live No Topic Session. The Command Palette reaches each of them.
     func nextTopic(after id: String) -> TopicGroupID {
         guard let index = rows.firstIndex(where: { $0.id == .topic(id) }) else { return .noTopic }
         if index + 1 < rows.count { return rows[index + 1].id }
@@ -253,7 +265,10 @@ struct TopicsModel {
         return .noTopic
     }
 
+    /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
     let noTopicSessions: [Session]
+    /// The Locked Sessions, by Session ID, also while Zen hides their cards.
+    let lockedSessionIDs: Set<String>
     /// The No Topic Session of the selected Window. The Topic list shows it as one card after the open Topics.
     /// Nil while the Active Topic is a Topic.
     let openedNoTopicSession: Session?
@@ -294,12 +309,18 @@ struct TopicsModel {
         topicsEnabled = config.sidebar.topics
         sessionsEnabled = config.sidebar.sessions
         self.mode = config.sidebar.shownMode(chosen: mode)
-        let open = TopicOrder.sorted(records)
+        let locks = SessionLock.locks(in: windows, records: records)
+        lockedSessionIDs = Set(locks.map(\.sessionID))
+        // Zen keeps only Topics: it hides the Locked Sessions, and then each is one more No Topic Session.
+        let shownLocks = zen == nil ? lockedSessionIDs : []
+        let entries = TopicOrder.sorted(records.map(TopicListEntry.topic) + (zen == nil ? locks : []).map(TopicListEntry.lock))
+        let open = entries.records
         let ids = Set(open.map(\.id))
         let snoozedIDs = Set(open.filter { $0.isSnoozed(at: now) }.map(\.id))
         snoozedTopicIDs = snoozedIDs
         func groupID(_ window: TmuxWindow) -> TopicGroupID {
             if let id = window.topicID, ids.contains(id) { return .topic(id) }
+            if shownLocks.contains(window.sessionID) { return .locked(window.sessionID) }
             return .noTopic
         }
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -317,6 +338,7 @@ struct TopicsModel {
         func isQuiet(_ group: TopicGroupID) -> Bool {
             switch group {
             case .topic(let id): return snoozedIDs.contains(id)
+            case .locked: return false
             case .noTopic: return zen != nil
             }
         }
@@ -338,12 +360,11 @@ struct TopicsModel {
         let active = activeTopic
         let openTopics = selection.openTopics(for: active)
         let grouped = Dictionary(grouping: windows, by: groupID)
-        /// A Topic's Sessions in the Topic's order; No Topic's in tmux order.
-        func sessions(of id: TopicGroupID, record: TopicRecord?) -> [Session] {
-            let members = grouped[id] ?? []
+        /// A Topic's Sessions in the Topic's order; the Sessions of No Topic or of a Locked Session in tmux order.
+        func sessions(of id: TopicGroupID, members: [TmuxWindow], record: TopicRecord?) -> [Session] {
             var seen: Set<String> = []
             let firsts = members.filter { seen.insert($0.sessionID).inserted }
-            let ordered = id == .noTopic ? firsts : TopicSessionOrder.ordered(firsts, record: record, order: config.topics.sessionOrder) {
+            let ordered = record == nil ? firsts : TopicSessionOrder.ordered(firsts, record: record, order: config.topics.sessionOrder) {
                 TopicSessionKey(of: $0, record: record, projects: config.projects)
             }
             return ordered.map(\.sessionID).map { sessionID -> Session in
@@ -361,7 +382,17 @@ struct TopicsModel {
             let kind: Row.Kind = (record.isSnoozed(at: now) ? record.snoozeDeadline : nil).map { .snoozed(wake: $0.wakeLabel) } ?? .open
             let agents = isQuiet(id) ? [] : agentsByGroup[id] ?? []
             return Row(id: id, title: title, kind: kind, mark: mark(agents), hasWorkingAgent: agents.contains { $0.status == .working },
-                       isPinned: record.isPinned, sessions: sessions(of: id, record: record), isExpanded: openTopics.contains(id))
+                       isPinned: record.isPinned, sessions: sessions(of: id, members: grouped[id] ?? [], record: record),
+                       isExpanded: openTopics.contains(id))
+        }
+        /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
+        func lockedRow(_ lock: SessionLock) -> Row {
+            let id = TopicGroupID.locked(lock.sessionID)
+            let agents = agentsByGroup[id] ?? []
+            let members = grouped[id] ?? []
+            return Row(id: id, title: members.first?.sessionName ?? lock.sessionID, kind: .open, mark: mark(agents),
+                       hasWorkingAgent: agents.contains { $0.status == .working }, isPinned: false,
+                       sessions: sessions(of: id, members: members, record: nil), isExpanded: openTopics.contains(id))
         }
         let untitledRecords = open.filter { $0.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }
         var numbers: [String: Int] = [:]
@@ -378,15 +409,24 @@ struct TopicsModel {
             numbers[record.id] = number
             usedNumbers.insert(number)
         }
-        let rows = open.map { record -> Row in
-            let title: String
-            if let value = record.title, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { title = value }
-            else {
-                title = "Untitled \(numbers[record.id] ?? 1)"
+        let rows = entries.map { entry -> Row in
+            switch entry {
+            case .lock(let lock): return lockedRow(lock)
+            case .topic(let record):
+                let title: String
+                if let value = record.title, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { title = value }
+                else {
+                    title = "Untitled \(numbers[record.id] ?? 1)"
+                }
+                return row(record, title: title)
             }
-            return row(record, title: title)
         }
-        noTopicSessions = sessions(of: .noTopic, record: nil)
+        noTopicSessions = sessions(of: .noTopic, members: windows.filter { window in
+            switch groupID(window) {
+            case .topic: return false
+            case .locked, .noTopic: return true
+            }
+        }, record: nil)
         openedNoTopicSession = active == .noTopic ? noTopicSessions.first { $0.id.session == selectedWindow?.sessionID } : nil
         topicSessions = Dictionary((rows.flatMap(\.sessions) + noTopicSessions).map { ($0.id.session, $0) },
                                    uniquingKeysWith: { first, _ in first })

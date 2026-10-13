@@ -43,6 +43,8 @@ public struct TopicMembershipPlan: Sendable {
 
     public let record: TopicRecord?
     public let commands: [TopicPlan.Command]
+    /// The Session whose Lock the move ends: a Locked Session goes into a Topic (ADR 0018).
+    private(set) var endedLockOf: String? = nil
 
     init(removingSession sessionID: String) {
         record = nil
@@ -77,6 +79,10 @@ public struct TopicMembershipPlan: Sendable {
                 .tmux(["rename-session", "-t", window.sessionID, sessionName]),
                 .tmux(["set-option", "-t", window.sessionID, "@muxify_topic", record.id]),
             ]
+            if window.lockOrder != nil {
+                commands.append(.tmux(SessionLock.unsetOption(window.sessionID)))
+                endedLockOf = window.sessionID
+            }
             if let clientTTY {
                 commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", window.sessionID + ":" + window.id]))
             }

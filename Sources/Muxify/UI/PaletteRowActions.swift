@@ -41,9 +41,15 @@ extension CommandPalette {
         case .move:
             if let window { begin(.move(MoveDraft(window: window, paneID: paneID ?? window.activePaneID, scope: scope)), keepingHistory: true) }
         case .rename:
-            if let window { begin(.text(.renameWindow(window)), text: window.name, keepingHistory: true) }
+            guard let window else { break }
+            if scope == .session { begin(.text(.renameSession(window)), text: window.sessionName, keepingHistory: true) }
+            else { begin(.text(.renameWindow(window)), text: window.name, keepingHistory: true) }
         case .killWindow:
             if let window { begin(.confirm(PaletteConfirmation(.killWindow(window))), keepingHistory: true) }
+        case .killSession:
+            if let window { begin(.confirm(PaletteConfirmation(.killSession(window))), keepingHistory: true) }
+        case .lockSession, .unlockSession:
+            if let window { close(); store.setLock(ofSession: window.sessionID, action == .lockSession) }
         case .newWindow:
             if let window { close(); store.newWindow(beside: window) }
         case .removeFromTopic:

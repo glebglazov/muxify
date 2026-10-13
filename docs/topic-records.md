@@ -132,6 +132,29 @@ remembered Session. It makes one shell Window there, with no Tabs and no Agent.
 When the new Sessions are live, the record remembers them in place of the old
 Windows.
 
+## Locked Sessions
+
+A Lock (ADR 0018) has no record file. tmux keeps it in the Session option
+`@muxify_lock`. Its value is the place of the Session's card in the Topics list,
+in the same scale as the `order` of the Topic records:
+
+```sh
+tmux set-option -t notes @muxify_lock 3.5
+```
+
+Only a No Topic Session can be Locked. Muxify ignores the option on a Session
+whose `@muxify_topic` names an open Topic. A Lock is never Pinned, so its card
+moves among the Topics that are not Pinned. When a move renumbers the list,
+Muxify writes the new `order` values to the records and the new
+`@muxify_lock` values to tmux. A new Lock goes after the last Topic that is not
+Pinned. The Lock ends when the user Unlocks the Session, when the Session ends,
+and when the Session goes into a Topic. A Topic that the user makes from a
+Locked Session takes the Lock's value as its `order`.
+
+`muxify session lock` and `muxify session unlock`, and the URLs
+`muxify://topic/lock?session=<name>` and `muxify://topic/unlock?session=<name>`,
+change a Lock through the Topic service.
+
 ## Zen record
 
 While Zen is on, Muxify keeps one record in `$XDG_STATE_HOME/muxify/zen.json`,

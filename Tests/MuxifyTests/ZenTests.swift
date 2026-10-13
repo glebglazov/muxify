@@ -134,6 +134,31 @@ final class ZenTests: XCTestCase {
         }
     }
 
+    func testZenHidesALockedSessionAndShowsItAsTheNoTopicCardWhileTheUserIsInIt() {
+        var windows = self.windows
+        windows[3].lockOrder = 10
+        func model(selected: String, zen: ZenRecord?) -> TopicsModel {
+            var selection = TopicSelection()
+            selection.windowID = selected
+            return TopicsModel(records: [kept, made], windows: windows, config: Config(), selection: selection,
+                               agents: agents, zen: zen, now: now)
+        }
+        let without = model(selected: "@4", zen: nil)
+        XCTAssertEqual(without.rows.map(\.id), [.topic("kept"), .topic("made"), .locked("$n2")])
+        XCTAssertNil(without.openedNoTopicSession)
+        XCTAssertEqual(without.workingSessionIDs, ["$n2"], "a Locked Session is not quiet without Zen")
+
+        let during = model(selected: "@4", zen: zen)
+        XCTAssertEqual(during.rows.map(\.id), [.topic("kept"), .topic("made")], "Zen hides the Locked Session")
+        XCTAssertEqual(during.openedNoTopicSession?.id.session, "$n2", "while the user is in it, it is the one No Topic card")
+        XCTAssertEqual(during.workingSessionIDs, [], "it is quiet as No Topic is")
+        XCTAssertEqual(during.lockedSessionIDs, ["$n2"], "Zen does not end the Lock")
+        XCTAssertNil(model(selected: "@1", zen: zen).openedNoTopicSession)
+        for zen in [nil, zen] {
+            XCTAssertEqual(model(selected: "@1", zen: zen).noTopicSessions.map(\.id.session), ["$n1", "$n2"], "the palette still reaches it")
+        }
+    }
+
     func testWithOrWithoutZenTheNoTopicSlotShowsOnlyTheOpenedSessionAndTheNextOneReplacesIt() {
         for zen in [nil, zen] {
             let opened = { (selected: String) in self.model(selected: selected, zen: zen).openedNoTopicSession?.id.session }

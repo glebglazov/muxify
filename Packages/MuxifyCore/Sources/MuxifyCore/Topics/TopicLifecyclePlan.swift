@@ -72,7 +72,9 @@ struct TopicSettlePlan {
             let choice = choices.first { $0.id == session.id } ?? session
             switch choice.disposition {
             case .kill: commands.append(.tmux(["kill-session", "-t", session.id]))
-            case .keep: commands.append(.tmux(["set-option", "-u", "-t", session.id, "@muxify_topic"]))
+            case .keep:
+                commands.append(.tmux(["set-option", "-u", "-t", session.id, "@muxify_topic"]))
+                commands.append(.tmux(SessionLock.unsetOption(session.id)))
             }
         }
         for session in defaults {
@@ -250,7 +252,7 @@ struct TopicReopenPlan {
                                                excludingTopicID: topic.id)
                 record.settledAt = nil
                 record.snoozedUntil = nil
-                record.order = TopicOrder.firstOrder(in: records, pinned: topic.isPinned)
+                record.order = TopicOrder.firstOrder(in: TopicListEntry.all(records: records, windows: windows), pinned: topic.isPinned)
                 reopened = record
             }
             edit = TopicEdit(record: nil, commands: [], selection: .emptyTopic(topic.id), completion: reopened.map(TopicEdit.Completion.save))
@@ -282,7 +284,7 @@ struct TopicReopenPlan {
         var reopened = topic
         reopened.slug = slug
         reopened.settledAt = nil
-        reopened.order = TopicOrder.firstOrder(in: records, pinned: topic.isPinned)
+        reopened.order = TopicOrder.firstOrder(in: TopicListEntry.all(records: records, windows: windows), pinned: topic.isPinned)
         edit = TopicEdit(record: topic, commands: commands, selection: .sessionName(home.name), completion: .save(reopened))
     }
 }

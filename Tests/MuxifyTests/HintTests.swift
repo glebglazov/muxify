@@ -233,6 +233,35 @@ final class HintTests: XCTestCase {
                        [.session("$2"), .session("$1")])
     }
 
+    func testALockedSessionsCardIsNumberedInItsPlaceAmongTheTopics() {
+        var pinned = TopicRecord(id: "pinned")
+        pinned.isPinned = true
+        pinned.order = 5
+        var first = TopicRecord(id: "first")
+        first.order = 0
+        var last = TopicRecord(id: "last")
+        last.order = 2
+        func window(_ id: String, lock: Double?) -> TmuxWindow {
+            var window = TmuxWindow(id: "@" + id, sessionID: "$" + id, sessionName: "session-" + id, index: 0,
+                                    name: "shell", paneTitle: "shell", path: "/tmp", command: "zsh", isActive: true,
+                                    paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: .init(), openRequests: [])
+            window.lockOrder = lock
+            return window
+        }
+        let windows = [window("1", lock: 1), window("2", lock: nil)]
+        let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
+        var selection = TopicSelection()
+        selection.windowID = "@1"
+        let topics = TopicsModel(records: [last, first, pinned], windows: windows, config: Config(), selection: selection)
+        XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
+                       [.topic("pinned"), .topic("first"), .locked("$1"), .topic("last")])
+        XCTAssertEqual(topics.activeTopic, .locked("$1"))
+        XCTAssertEqual(topics.rows.first { $0.id == .locked("$1") }?.isExpanded, true, "going into a Locked Session opens its card")
+        XCTAssertEqual(topics.rows.first { $0.id == .locked("$1") }?.sessions.map(\.id.session), ["$1"])
+        XCTAssertNil(topics.openedNoTopicSession, "a Locked Session has its own card, not the No Topic card")
+        XCTAssertEqual(topics.nextTopic(after: "first"), .locked("$1"), "a Locked Session can be the Next Topic")
+    }
+
     func testAppKitModifiersAndNumberedTriggerUseExactSet() throws {
         let flags: NSEvent.ModifierFlags = [.control, .option, .capsLock, .numericPad]
         XCTAssertEqual(KeyTrigger.Modifiers(flags), [.control, .option])

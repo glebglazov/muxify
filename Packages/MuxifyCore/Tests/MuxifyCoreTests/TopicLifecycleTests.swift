@@ -33,7 +33,8 @@ final class TopicLifecycleTests: XCTestCase {
         XCTAssertEqual(choices.map(\.disposition), [.keep, .kill])
         let edit = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: [], outcome: "  Delivered  ",
                                    now: Date(timeIntervalSince1970: 0)).edit
-        XCTAssertEqual(edit.commands, [.tmux(["set-option", "-u", "-t", "$1", "@muxify_topic"]), .tmux(["kill-session", "-t", "$2"])])
+        XCTAssertEqual(edit.commands, [.tmux(["set-option", "-u", "-t", "$1", "@muxify_topic"]), .tmux(["set-option", "-u", "-t", "$1", "@muxify_lock"]),
+                                       .tmux(["kill-session", "-t", "$2"])], "a kept Session leaves as a No Topic Session with no Lock")
         XCTAssertEqual(edit.record?.settledAt, "1970-01-01T00:00:00Z")
         XCTAssertEqual(edit.record?.outcome, "Delivered")
         XCTAssertEqual(edit.record?.sessions.count, 2)
@@ -47,12 +48,13 @@ final class TopicLifecycleTests: XCTestCase {
         choices[1].disposition = .keep
         let merged = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: choices, outcome: "", mergedWorktrees: ["/trees/game"]).edit
         XCTAssertEqual(merged.commands, [.tmux(["kill-session", "-t", "$1"]), .tmux(["set-option", "-u", "-t", "$2", "@muxify_topic"]),
+                                         .tmux(["set-option", "-u", "-t", "$2", "@muxify_lock"]),
                                          .removeMergedWorktree(.init(projectPath: game.path, path: "/trees/game", branch: "old-branch"))])
         let unmerged = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: choices, outcome: "").edit
-        XCTAssertEqual(unmerged.commands.count, 2)
+        XCTAssertEqual(unmerged.commands.count, 3)
         choices[0].disposition = .keep
         let kept = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: choices, outcome: "", mergedWorktrees: ["/trees/game"]).edit
-        XCTAssertEqual(kept.commands.count, 2)
+        XCTAssertEqual(kept.commands.count, 4, "two kept Sessions, each without its Topic and its Lock")
         XCTAssertEqual(kept.commands.first, .tmux(["set-option", "-u", "-t", "$1", "@muxify_topic"]))
     }
 
