@@ -120,7 +120,10 @@ class WindowPartsSidebar(unittest.TestCase):
         s.wait_rows(lambda rs: s.has(card, rs), 'no card for the Session with the bell')
         if 'expanded' not in s.row(card).get('accessibilityValue', ''):
             s.act('press', card)
-        key = 'window-bell-' + window
-        rs = s.wait_rows(lambda rs: s.has(key, rs), 'the Window row shows no bell')
-        bell = s.row(key, rs)
+        self.row_key = 'session-window-' + window
+        rs = s.wait_rows(lambda rs: any(row.get('accessibilityRole') == 'AXImage'
+                                       and row.get('accessibilityLabel') == 'Bell' for row in self.window_rows(rs)),
+                         'the Window row shows no bell')
+        bell = next(row for row in self.window_rows(rs) if row.get('accessibilityRole') == 'AXImage'
+                    and row.get('accessibilityLabel') == 'Bell')
         self.assertEqual((bell.get('accessibilityRole'), bell.get('accessibilityLabel')), ('AXImage', 'Bell'), json.dumps(bell))
