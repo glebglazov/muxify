@@ -754,7 +754,7 @@ private struct LockedCard: View {
         CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isLocked: true, hintTarget: .locked(sessionID),
                    notes: ["Locked"], summary: formatted.summary) {
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
-                Circle().fill(Color.orange).frame(width: 5, height: 5).accessibilityLabel("Bell")
+                BellMark()
             }
         }
         .longPressDrag(id, state: $drag, in: TopicCard.listSpace, isEnabled: !store.changingTopic,
@@ -975,7 +975,7 @@ private struct SessionCard<Row: View>: View {
                     SessionPills(isHome: topicSession.isHome, branch: topicSession.branch)
                 }
                 if !isOpen, session.windows.contains(where: \.hasBell) {
-                    Circle().fill(Color.orange).frame(width: 5, height: 5).accessibilityLabel("Bell")
+                    BellMark()
                 }
             }
             .onTapGesture(perform: toggle)
@@ -1067,9 +1067,7 @@ struct WindowRow: View {
             }
             Spacer(minLength: 4)
             if window.hasBell && !topicsView {
-                Circle()
-                    .fill(Color.orange)
-                    .frame(width: 5, height: 5)
+                BellMark()
                     .accessibilityIdentifier("window-bell-\(window.id)")
             }
             if let right = content?.right {
@@ -1151,6 +1149,16 @@ struct WindowRow: View {
 private enum SelectedRow {
     static let fill = Color.accentColor.opacity(0.22)
     static let fade = 0.14
+}
+
+/// A terminal bell in a Window. It is not an Agent mark, so it is gray, and no Config changes it.
+private struct BellMark: View {
+    var body: some View {
+        Image(systemName: "bell.fill")
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Bell")
+    }
 }
 
 /// The row of one Pane of a split Window.
