@@ -559,6 +559,54 @@ class TopicsCardsSidebar(TopicsSidebar):
         s.wait_shown('=alpha/click-dormant:')
         self.assertFalse(s.has('reopen-choice-reopen'), 'going to the Dormant Topic showed the Reopen choice')
 
+    def test_reopen_keeps_browser_tabs_in_the_window_and_the_topic_record(self):
+        s = self.s
+        tabs = ['data:text/html,reopen-one', 'data:text/html,reopen-two']
+        for split in [False, True]:
+            with self.subTest(split=split):
+                topic = 'browser-split' if split else 'browser-shell'
+                directory = self.beta if split else self.alpha
+                panes = [dict(directory=str(directory), active=True)]
+                if split:
+                    panes[0].update(agent='claude', agent_conversation='verify-reopen')
+                    panes.append(dict(directory=str(self.alpha), active=False))
+                self.write_topic(topic, topic, self.alpha, sessions=[dict(project_path=str(self.alpha), windows=[
+                    dict(directory=str(directory), name='browser', panes=panes,
+                         browser_tabs=tabs, browser_active_tab=1, browser_open=True, terminal_open=not split)])])
+                self.find('topic-' + topic)
+                s.act('press', 'topic-' + topic)
+                target = '=alpha/' + topic + ':'
+                self.wait_session('alpha/' + topic)
+                sid = s.tmux('display-message', '-p', '-t', target, '#{session_id}')
+                self.addCleanup(self.end_session, sid)
+                s.wait_shown(target)
+                wait(lambda: len(s.tmux('list-panes', '-t', target, '-F', '#{pane_id}').split()) == len(panes),
+                     'Reopen did not restore the Panes')
+                with self.subTest(restored_browser=True):
+                    _, rows = self.rows_until(lambda rs: len([key for key in s.ids(rs)
+                                                              if key.startswith('browser-tab-title-')]) == len(tabs))
+                    tab_rows = [key for key in s.ids(rows) if key.startswith('browser-tab-title-')]
+                    self.assertEqual(len(tab_rows), len(tabs), 'Reopen did not show the remembered Tabs')
+                    self.assertEqual(s.has('terminal-panel', rows), not split)
+                    if split:
+                        wait(lambda: any(name.startswith(('WKWebView', 'WKContentView'))
+                                         for name in s.driver('responder')['responders']),
+                             'Reopen did not give the Browser keyboard focus while the Terminal was hidden')
+                self.press_menu_item('Focus Terminal')
+                time.sleep(REFRESH_LIMIT)
+                with self.subTest(saved_browser=True):
+                    self.assertEqual(s.tmux('show-options', '-wqv', '-t', target, '@muxify_tabs').split(), tabs)
+                    self.assertEqual(s.tmux('show-options', '-wqv', '-t', target, '@muxify_active_tab'), '1')
+                    self.assertEqual(s.tmux('show-options', '-wqv', '-t', target, '@muxify_browser'), 'on')
+                s.tmux('rename-window', '-t', target, 'browser-saved')
+                def saved():
+                    windows = self.records().get(topic, {}).get('sessions', [{}])[0].get('windows', [])
+                    return windows[0] if windows and windows[0].get('name') == 'browser-saved' else None
+                record = wait(saved, 'the Topic record did not save the reopened Window')
+                self.assertEqual(record.get('browser_tabs'), tabs, record)
+                self.assertEqual(record.get('browser_active_tab'), 1, record)
+                self.assertTrue(record.get('browser_open'), record)
+
     def test_a_dormant_topic_comes_back_with_the_panes_of_its_split_window_and_its_program_typed_not_run(self):
         s = self.s
         # Reopen reaches each Pane by its place, not its index, so a pane-base-index the user changed must not matter.

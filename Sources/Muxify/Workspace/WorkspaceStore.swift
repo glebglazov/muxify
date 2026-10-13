@@ -1248,6 +1248,7 @@ final class WorkspaceStore {
         }
         let listedBefore = windows
         if !changingTopic { rememberTopics(in: snapshot) }
+        let unresolvedSelectedWindowID = selectedWindow == nil ? selectedWindowID : nil
         if windows != snapshot.windows { windows = snapshot.windows }
         let now = Date()
         pendingOpenings = pendingOpenings.filter { _, opening in
@@ -1299,6 +1300,9 @@ final class WorkspaceStore {
             if surface != nil, let window = takePendingSession(in: windows) { select(window) }
         }
         updateTopicSelection()
+        if let unresolvedSelectedWindowID, selectedWindow?.id == unresolvedSelectedWindowID {
+            moveFocusIntoWindow()
+        }
         recordVisit()
         consumeOpenRequests()
         if !updateUnread(snapshot.panes) { wakeTopics() }
@@ -1746,7 +1750,7 @@ final class WorkspaceStore {
     }
 
     var currentBrowser: Browser? {
-        selectedWindowID.map(browser(for:))
+        selectedWindow.map { browser(for: $0.id) }
     }
 
     /// For the sidebar badge, without restoring Browsers nobody has looked at.
