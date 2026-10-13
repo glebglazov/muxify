@@ -28,7 +28,6 @@ final class WorkspaceStore {
     private(set) var visits = VisitLog(defaults: .standard)
     /// The Projects on this App Window's Environment, as `refreshProjects` found them last.
     private(set) var projects: [Project] = []
-    var notifications: Config.Notifications { configStore.config.notifications }
     var topicConfig: Config.Topics { configStore.config.topics }
 
     /// Looks for the Config's Projects again, on the Environment's machine and off the main thread. A sheet

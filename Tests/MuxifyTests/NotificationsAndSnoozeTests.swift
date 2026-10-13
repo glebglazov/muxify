@@ -100,7 +100,7 @@ final class NotificationsAndSnoozeTests: XCTestCase {
         }
         XCTAssertEqual(model(Config(), agents).rows[0].mark, .blocked)
         XCTAssertEqual(model(Config(), agents).dueWakes[0].count, 3)
-        for (key, disabled, expected) in [(\Config.Notifications.blockedEnabled, AgentStatus.blocked, AgentStatus.failed),
+        for (key, disabled, expected) in [(\Config.Notifications.blockedEnabled, AgentStatus.blocked, AgentMark.failed),
                                          (\Config.Notifications.failedEnabled, .failed, .blocked),
                                          (\Config.Notifications.doneEnabled, .done, .blocked)] {
             var config = Config()
@@ -112,14 +112,31 @@ final class NotificationsAndSnoozeTests: XCTestCase {
         }
         XCTAssertEqual(model(Config(), Array(agents.prefix(2))).rows[0].mark, .failed)
         XCTAssertEqual(model(Config(), [agents[0]]).rows[0].mark, .done)
-        XCTAssertNil(model(Config(), [agent(.done, unread: false), agent(.working)]).rows[0].mark)
+        XCTAssertEqual(model(Config(), [agent(.done, unread: false), agent(.working, id: "%2")]).rows[0].mark, .working)
+        XCTAssertNil(model(Config(), [agent(.done, unread: false)]).rows[0].mark, "a read, done Agent has no mark")
         XCTAssertEqual(model(Config(), [agent(.blocked, unread: false), agent(.done, id: "%2")]).rows[0].mark, .blocked)
         var noBlocked = Config()
         noBlocked.notifications.blockedEnabled = false
         XCTAssertNil(model(noBlocked, [agent(.blocked, unread: false)]).rows[0].mark)
     }
 
-    func testSnoozedMembershipVisibilityAndDueWakeRemainSeparateFromDormancy() {
+    func testASnoozedTopicHasNoMarkAndItsAgentsKeepOnlyTheWorkingMark() {
+        var snoozed = TopicRecord(id: "a")
+        snoozed.snoozedUntil = "never"
+        let windows = [window("@1", topic: "a"), window("@2", topic: nil)]
+        let agents = [agent(.working), agent(.blocked, id: "%2"), agent(.failed, id: "%3"), agent(.done, id: "%4", window: "@2")]
+        let model = TopicsModel(records: [snoozed], windows: windows, config: Config(), selection: TopicSelection(),
+                                agents: agents, now: now)
+        XCTAssertNil(model.groups.first { $0.kind == .snoozed }?.topics.first?.mark)
+        XCTAssertEqual(model.agentMarks, ["%1": .working, "%4": .done])
+
+        var config = Config()
+        config.notifications.doneEnabled = false
+        let off = TopicsModel(records: [], windows: windows, config: config, selection: TopicSelection(), agents: agents, now: now)
+        XCTAssertEqual(off.agentMarks, ["%1": .working, "%2": .blocked, "%3": .failed], "done_enabled: false reaches every row")
+    }
+
+        func testSnoozedMembershipVisibilityAndDueWakeRemainSeparateFromDormancy() {
         var future = TopicRecord(id: "future")
         future.snoozedUntil = SnoozeDeadline.at(now.addingTimeInterval(60)).stored
         var never = TopicRecord(id: "never")

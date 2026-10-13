@@ -103,6 +103,7 @@ struct ContentView: View {
             store.hintHold.receive(.reset)
         }
         .environment(\.pulses, configStore.config.pulse)
+        .environment(\.agentColors, configStore.config.agentColors)
         .environment(\.chromeTheme, store.theme)
 
     }

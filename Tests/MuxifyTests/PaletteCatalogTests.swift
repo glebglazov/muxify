@@ -33,7 +33,7 @@ final class PaletteCatalogTests: XCTestCase {
                                 agents: agents, zen: zen, now: now)
         return PaletteCatalog(windows: windows, agents: agents, projects: config.projects, selectedWindowID: selected,
                               homeDirectory: "/home", topics: model, records: records, lastWindowByGroup: lastWindow,
-                              visits: visits, now: now)
+                              visits: visits, now: now, agentMarks: model.agentMarks)
     }
 
     private func visits(_ stamps: [(VisitKey, TimeInterval)]) -> VisitLog {
@@ -122,7 +122,7 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(ids(list), ["session:$note-b", "session:$note", "project:/q/notes"])
     }
 
-    func testRowsShowTheNotificationMarkAndWorkingDotOfTheirSidebarCard() {
+    func testRowsShowTheAgentMarkOfTheirSidebarCard() {
         let records = [topic("a", "Alpha"), topic("b", "Beta")]
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "game/beta", directory: "/work/game/release", topic: "b"),
@@ -135,9 +135,7 @@ final class PaletteCatalogTests: XCTestCase {
         let list = catalog(records: records, windows: windows, agents: agents).list(goTo, query: "")
         func row(_ id: String) -> PickRow<PaletteItem>? { list.rows.first { $0.id == id } }
         XCTAssertEqual(row("topic-a")?.mark, .done)
-        XCTAssertEqual(row("topic-a")?.isWorking, false)
-        XCTAssertNil(row("topic-b")?.mark)
-        XCTAssertEqual(row("topic-b")?.isWorking, true)
+        XCTAssertEqual(row("topic-b")?.mark, .working)
         XCTAssertEqual(row("session:$scratch")?.mark, .blocked)
     }
 
@@ -282,10 +280,11 @@ final class PaletteCatalogTests: XCTestCase {
             Agent(paneID: id, kind: .codex, status: status, unread: unread, windowID: window.id, sessionID: window.sessionID,
                   sessionName: window.sessionName, windowIndex: 0, windowTitle: "", label: "Agent " + id)
         }
-        let agents = [agent("%1", windows[0], .done), agent("%2", windows[1], .working), agent("%3", windows[0], .failed),
-                      agent("%4", windows[1], .done, unread: true)]
+        let agents = [agent("%1", windows[0], .done), agent("%2", windows[1], .working), agent("%3", windows[0], .failed, unread: true),
+                      agent("%4", windows[1], .done, unread: true), agent("%5", windows[0], .failed)]
         let catalog = catalog(records: [], windows: windows, agents: agents, mode: .sessions)
-        XCTAssertEqual(ids(catalog.list([.agents], query: "")), ["agent:%3", "agent:%4", "agent:%2", "agent:%1"])
+        XCTAssertEqual(ids(catalog.list([.agents], query: "")), ["agent:%3", "agent:%4", "agent:%2", "agent:%1", "agent:%5"],
+                       "a read, failed Agent has no Notification, so it goes with the read, done one")
         XCTAssertEqual(catalog.list([.sessions, .windows], query: "").sections.map(\.id), ["sessions"])
         XCTAssertEqual(ids(catalog.list([.windows], query: "")), ["window:@1", "window:@2"])
         XCTAssertFalse(ids(catalog.list([.agents, .windows], query: "a")).contains("window:@1"), "the Agent's row stands for its Window")

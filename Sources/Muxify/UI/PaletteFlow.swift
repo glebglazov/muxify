@@ -196,7 +196,7 @@ extension CommandPalette {
                     case .blocked(let reason): pick = .blocked(reason: reason)
                     }
                     return PickRow(id: row.id, symbol: row.symbol, title: row.title, detail: row.detail,
-                                   trailing: row.trailing, mark: row.mark, isWorking: row.isWorking,
+                                   trailing: row.trailing, mark: row.mark,
                                    pick: pick, paste: nil, snooze: nil)
                 })
             })

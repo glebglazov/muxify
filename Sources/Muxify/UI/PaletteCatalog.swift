@@ -26,8 +26,9 @@ struct PaletteItem: Equatable {
     var target: String?
     /// A `Resources/Logos` name, for Windows and Agents.
     var logo: String?
+    /// An Agent's Status, which its row shows as text.
     var status: AgentStatus?
-    var unread = false
+    var mark: AgentMark?
 }
 
 enum MoveDestination: Hashable {
@@ -53,6 +54,8 @@ struct PaletteCatalog {
     var now = Date()
     var commands: [PaletteCommand] = []
     var commandShortcuts: [PaletteCommand: String] = [:]
+    /// The Agent mark of each Agent, by Pane ID.
+    var agentMarks: [String: AgentMark] = [:]
 
     /// Whether the topics Source has rows: Topics are on, in a Local App Window.
     var offersTopics: Bool { topics?.topicsEnabled == true }
@@ -122,7 +125,7 @@ struct PaletteCatalog {
         return PickCandidate(
             id: row.id.accessibilityID, symbol: row.isDormant ? "◇" : "◆", title: row.title,
             fields: topicFields(row, type: row.isDormant ? "dormant" : "topic"),
-            trailing: trailing, mark: row.mark, isWorking: row.hasWorkingAgent,
+            trailing: trailing, mark: row.mark,
             lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, isPinned: row.isPinned,
             pick: .available(PaletteItem(kind: .topic, ref: .topic(id: id, window: window))), snooze: id)
     }
@@ -178,14 +181,12 @@ struct PaletteCatalog {
         let visit = ([visits.last(.directory((choice.directory as NSString).standardizingPath))]
                      + names.map { visits.last(.session(name: $0)) }).compactMap { $0 }.max()
         let isCurrent = sessions.contains { $0.contains { $0.id == selectedWindowID } }
-        let marks = ids.compactMap { topics?.sessionMarks[$0] }
         return PickCandidate(
             id: "project:\(choice.directory)", symbol: sessions.isEmpty ? "□" : "■", title: choice.displayName,
             fields: [.typeWord(choice.isWorktree ? "worktree" : "project"), .detail(Paths.tildify(choice.directory, home: homeDirectory))]
                 + choice.nameFields + names.filter { $0 != choice.name }.map { .hidden($0) },
             trailing: sessions.isEmpty ? "↩ open" : isCurrent ? "Current" : visit.map { VisitAge.short(since: $0, now: now) } ?? "",
-            mark: [AgentStatus.blocked, .failed, .done].first(where: marks.contains),
-            isWorking: ids.contains { topics?.workingSessionIDs.contains($0) ?? false },
+            mark: ids.compactMap { topics?.sessionMarks[$0] }.max(),
             lastVisit: visit, isCurrent: isCurrent, unopened: sessions.isEmpty,
             activity: sessions.flatMap { $0.map(\.sessionActivity) }.max() ?? 0,
             pick: .available(PaletteItem(kind: choice.isWorktree ? .worktree : .project,
@@ -210,7 +211,7 @@ struct PaletteCatalog {
                 fields: [.typeWord("session"), .detail("\(count) window\(count == 1 ? "" : "s")"),
                          .detail(Paths.tildify(folder, home: homeDirectory))],
                 trailing: isCurrent ? "Current" : age(.session(name: session.name)) ?? "",
-                mark: topics?.sessionMarks[session.id], isWorking: topics?.workingSessionIDs.contains(session.id) ?? false,
+                mark: topics?.sessionMarks[session.id],
                 lastVisit: visits.last(.session(name: session.name)), isCurrent: isCurrent, activity: active.sessionActivity,
                 pick: .available(PaletteItem(kind: .session, ref: .session(session), path: folder, target: session.name)),
                 paste: Self.shellWord(folder))
@@ -230,12 +231,15 @@ struct PaletteCatalog {
             paste: Self.shellWord(window.path))
     }
 
-    /// Those that need you (blocked, failed or unread) first, then working ones, then the rest, each in tmux order.
+    /// Those with a Notification first, then working ones, then the rest, each in tmux order.
     private var agentCandidates: [PickCandidate<PaletteItem>] {
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         func rank(_ agent: Agent) -> Int {
-            if agent.unread || agent.status == .blocked || agent.status == .failed { return 0 }
-            return agent.status == .working ? 1 : 2
+            switch agentMarks[agent.paneID] {
+            case .working?: return 1
+            case nil: return 2
+            default: return 0
+            }
         }
         let ordered = agents.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
         return ordered.map { agent in
@@ -247,7 +251,8 @@ struct PaletteCatalog {
                          .hidden(Paths.tildify(path, home: homeDirectory))],
                 isCurrent: agent.windowID == selectedWindowID, activity: window?.sessionActivity ?? 0,
                 pick: .available(PaletteItem(kind: .agent, ref: .agent(agent), path: path, target: agent.paneID,
-                                             logo: agent.kind.rawValue, status: agent.status, unread: agent.unread)),
+                                             logo: agent.kind.rawValue, status: agent.status,
+                                             mark: agentMarks[agent.paneID])),
                 paste: path.isEmpty ? nil : Self.shellWord(path))
         }
     }
@@ -267,7 +272,7 @@ struct PaletteCatalog {
             return PickCandidate(
                 id: row.id.accessibilityID, symbol: row.isDormant ? "◇" : "◆", title: row.title,
                 fields: topicFields(row, type: row.isDormant ? "dormant" : "topic"),
-                trailing: age(.topic(row.id)) ?? "", mark: row.mark, isWorking: row.hasWorkingAgent,
+                trailing: age(.topic(row.id)) ?? "", mark: row.mark,
                 lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned,
                 pick: occupied ? .blocked(reason: "has a \(project.displayName) Session")
                     : .available(PaletteItem(kind: .topic, ref: .choice(.move(.topic(id: id))))))

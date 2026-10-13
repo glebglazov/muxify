@@ -1,49 +1,10 @@
 import SwiftUI
-import MuxifyCore
 
-/// Shared presentation for the Sidebar and Command Palette. Attention takes
-/// priority over Unread; a working Agent never gets an Unread dot.
-enum AgentStatusMarker: Equatable {
-    case working, unread, attention
-
-    init?(status: AgentStatus?, unread: Bool) {
-        switch status {
-        case .working: self = .working
-        case .blocked, .failed: self = .attention
-        case .done where unread: self = .unread
-        case .done, nil: return nil
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .working: .secondary
-        case .unread: .blue
-        case .attention: .orange
-        }
-    }
-}
-
-struct AgentStatusIndicator: View {
-    let marker: AgentStatusMarker
-    var dotSize: CGFloat = 7
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        switch marker {
-        case .working:
-            TerminalActivityIndicator(reduceMotion: reduceMotion)
-        case .unread, .attention:
-            Circle().fill(marker.color).frame(width: dotSize, height: dotSize)
-        }
-    }
-}
-
-/// Square pixels light up one step at a time, like a terminal activity glyph.
-/// Every visible indicator shares a clock; reduced motion has no animation timer.
+/// The Working mark of a row: square pixels light up one step at a time, like a terminal activity glyph.
+/// Every moving glyph shares a clock; a still one has no animation timer.
 struct TerminalActivityIndicator: View {
-    let reduceMotion: Bool
+    let moves: Bool
+    let color: Color
 
     static let period: TimeInterval = 1.2
 
@@ -53,12 +14,12 @@ struct TerminalActivityIndicator: View {
     }
 
     var body: some View {
-        if reduceMotion {
-            TerminalActivityGlyph(phase: 0)
+        if !moves {
+            TerminalActivityGlyph(phase: 0, color: color)
         } else {
             TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0),
                                    by: Self.period / Double(TerminalActivityGlyph.cells.count))) { context in
-                TerminalActivityGlyph(phase: Self.phase(at: context.date))
+                TerminalActivityGlyph(phase: Self.phase(at: context.date), color: color)
             }
         }
     }
@@ -68,6 +29,7 @@ struct TerminalActivityIndicator: View {
 /// connects them: a bright head and two dimmer trailing pixels step clockwise.
 struct TerminalActivityGlyph: View {
     let phase: Double
+    let color: Color
 
     @Environment(\.displayScale) private var displayScale
 
@@ -111,7 +73,7 @@ struct TerminalActivityGlyph: View {
                 }
                 let block = CGRect(x: origin.x + cell.x * pitch, y: origin.y + cell.y * pitch,
                                    width: blockSize, height: blockSize)
-                context.fill(Path(block), with: .color(.primary.opacity(opacity)))
+                context.fill(Path(block), with: .color(color.opacity(opacity)))
             }
         }
         .frame(width: 10, height: 10)

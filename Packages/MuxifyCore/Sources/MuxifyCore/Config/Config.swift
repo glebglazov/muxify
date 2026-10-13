@@ -65,16 +65,6 @@ public struct Config: Equatable {
         public var doneEnabled = true
         public var failedEnabled = true
         public var blockedEnabled = true
-
-        public func notification(for agent: Agent) -> AgentStatus? {
-            guard agent.unread, let status = agent.status else { return nil }
-            switch status {
-            case .done: return doneEnabled ? status : nil
-            case .failed: return failedEnabled ? status : nil
-            case .blocked: return blockedEnabled ? status : nil
-            case .working: return nil
-            }
-        }
     }
 
     public struct Sidebar: Equatable {

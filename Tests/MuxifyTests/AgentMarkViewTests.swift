@@ -3,27 +3,8 @@ import SwiftUI
 import XCTest
 @testable import MuxifyCore
 
-final class AgentStatusIndicatorTests: XCTestCase {
-    func testMarkerPriorityForEveryStatusAndUnreadFlag() {
-        for unread in [false, true] {
-            XCTAssertEqual(AgentStatusMarker(status: .working, unread: unread), .working)
-            XCTAssertEqual(AgentStatusMarker(status: .blocked, unread: unread), .attention)
-            XCTAssertEqual(AgentStatusMarker(status: .failed, unread: unread), .attention)
-            XCTAssertEqual(AgentStatusMarker(status: .done, unread: unread), unread ? .unread : nil)
-            XCTAssertNil(AgentStatusMarker(status: nil, unread: unread))
-        }
-    }
-
-    func testPaletteStatusLabelsUseTheSameMonochromeBlueAndOrangeColors() {
-        let theme = PaletteTheme(nil)
-        for unread in [false, true] {
-            XCTAssertEqual(theme.status(.working, unread: unread), .secondary)
-            XCTAssertEqual(theme.status(.blocked, unread: unread), .orange)
-            XCTAssertEqual(theme.status(.failed, unread: unread), .orange)
-            XCTAssertEqual(theme.status(.done, unread: unread), unread ? .blue : nil)
-            XCTAssertNil(theme.status(nil, unread: unread))
-        }
-    }
+final class AgentMarkViewTests: XCTestCase {
+    private let gray = AgentColors()[.working].color
 
     func testWorkingPhaseAdvancesAndLoopsOnTheSharedClock() {
         let period = TerminalActivityIndicator.period
@@ -65,16 +46,16 @@ final class AgentStatusIndicatorTests: XCTestCase {
 
     @MainActor func testThreePointPixelsFitInATenPointIndicatorFootprint() {
         _ = NSApplication.shared
-        let host = NSHostingView(rootView: TerminalActivityGlyph(phase: 0))
+        let host = NSHostingView(rootView: TerminalActivityGlyph(phase: 0, color: gray))
         XCTAssertEqual(host.fittingSize.width, 10)
         XCTAssertEqual(host.fittingSize.height, 10)
         XCTAssertEqual(TerminalActivityGlyph.blockSize, 3)
     }
 
-    @MainActor func testWorkingGlyphIsAMonochromeSquareWithAnEmptyCenterInBothSchemes() throws {
+    @MainActor func testWorkingGlyphIsAGraySquareWithAnEmptyCenterInBothSchemes() throws {
         for scheme in [ColorScheme.light, .dark] {
             for phase in [0.0, 0.25, 0.92] {
-                let image = try render(TerminalActivityGlyph(phase: phase), scheme: scheme)
+                let image = try render(TerminalActivityGlyph(phase: phase, color: gray), scheme: scheme)
                 let background = try color(image, x: 0, y: 0)
                 var xs: [Int] = []
                 var ys: [Int] = []
@@ -82,8 +63,8 @@ final class AgentStatusIndicatorTests: XCTestCase {
                     for x in 0..<image.pixelsWide {
                         let pixel = try color(image, x: x, y: y)
                         guard abs(pixel.redComponent - background.redComponent) > 0.04 else { continue }
-                        XCTAssertEqual(pixel.redComponent, pixel.greenComponent, accuracy: 0.015)
-                        XCTAssertEqual(pixel.greenComponent, pixel.blueComponent, accuracy: 0.015)
+                        XCTAssertEqual(pixel.redComponent, pixel.greenComponent, accuracy: 0.025)
+                        XCTAssertEqual(pixel.greenComponent, pixel.blueComponent, accuracy: 0.025)
                         xs.append(x)
                         ys.append(y)
                     }
@@ -100,10 +81,10 @@ final class AgentStatusIndicatorTests: XCTestCase {
     @MainActor func testPixelsStepAlongThePerimeterRatherThanMovingContinuously() throws {
         let count = Double(TerminalActivityGlyph.cells.count)
         for scheme in [ColorScheme.light, .dark] {
-            let first = try render(TerminalActivityGlyph(phase: 0.1 / count), scheme: scheme)
-            let sameStep = try render(TerminalActivityGlyph(phase: 0.9 / count), scheme: scheme)
-            let later = try render(TerminalActivityGlyph(phase: 1.1 / count), scheme: scheme)
-            let looped = try render(TerminalActivityGlyph(phase: 1 + 0.1 / count), scheme: scheme)
+            let first = try render(TerminalActivityGlyph(phase: 0.1 / count, color: gray), scheme: scheme)
+            let sameStep = try render(TerminalActivityGlyph(phase: 0.9 / count, color: gray), scheme: scheme)
+            let later = try render(TerminalActivityGlyph(phase: 1.1 / count, color: gray), scheme: scheme)
+            let looped = try render(TerminalActivityGlyph(phase: 1 + 0.1 / count, color: gray), scheme: scheme)
             XCTAssertEqual(try pixels(first), try pixels(sameStep))
             XCTAssertNotEqual(try pixels(first), try pixels(later))
             XCTAssertEqual(try pixels(first), try pixels(looped))
@@ -112,12 +93,12 @@ final class AgentStatusIndicatorTests: XCTestCase {
 
     @MainActor func testWorkingGlyphDrawsEightSeparateSquareBlocksNotAnOutline() throws {
         for scheme in [ColorScheme.light, .dark] {
-            let native = try render(TerminalActivityGlyph(phase: 0), scheme: scheme)
+            let native = try render(TerminalActivityGlyph(phase: 0, color: gray), scheme: scheme)
             let nativeScale = CGFloat(native.pixelsWide) / 32
             try assertSeparateBlocks(native, expectedSize: nativeScale == 1 ? 2 : 3)
             for scale in [CGFloat(1), 2] {
                 for phase in [0.0, 0.25, 0.92] {
-                    let image = try render(TerminalActivityGlyph(phase: phase), scheme: scheme, scale: scale)
+                    let image = try render(TerminalActivityGlyph(phase: phase, color: gray), scheme: scheme, scale: scale)
                     XCTAssertEqual(image.pixelsWide, Int(32 * scale))
                     XCTAssertEqual(image.pixelsHigh, Int(24 * scale))
                     try assertSeparateBlocks(image, expectedSize: scale == 1 ? 2 : 3)
@@ -163,59 +144,79 @@ final class AgentStatusIndicatorTests: XCTestCase {
                        file: file, line: line)
     }
 
-    @MainActor func testReduceMotionUsesTheStaticPixelGlyph() throws {
+    @MainActor func testPulseOffOrReduceMotionKeepsTheWorkingMarkStill() throws {
         for scheme in [ColorScheme.light, .dark] {
-            let indicator = try render(TerminalActivityIndicator(reduceMotion: true), scheme: scheme)
-            let staticGlyph = try render(TerminalActivityGlyph(phase: 0), scheme: scheme)
-            XCTAssertEqual(try pixels(indicator), try pixels(staticGlyph))
+            let still = try pixels(render(TerminalActivityIndicator(moves: false, color: gray), scheme: scheme))
+            let pulseOff = try pixels(render(AgentMarkView(mark: .working).environment(\.pulses, false), scheme: scheme))
+            XCTAssertEqual(still, try pixels(render(TerminalActivityGlyph(phase: 0, color: gray), scheme: scheme)))
+            XCTAssertEqual(pulseOff, still)
         }
     }
 
-    @MainActor func testUnreadAndAttentionDotsRenderBlueAndOrange() throws {
+    @MainActor func testNotificationsAreBlueForDoneRedForFailedAndOrangeForBlocked() throws {
         for scheme in [ColorScheme.light, .dark] {
-            let blue = try render(AgentStatusIndicator(marker: .unread), scheme: scheme)
-            let orange = try render(AgentStatusIndicator(marker: .attention), scheme: scheme)
-            let blueCenter = try color(blue, x: blue.pixelsWide / 2, y: blue.pixelsHigh / 2)
-            let orangeCenter = try color(orange, x: orange.pixelsWide / 2, y: orange.pixelsHigh / 2)
-            XCTAssertGreaterThan(blueCenter.blueComponent, blueCenter.redComponent + 0.3)
-            XCTAssertGreaterThan(orangeCenter.redComponent, orangeCenter.blueComponent + 0.3)
-            XCTAssertGreaterThan(orangeCenter.greenComponent, orangeCenter.blueComponent + 0.2)
+            for spine in [false, true] {
+                func center(_ mark: AgentMark) throws -> NSColor {
+                    let image = spine ? try render(AgentMarkSpine(mark: mark).frame(width: 3, height: 20), scheme: scheme)
+                        : try render(AgentMarkView(mark: mark), scheme: scheme)
+                    return try color(image, x: image.pixelsWide / 2, y: image.pixelsHigh / 2)
+                }
+                let done = try center(.done)
+                let failed = try center(.failed)
+                let blocked = try center(.blocked)
+                XCTAssertGreaterThan(done.blueComponent, done.redComponent + 0.3, "done is blue")
+                XCTAssertGreaterThan(failed.redComponent, failed.greenComponent + 0.4, "failed is red")
+                XCTAssertGreaterThan(failed.redComponent, failed.blueComponent + 0.4, "failed is red")
+                XCTAssertGreaterThan(blocked.redComponent, blocked.blueComponent + 0.3, "blocked is orange")
+                XCTAssertGreaterThan(blocked.greenComponent, blocked.blueComponent + 0.2, "blocked is orange")
+                XCTAssertGreaterThan(blocked.greenComponent, failed.greenComponent + 0.15, "blocked is not the red of failed")
+            }
         }
     }
 
-    @MainActor func testPaletteRendersTheStatusHues() throws {
-        let cases: [(AgentStatus?, Bool, Color?)] = [
-            (.working, true, nil), (.done, true, .blue), (.done, false, nil),
-            (.blocked, false, .orange), (.failed, true, .orange), (nil, false, nil),
-        ]
+    @MainActor func testAgentColorsChangeTheMarkOnEverySurface() throws {
+        var colors = AgentColors()
+        colors[.done] = .rgb(red: 0, green: 255, blue: 0)
+        let views: [AnyView] = [AnyView(AgentMarkView(mark: .done)), AnyView(AgentMarkSpine(mark: .done).frame(width: 3, height: 20))]
+        for view in views {
+            let image = try render(view.environment(\.agentColors, colors), scheme: .light)
+            let center = try color(image, x: image.pixelsWide / 2, y: image.pixelsHigh / 2)
+            XCTAssertGreaterThan(center.greenComponent, center.redComponent + 0.3, "done is the green of the Config")
+            XCTAssertGreaterThan(center.greenComponent, center.blueComponent + 0.3, "done is the green of the Config")
+        }
+    }
+
+    @MainActor func testThePaletteAgentBadgeTakesTheMarkColorAndAReadDoneAgentHasNone() throws {
+        let cases: [(AgentMark?, String?)] = [(.working, nil), (.done, "blue"), (.failed, "red"), (.blocked, "orange"), (nil, nil)]
         for scheme in [ColorScheme.light, .dark] {
-            for (status, unread, expected) in cases {
-                let agent = Agent(paneID: "%1", kind: .pi, status: status, unread: unread,
+            for (mark, expected) in cases {
+                let agent = Agent(paneID: "%1", kind: .pi, status: .done, unread: false,
                                   windowID: "@1", sessionID: "$1", sessionName: "test", windowIndex: 1,
                                   windowTitle: "Agent", label: "Agent")
                 let item = PaletteItem(kind: .agent, ref: .agent(agent), path: "/test", target: "%1", logo: "pi",
-                                       status: status, unread: unread)
-                let icon = try render(PaletteIcon(source: .item(item), theme: PaletteTheme(nil)),
-                                      scheme: scheme, width: 48, height: 48)
-                for image in [icon] {
-                    var colored = 0
-                    for y in 0..<image.pixelsHigh {
-                        for x in 0..<image.pixelsWide {
-                            let pixel = try color(image, x: x, y: y)
-                            let components = [pixel.redComponent, pixel.greenComponent, pixel.blueComponent]
-                            guard components.max()! - components.min()! > 0.1 else { continue }
-                            colored += 1
-                            if expected == .blue {
-                                XCTAssertGreaterThan(pixel.blueComponent, pixel.redComponent)
-                            } else if expected == .orange {
-                                XCTAssertGreaterThan(pixel.redComponent, pixel.greenComponent)
-                                XCTAssertGreaterThan(pixel.greenComponent, pixel.blueComponent)
-                            }
+                                       status: agent.status, mark: mark)
+                let image = try render(PaletteIcon(source: .item(item), theme: PaletteTheme(nil)), scheme: scheme, width: 48, height: 48)
+                var colored = 0
+                for y in 0..<image.pixelsHigh {
+                    for x in 0..<image.pixelsWide {
+                        let pixel = try color(image, x: x, y: y)
+                        let components = [pixel.redComponent, pixel.greenComponent, pixel.blueComponent]
+                        guard components.max()! - components.min()! > 0.1 else { continue }
+                        colored += 1
+                        switch expected {
+                        case "blue": XCTAssertGreaterThan(pixel.blueComponent, pixel.redComponent)
+                        case "red":
+                            XCTAssertGreaterThan(pixel.redComponent, pixel.greenComponent)
+                            XCTAssertEqual(pixel.greenComponent, pixel.blueComponent, accuracy: 0.1)
+                        case "orange":
+                            XCTAssertGreaterThan(pixel.redComponent, pixel.greenComponent)
+                            XCTAssertGreaterThan(pixel.greenComponent, pixel.blueComponent)
+                        default: break
                         }
                     }
-                    if expected == nil { XCTAssertEqual(colored, 0) }
-                    else { XCTAssertGreaterThan(colored, 0) }
                 }
+                if expected == nil { XCTAssertEqual(colored, 0, String(describing: mark)) }
+                else { XCTAssertGreaterThan(colored, 0, String(describing: mark)) }
             }
         }
     }

@@ -38,6 +38,7 @@ struct CommandPaletteOverlay: View {
 private struct SpotlightPalette: View {
     @Bindable var palette: CommandPalette
     @FocusState private var focused: Bool
+    @Environment(\.agentColors) private var agentColors
 
     private let rowHeight: CGFloat = 52
     private let fieldFont = Font.system(size: 24)
@@ -290,14 +291,11 @@ private struct SpotlightPalette: View {
                 }
             }
             Spacer(minLength: 12)
-            if let marker = row.mark.map({ AgentStatusMarker(status: $0, unread: true) })
-                ?? (row.isWorking ? AgentStatusMarker(status: .working, unread: false) : nil) {
-                AgentStatusIndicator(marker: marker)
-            }
+            if let mark = row.mark { AgentMarkView(mark: mark) }
             if let item, let status = item.status {
-                Text(item.unread && status == .done ? "Done · Unread" : status.rawValue.capitalized)
+                Text(item.mark == .done ? "Done · Unread" : status.rawValue.capitalized)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(theme.status(status, unread: item.unread) ?? .secondary)
+                    .foregroundStyle(item.mark.map { agentColors[$0].color } ?? .secondary)
             } else if !row.trailing.isEmpty {
                 Text(row.trailing).font(.system(size: 12.5)).foregroundStyle(.secondary)
             }
@@ -404,16 +402,16 @@ struct PaletteIcon: View {
                 .overlay(Logo(name: item.logo ?? "terminal", size: size * 0.56))
                 .frame(width: size, height: size)
                 .overlay(alignment: .bottomTrailing) {
-                    if let marker = AgentStatusMarker(status: item.status, unread: item.unread) {
-                        AgentStatusIndicator(marker: marker, dotSize: size * 0.36)
-                            .padding(marker == .working ? 2 : 0)
+                    if let mark = item.mark {
+                        AgentMarkView(mark: mark, dotSize: size * 0.36)
+                            .padding(mark == .working ? 2 : 0)
                             .background {
-                                if marker == .working {
+                                if mark == .working {
                                     RoundedRectangle(cornerRadius: 3).fill(theme.background)
                                 }
                             }
                             .overlay {
-                                if marker != .working {
+                                if mark.isNotification {
                                     Circle().strokeBorder(theme.background, lineWidth: 2)
                                 }
                             }

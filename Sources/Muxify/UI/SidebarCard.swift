@@ -3,12 +3,12 @@ import MuxifyCore
 
 /// One Topic or Session in the Sidebar. Closed, the card is flat, with only its border; open, it is raised and lists
 /// its Window and Pane rows, and its header stays at the top of the list while its rows scroll under it. A spine on the
-/// left edge shows the Status of its Agents. The card that holds the selected Window has a many-coloured border,
+/// left edge shows the Agent mark of its Agents. The card that holds the selected Window has a many-coloured border,
 /// which turns once when the selection comes to it from another card, so a closed card still shows where the user is.
 struct SidebarCard<Header: View, Content: View>: View {
     let isOpen: Bool
     let holdsSelection: Bool
-    let status: AgentStatus?
+    let mark: AgentMark?
     /// The coordinate space of the scroll view around the list, in which the open card's header sticks to the top.
     var viewport: String? = nil
     var restingOpacity: Double = 1
@@ -59,9 +59,8 @@ struct SidebarCard<Header: View, Content: View>: View {
             }
         }
         .overlay(alignment: .leading) {
-            if let status {
-                RoundedRectangle(cornerRadius: 2).fill(status.color)
-                    .breathing(status == .working)
+            if let mark {
+                AgentMarkSpine(mark: mark)
                     .frame(width: 3)
                     .padding(.vertical, 8)
                     .padding(.leading, 4)
@@ -127,7 +126,7 @@ extension EnvironmentValues {
 struct CardHeader<Details: View>: View {
     let title: String
     let isOpen: Bool
-    let status: AgentStatus?
+    let mark: AgentMark?
     var isPinned = false
     /// A Locked Session's card shows a lock where a Pinned Topic's card shows its pin.
     var isLocked = false
@@ -177,7 +176,7 @@ struct CardHeader<Details: View>: View {
         .accessibilityLabel(title)
         .accessibilityHint(isOpen ? "" : summary)
         .accessibilityActivationPoint(CGPoint(x: titleLine.midX, y: titleLine.midY))
-        .accessibilityValue(([isOpen ? "expanded" : "collapsed"] + notes + [status?.rawValue].compactMap { $0 }).joined(separator: ", "))
+        .accessibilityValue(([isOpen ? "expanded" : "collapsed"] + notes + [mark?.rawValue].compactMap { $0 }).joined(separator: ", "))
     }
 }
 

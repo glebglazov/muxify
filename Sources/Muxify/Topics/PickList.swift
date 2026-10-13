@@ -94,10 +94,8 @@ struct PickCandidate<Payload: Equatable> {
     var note: String? = nil
     /// The right column: "2m", "Reopen · 2d", "Active".
     var trailing = ""
-    /// The Notification mark that the row's Sidebar card shows before its title.
-    var mark: AgentStatus? = nil
-    /// The working-Agent dot that the row's closed Sidebar card shows after its title.
-    var isWorking = false
+    /// The Agent mark that the row's Sidebar card shows.
+    var mark: AgentMark? = nil
     var lastVisit: Date? = nil
     /// The Active Topic or the current Session: first after the Pinned rows on an empty query.
     var isCurrent = false
@@ -123,8 +121,7 @@ struct PickRow<Payload: Equatable>: Identifiable, Equatable {
     let title: Highlighted
     let detail: Highlighted
     let trailing: String
-    let mark: AgentStatus?
-    let isWorking: Bool
+    let mark: AgentMark?
     let pick: Pick<Payload>
     let paste: String?
     let snooze: String?
@@ -204,7 +201,7 @@ enum FuzzyRanker {
         PickRow(id: candidate.id, symbol: candidate.symbol,
                 title: Highlighted(text: candidate.title, marks: match?.positions[0] ?? []),
                 detail: detail(candidate.searchFields, note: candidate.note, match: match),
-                trailing: candidate.trailing, mark: candidate.mark, isWorking: candidate.isWorking,
+                trailing: candidate.trailing, mark: candidate.mark,
                 pick: candidate.pick, paste: candidate.paste, snooze: candidate.snooze)
     }
 

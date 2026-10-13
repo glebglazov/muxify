@@ -531,7 +531,7 @@ private struct TopicCard: View {
     static let viewport = "topics-viewport"
 
     var body: some View {
-        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, status: status, viewport: Self.viewport, restingOpacity: topic.isDormant ? 0.55 : 1) {
+        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.mark, viewport: Self.viewport, restingOpacity: topic.isDormant ? 0.55 : 1) {
             header
         } content: {
             CardList(blocks: topic.sessions.compactMap { session in
@@ -566,8 +566,6 @@ private struct TopicCard: View {
         .longPressDragLook(listID ?? .topic(""), state: drag, lineOffset: 4)
     }
 
-    private var status: AgentStatus? { .shown(mark: topic.mark, working: topic.hasWorkingAgent) }
-
     private var sessionSpace: String { "sessions-" + topic.id.accessibilityID }
 
     /// How a Session line moves within this Topic. A Snoozed or Settled Topic's lines do not move.
@@ -586,7 +584,7 @@ private struct TopicCard: View {
     }
 
     private var header: some View {
-        CardHeader(title: formatted.title, isOpen: topic.isExpanded, status: status, isPinned: topic.isPinned,
+        CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned,
                    hintTarget: namedTopicID.map { .topic($0) },
                    notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isDormant ? ["Dormant"] : []),
                    summary: formatted.summary, reservesCorner: true) {
@@ -728,14 +726,13 @@ private struct LockedCard: View {
 
     private var id: TopicListID { .lock(sessionID: sessionID) }
     private var window: TmuxWindow? { row.sessions.first?.windows.first }
-    private var status: AgentStatus? { .shown(mark: row.mark, working: row.hasWorkingAgent) }
 
     private var formatted: SidebarFormats.Text {
         store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[sessionID])
     }
 
     var body: some View {
-        SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, status: status, viewport: TopicCard.viewport) {
+        SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, mark: row.mark, viewport: TopicCard.viewport) {
             header
         } content: {
             CardList(blocks: row.sessions.compactMap { session in
@@ -754,7 +751,7 @@ private struct LockedCard: View {
     }
 
     private var header: some View {
-        CardHeader(title: formatted.title, isOpen: row.isExpanded, status: status, isLocked: true, hintTarget: .locked(sessionID),
+        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isLocked: true, hintTarget: .locked(sessionID),
                    notes: ["Locked"], summary: formatted.summary) {
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
                 Circle().fill(Color.orange).frame(width: 5, height: 5).accessibilityLabel("Bell")
@@ -966,11 +963,11 @@ private struct SessionCard<Row: View>: View {
     var body: some View {
         let isOpen = store.openSessionCards.contains(session.name)
         let isSnoozed = session.windows.first?.topicID.map { model.snoozedTopicIDs.contains($0) } ?? false
-        let status = AgentStatus.shown(mark: model.sessionMarks[session.id], working: model.workingSessionIDs.contains(session.id))
+        let mark = model.sessionMarks[session.id]
         let isLocked = model.lockedSessionIDs.contains(session.id)
-        SidebarCard(isOpen: isOpen, holdsSelection: session.windows.contains { $0.id == store.selectedWindowID }, status: status,
+        SidebarCard(isOpen: isOpen, holdsSelection: session.windows.contains { $0.id == store.selectedWindowID }, mark: mark,
                     viewport: viewport, restingOpacity: isSnoozed ? 0.45 : 1) {
-            CardHeader(title: formatted.title, isOpen: isOpen, status: status, isLocked: isLocked, hintTarget: .session(session.id),
+            CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, hintTarget: .session(session.id),
                        notes: (isSnoozed ? ["snoozed"] : []) + (isLocked ? ["Locked"] : []),
                        summary: formatted.summary) {
                 if isSnoozed { Text("snoozed").font(.system(size: 10)).foregroundStyle(.secondary) }
@@ -1172,6 +1169,8 @@ private struct PaneRow: View {
         store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id])
     }
 
+    private var mark: AgentMark? { store.topics.agentMarks[row.pane.id] }
+
     var body: some View {
         Button { store.select(row) } label: {
             HStack(spacing: 6) {
@@ -1185,9 +1184,7 @@ private struct PaneRow: View {
                     }
                 }
                 Spacer(minLength: 4)
-                if let status = row.agent?.status {
-                    StatusDot(color: status.color, breathes: status == .working)
-                }
+                if let mark { AgentMarkView(mark: mark) }
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
             .padding(.leading, row.isUnderWindowRow ? 28 : 8).padding(.trailing, 6).padding(.vertical, 3)
@@ -1202,7 +1199,7 @@ private struct PaneRow: View {
         .hoverLabel(title: row.pane.label, titleFont: .systemFont(ofSize: 12),
                     detail: row.pane.path.isEmpty ? row.pane.label : Paths.tildify(row.pane.path))
         .accessibilityIdentifier("pane-" + row.pane.id)
-        .accessibilityValue([row.pane.isActive ? "active" : nil, row.agent?.status?.rawValue].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue([row.pane.isActive ? "active" : nil, mark?.rawValue].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -1241,7 +1238,7 @@ private struct AgentsSection: View {
                         ForEach(model.visibleAgents) { agent in
                             AgentRow(agent: agent,
                                      text: store.sidebarText(.agent, context: store.sidebarFormatContexts.panes[agent.paneID]),
-                                     notification: store.notifications.notification(for: agent))
+                                     mark: model.agentMarks[agent.paneID])
                                 .onTapGesture { store.select(agent) }
                                 .accessibilityIdentifier("agent-" + agent.paneID)
                                 .contextMenu {
@@ -1263,7 +1260,7 @@ private struct AgentsSection: View {
 struct AgentRow: View {
     let agent: Agent
     let text: SidebarFormats.Text
-    let notification: AgentStatus?
+    let mark: AgentMark?
 
     private var detail: String {
         "\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")\(agent.unread ? ", unread" : "")"
@@ -1274,9 +1271,6 @@ struct AgentRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if notification != nil {
-                Circle().fill(Color.accentColor).frame(width: 5, height: 5).accessibilityLabel("Unread")
-            }
             Logo(name: agent.kind.rawValue)
             VStack(alignment: .leading, spacing: 1) {
                 Text(text.title)
@@ -1292,9 +1286,7 @@ struct AgentRow: View {
                 }
             }
             Spacer(minLength: 4)
-            if let status = agent.status {
-                StatusDot(color: status.color, breathes: status == .working)
-            }
+            if let mark { AgentMarkView(mark: mark) }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)

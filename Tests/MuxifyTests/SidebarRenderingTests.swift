@@ -20,7 +20,7 @@ final class SidebarRenderingTests: XCTestCase {
     }
 
     @MainActor func testCardHeaderGrowsWithTheSidebarFontSize() throws {
-        let header = CardHeader(title: "AgM Session", isOpen: true, status: nil, summary: "") { EmptyView() }
+        let header = CardHeader(title: "AgM Session", isOpen: true, mark: nil, summary: "") { EmptyView() }
         let baseline = try render(header, typography: SidebarTypography(), scheme: .light)
         let large = try render(header, typography: SidebarTypography(fontSize: 24), scheme: .light)
         XCTAssertGreaterThan(large.height, baseline.height)
@@ -102,10 +102,10 @@ final class SidebarRenderingTests: XCTestCase {
                           sessionName: window.sessionName, windowIndex: 1, windowTitle: window.displayTitle,
                           label: window.displayTitle)
         return VStack(spacing: 0) {
-            CardHeader(title: window.sessionName, isOpen: false, status: nil, summary: "1 Window") { EmptyView() }
+            CardHeader(title: window.sessionName, isOpen: false, mark: nil, summary: "1 Window") { EmptyView() }
             WindowRow(window: window, isSelected: false, tabCount: 12)
             WindowRow(window: window, isSelected: true, tabCount: 12)
-            AgentRow(agent: agent, text: .init(title: agent.label, summary: window.sessionName), notification: .failed)
+            AgentRow(agent: agent, text: .init(title: agent.label, summary: window.sessionName), mark: .failed)
         }
     }
 

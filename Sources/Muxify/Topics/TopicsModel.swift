@@ -225,9 +225,8 @@ struct TopicsModel {
         let id: TopicGroupID
         let title: String
         let kind: Kind
-        let mark: AgentStatus?
-        /// An Agent in the Topic is working; the card's spine shows it.
-        let hasWorkingAgent: Bool
+        /// The strongest Agent mark of the Topic's Agents; nil while the Topic is quiet.
+        let mark: AgentMark?
         let isPinned: Bool
         let sessions: [Session]
         let isExpanded: Bool
@@ -282,12 +281,12 @@ struct TopicsModel {
     /// The line under each listed Agent, by Pane ID: its Topic's title in Topics mode, its Session's name in
     /// Sessions mode. Empty when the section lists one Topic or Session, which the header already names.
     let agentGroups: [String: String]
-    /// The Status each Session card's spine shows in Sessions mode, by Session ID.
-    let sessionMarks: [String: AgentStatus]
+    /// The Agent mark each Session card's spine shows in Sessions mode, by Session ID.
+    let sessionMarks: [String: AgentMark]
+    /// The Agent mark of each Agent's own row, by Pane ID: its Pane row, its Agents row and its Command Palette result.
+    let agentMarks: [String: AgentMark]
     /// The rows under each Session row in Sessions mode, by Session ID.
     let sessionChildren: [String: SessionChildren]
-    /// The Sessions in Sessions mode with a working Agent; the card's spine shows it.
-    let workingSessionIDs: Set<String>
     /// Each live Session as a Topic lists it, by Session ID, for its home and branch pills in Sessions mode.
     let topicSessions: [String: Session]
     let dueWakes: [Wake]
@@ -325,16 +324,9 @@ struct TopicsModel {
         }
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let agentsByGroup = Dictionary(grouping: agents, by: { windowsByID[$0.windowID].map(groupID) ?? .noTopic })
-        /// A blocked Agent marks its card until it stops waiting, even after the user has seen it; done and failed
-        /// mark it only while Unread.
-        func mark(_ agents: [Agent]) -> AgentStatus? {
-            let statuses = Set(agents.compactMap { agent -> AgentStatus? in
-                agent.status == .blocked && config.notifications.blockedEnabled ? .blocked : config.notifications.notification(for: agent)
-            })
-            return [AgentStatus.blocked, .failed, .done].first { statuses.contains($0) }
-        }
-        /// A group whose Agents show no Notification mark and no working dot: a Snoozed Topic, and No Topic while
-        /// Zen is on. Unread does not change, so the marks come back when the Snooze or Zen ends.
+        /// A group that shows no Notification: a Snoozed Topic, and No Topic while Zen is on. Its card has no mark at
+        /// all; an Agent's own row keeps the Working mark. Unread does not change, so the Notifications come back when
+        /// the Snooze or Zen ends.
         func isQuiet(_ group: TopicGroupID) -> Bool {
             switch group {
             case .topic(let id): return snoozedIDs.contains(id)
@@ -342,9 +334,14 @@ struct TopicsModel {
             case .noTopic: return zen != nil
             }
         }
-        let shown = agents.filter { !isQuiet(windowsByID[$0.windowID].map(groupID) ?? .noTopic) }
+        func isQuiet(_ agent: Agent) -> Bool { isQuiet(windowsByID[agent.windowID].map(groupID) ?? .noTopic) }
+        let agentMarks = Dictionary(agents.compactMap { agent in
+            AgentMark(agent, notifications: config.notifications, quiet: isQuiet(agent)).map { (agent.paneID, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+        self.agentMarks = agentMarks
+        func mark(_ agents: [Agent]) -> AgentMark? { agents.compactMap { agentMarks[$0.paneID] }.max() }
+        let shown = agents.filter { !isQuiet($0) }
         sessionMarks = Dictionary(grouping: shown, by: \.sessionID).compactMapValues(mark)
-        workingSessionIDs = Set(shown.filter { $0.status == .working }.map(\.sessionID))
         let panesByWindow = panes.map { Dictionary(grouping: $0, by: \.windowID) }
         let agentsByPane = Dictionary(agents.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
         func children(_ windows: [TmuxWindow]) -> SessionChildren {
@@ -381,17 +378,15 @@ struct TopicsModel {
             let id = TopicGroupID.topic(record.id)
             let kind: Row.Kind = (record.isSnoozed(at: now) ? record.snoozeDeadline : nil).map { .snoozed(wake: $0.wakeLabel) } ?? .open
             let agents = isQuiet(id) ? [] : agentsByGroup[id] ?? []
-            return Row(id: id, title: title, kind: kind, mark: mark(agents), hasWorkingAgent: agents.contains { $0.status == .working },
-                       isPinned: record.isPinned, sessions: sessions(of: id, members: grouped[id] ?? [], record: record),
-                       isExpanded: openTopics.contains(id))
+            return Row(id: id, title: title, kind: kind, mark: mark(agents), isPinned: record.isPinned,
+                       sessions: sessions(of: id, members: grouped[id] ?? [], record: record), isExpanded: openTopics.contains(id))
         }
         /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
         func lockedRow(_ lock: SessionLock) -> Row {
             let id = TopicGroupID.locked(lock.sessionID)
             let agents = agentsByGroup[id] ?? []
             let members = grouped[id] ?? []
-            return Row(id: id, title: members.first?.sessionName ?? lock.sessionID, kind: .open, mark: mark(agents),
-                       hasWorkingAgent: agents.contains { $0.status == .working }, isPinned: false,
+            return Row(id: id, title: members.first?.sessionName ?? lock.sessionID, kind: .open, mark: mark(agents), isPinned: false,
                        sessions: sessions(of: id, members: members, record: nil), isExpanded: openTopics.contains(id))
         }
         let untitledRecords = open.filter { $0.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }
@@ -459,7 +454,9 @@ struct TopicsModel {
         }.min()
         dueWakes = open.filter { $0.snoozeDeadline?.isDue(at: now) == true }.map { record in
             Wake(id: record.id, title: rows.first { $0.id == .topic(record.id) }?.title ?? "Untitled Topic",
-                 count: (agentsByGroup[.topic(record.id)] ?? []).filter { config.notifications.notification(for: $0) != nil }.count)
+                 count: (agentsByGroup[.topic(record.id)] ?? []).filter {
+                     AgentMark($0, notifications: config.notifications)?.isNotification == true
+                 }.count)
         }
 
         let scope: AgentsScopeTarget
@@ -490,9 +487,9 @@ struct TopicsModel {
                 : windowsByID[agent.windowID].map(groupID).flatMap { titlesByGroup[$0] } ?? "No Topic"
             return (agent.paneID, group)
         }, uniquingKeysWith: { first, _ in first })
-        visibleAgents = scoped.filter { config.notifications.notification(for: $0) != nil }
-            + scoped.filter { config.notifications.notification(for: $0) == nil && $0.status == .working }
-            + scoped.filter { config.notifications.notification(for: $0) == nil && $0.status != .working }
+        visibleAgents = scoped.filter { agentMarks[$0.paneID]?.isNotification == true }
+            + scoped.filter { agentMarks[$0.paneID] == .working }
+            + scoped.filter { agentMarks[$0.paneID] == nil }
     }
 
     /// A Settled Topic's row, with the Sessions and Windows its record remembers.
@@ -519,7 +516,7 @@ struct TopicsModel {
                            branch: label.branch, contents: .remembered(windows))
         }
         return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
-                   mark: nil, hasWorkingAgent: false, isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id))
+                   mark: nil, isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id))
     }
 
     /// A Session in a Worktree is named as the Project names that Worktree. Its branch badge shows only

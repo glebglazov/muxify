@@ -111,13 +111,12 @@ final class ZenTests: XCTestCase {
     func testZenHidesTheNotificationsOfNoTopicAndKeepsThoseOfATopicMadeDuringZen() {
         for mode in [SidebarMode.topics, .sessions] {
             let without = model(selected: "@3", zen: nil, mode: mode)
-            XCTAssertEqual(without.sessionMarks, ["$m": .done, "$n1": .done])
-            XCTAssertEqual(without.workingSessionIDs, ["$n2"])
+            XCTAssertEqual(without.sessionMarks, ["$m": .done, "$n1": .done, "$n2": .working])
             XCTAssertEqual(without.visibleAgents.map(\.paneID), ["%2", "%3", "%4"])
 
             let during = model(selected: "@3", zen: zen, mode: mode)
             XCTAssertEqual(during.sessionMarks, ["$m": .done], "\(mode)")
-            XCTAssertEqual(during.workingSessionIDs, [], "\(mode)")
+            XCTAssertEqual(during.agentMarks, ["%2": .done, "%4": .working], "an Agent's own row keeps only its Working mark")
             XCTAssertEqual(during.visibleAgents.map(\.paneID), ["%2"], "\(mode)")
         }
         XCTAssertEqual(model(selected: "@1", zen: zen).rows.first { $0.id == .topic("made") }?.mark, .done)
@@ -146,12 +145,12 @@ final class ZenTests: XCTestCase {
         let without = model(selected: "@4", zen: nil)
         XCTAssertEqual(without.rows.map(\.id), [.topic("kept"), .topic("made"), .locked("$n2")])
         XCTAssertNil(without.openedNoTopicSession)
-        XCTAssertEqual(without.workingSessionIDs, ["$n2"], "a Locked Session is not quiet without Zen")
+        XCTAssertEqual(without.sessionMarks["$n2"], .working, "a Locked Session is not quiet without Zen")
 
         let during = model(selected: "@4", zen: zen)
         XCTAssertEqual(during.rows.map(\.id), [.topic("kept"), .topic("made")], "Zen hides the Locked Session")
         XCTAssertEqual(during.openedNoTopicSession?.id.session, "$n2", "while the user is in it, it is the one No Topic card")
-        XCTAssertEqual(during.workingSessionIDs, [], "it is quiet as No Topic is")
+        XCTAssertNil(during.sessionMarks["$n2"], "it is quiet as No Topic is")
         XCTAssertEqual(during.lockedSessionIDs, ["$n2"], "Zen does not end the Lock")
         XCTAssertNil(model(selected: "@1", zen: zen).openedNoTopicSession)
         for zen in [nil, zen] {

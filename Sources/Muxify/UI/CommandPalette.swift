@@ -108,7 +108,7 @@ final class CommandPalette {
                               lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,
                               commandShortcuts: Dictionary(uniqueKeysWithValues: commands.compactMap { command in
                                   shortcut(for: command).map { (command, $0) }
-                              }))
+                              }), agentMarks: store.topics.agentMarks)
     }
 
     var results: PickList<PaletteItem> {
@@ -513,10 +513,4 @@ struct PaletteTheme {
     var blue: Color { ansi(4) }
     var magenta: Color { ansi(5) }
     var cyan: Color { ansi(6) }
-
-    /// Status hues keep the same meaning as the Sidebar, independent of ANSI
-    /// colors: monochrome working, blue Unread, orange blocked or failed.
-    func status(_ status: AgentStatus?, unread: Bool) -> Color? {
-        AgentStatusMarker(status: status, unread: unread)?.color
-    }
 }

@@ -1,37 +1,56 @@
+import AppKit
 import SwiftUI
 import MuxifyCore
 
-/// An Agent's Status dot. A working Agent's dot breathes, so movement always means busy.
-struct StatusDot: View {
-    let color: Color
-    let breathes: Bool
+/// The Agent mark of a row: a Pane row, an Agents row or a Command Palette result. The Working mark is the pixel glyph;
+/// a Notification is a dot.
+struct AgentMarkView: View {
+    let mark: AgentMark
+    var dotSize: CGFloat = 7
+
+    @Environment(\.agentColors) private var colors
+    @Environment(\.pulses) private var pulses
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 7, height: 7)
-            .breathing(breathes)
-    }
-}
-
-extension AgentStatus {
-    var color: Color {
-        switch self {
-        case .working: return .blue
-        case .blocked: return .orange
-        case .failed: return .red
-        case .done: return .green
+        let color = colors[mark].color
+        if mark == .working {
+            TerminalActivityIndicator(moves: pulses && !reduceMotion, color: color)
+        } else {
+            Circle().fill(color).frame(width: dotSize, height: dotSize)
         }
     }
+}
 
-    /// The Status a card or palette row shows for its Agents: the most urgent Notification, else working.
-    static func shown(mark: AgentStatus?, working: Bool) -> AgentStatus? {
-        mark ?? (working ? .working : nil)
+/// The Agent mark of a card: a bar along its left edge. The Working mark's bar fades in and out.
+struct AgentMarkSpine: View {
+    let mark: AgentMark
+
+    @Environment(\.agentColors) private var colors
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2).fill(colors[mark].color)
+            .breathing(mark == .working)
     }
 }
 
-/// Fades the view in and out on the clock every working mark reads, so they breathe together. It only fades, never
-/// moves, and stays still with Reduce Motion or `ui.pulse: false`.
+extension AgentColor {
+    var color: Color {
+        switch self {
+        case .system(let name):
+            let colors: [SystemColorName: NSColor] = [
+                .blue: .systemBlue, .orange: .systemOrange, .red: .systemRed, .green: .systemGreen, .yellow: .systemYellow,
+                .purple: .systemPurple, .pink: .systemPink, .teal: .systemTeal, .gray: .systemGray,
+            ]
+            return Color(nsColor: colors[name]!)
+        case .rgb(let red, let green, let blue):
+            return Color(red: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255)
+        }
+    }
+}
+
+/// Fades the view in and out on the clock every card's Working mark reads, so they breathe together. It only fades,
+/// never moves, and stays still with Reduce Motion or `ui.pulse: false`.
 private struct Breathing: ViewModifier {
     let isOn: Bool
 
@@ -52,7 +71,7 @@ private struct Breathing: ViewModifier {
     }
 }
 
-extension View {
+private extension View {
     func breathing(_ isOn: Bool) -> some View { modifier(Breathing(isOn: isOn)) }
 }
 
@@ -60,10 +79,20 @@ private struct PulsesKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+private struct AgentColorsKey: EnvironmentKey {
+    static let defaultValue = AgentColors()
+}
+
 extension EnvironmentValues {
     /// `ui.pulse` in the Config.
     var pulses: Bool {
         get { self[PulsesKey.self] }
         set { self[PulsesKey.self] = newValue }
+    }
+
+    /// `ui.agent_colors` in the Config.
+    var agentColors: AgentColors {
+        get { self[AgentColorsKey.self] }
+        set { self[AgentColorsKey.self] = newValue }
     }
 }

@@ -13,8 +13,6 @@ struct SearchableSelect<Payload: Equatable>: View {
     var accessibilityPrefix = "project"
     var focusSearchOnAppear = false
     var acceptsOnClick = true
-    /// Each row shows its Agents' Status as a spine in a gutter left of the row, outside its selection highlight.
-    var showsStatus = false
     @Binding var query: String
     @Binding var selection: String?
     /// Called only with an available row's payload.
@@ -88,16 +86,7 @@ struct SearchableSelect<Payload: Equatable>: View {
     }
 
     private func rowLabel(_ row: PickRow<Payload>) -> some View {
-        HStack(spacing: 3) {
-            if showsStatus {
-                let status = AgentStatus.shown(mark: row.mark, working: row.isWorking)
-                RoundedRectangle(cornerRadius: 2).fill(status?.color ?? .clear)
-                    .breathing(status == .working)
-                    .frame(width: 3)
-                    .padding(.vertical, 7)
-            }
-            rowContent(row)
-        }
+        rowContent(row)
         .contentShape(Rectangle())
         .hoverLabel(title: row.title.text, titleFont: .systemFont(ofSize: NSFont.systemFontSize, weight: .medium),
                     detail: (row.pick.reason.map(Highlighted.plain) ?? row.detail).text, onlyWhenCutOff: true)
