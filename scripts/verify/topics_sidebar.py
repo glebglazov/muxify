@@ -251,12 +251,16 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
 
     def agent_session(self, name, topic=None, status='working', unread=False):
         """A Session whose only Pane runs an Agent; returns (session id, window id, pane id)."""
-        sid = self.new_session(name, self.beta, 'sleep 600', topic=topic)
-        window, pane = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id} #{pane_id}').split()
-        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'claude')
-        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', status)
+        command = ['new-session', '-d', '-P', '-F', '#{session_id} #{window_id} #{pane_id}',
+                   '-s', name, '-c', str(self.beta), 'sleep 600',
+                   ';', 'set-option', '-p', '@muxify_agent', 'claude',
+                   ';', 'set-option', '-p', '@muxify_agent_status', status]
         if unread:
-            self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_unread', '1')
+            command += [';', 'set-option', '-p', '@muxify_agent_unread', '1']
+        if topic:
+            command += [';', 'set-option', '@muxify_topic', topic]
+        sid, window, pane = self.s.tmux(*command).split()
+        self.addCleanup(self.end_session, sid)
         return sid, window, pane
 
     def press_menu_item(self, title):
