@@ -121,8 +121,10 @@ public struct Config: Equatable {
     public var keybinds = Keybinds.defaults
     /// Height of the app's header in points; at least 24 to fit its buttons.
     public var headerHeight: Double = 30
-    /// `ui.pulse`: a working mark pulses. False keeps every mark still.
+    /// `ui.pulse`: every Working mark moves. False keeps them still.
     public var pulse = true
+    /// `ui.agent_colors`.
+    public var agentColors = AgentColors()
     /// The keybinds of an open Command Palette (`keybindings.command_palette`).
     public var paletteKeybinds = PaletteKeybinds.defaults
     /// In Config order (ADR 0009).
@@ -177,8 +179,16 @@ public struct Config: Equatable {
         # ui:
         #   # Header height in points (minimum 24). Changes apply live.
         #   header_height: 30
-        #   # false keeps the working marks still in place of pulsing.
+        #   # false keeps every Working mark still.
         #   pulse: true
+        #   # The color of each Agent mark, in the Sidebar and the Command
+        #   # Palette: blue, orange, red, green, yellow, purple, pink, teal,
+        #   # gray, or a quoted '#RRGGBB'.
+        #   agent_colors:
+        #     working: gray
+        #     done: blue
+        #     blocked: orange
+        #     failed: red
         #   sidebar:
         #     # Positive base size in points; other text scales proportionally.
         #     # Changes apply live. Invalid values use the defaults below.
@@ -834,9 +844,27 @@ private struct ConfigReader {
                 config.pulse = pulse
             case "sidebar":
                 readUISidebar(value)
+            case "agent_colors":
+                readAgentColors(value)
             default:
                 problem(at: key, "unknown key \"ui.\(name)\"")
             }
+        }
+    }
+
+    mutating func readAgentColors(_ node: Node) {
+        for (name, key, value) in entries(of: node, "ui.agent_colors") {
+            guard let mark = AgentMark(rawValue: name) else {
+                problem(at: key, "unknown key \"ui.agent_colors.\(name)\"")
+                continue
+            }
+            // An unquoted #RRGGBB is a YAML comment, so it arrives here as null.
+            guard value.tag == Tag(.str), let text = string(value), let color = AgentColor(text) else {
+                let names = SystemColorName.allCases.map(\.rawValue).joined(separator: ", ")
+                problem(at: value, "ui.agent_colors.\(name): expected one of \(names), or a quoted '#RRGGBB'")
+                continue
+            }
+            config.agentColors[mark] = color
         }
     }
 

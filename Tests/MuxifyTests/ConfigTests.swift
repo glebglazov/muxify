@@ -413,6 +413,53 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "ui.pulse: expected a boolean")])
     }
 
+    func testAgentColorsDefaultToGrayBlueRedOrange() throws {
+        let colors = try load("").agentColors
+        XCTAssertEqual(colors[.working], .system(.gray))
+        XCTAssertEqual(colors[.done], .system(.blue))
+        XCTAssertEqual(colors[.failed], .system(.red))
+        XCTAssertEqual(colors[.blocked], .system(.orange))
+    }
+
+    func testAgentColorsTakeASystemColorNameOrAQuotedHexValue() throws {
+        let config = try load("""
+        ui:
+          agent_colors:
+            working: Teal
+            done: '#3366FF'
+            failed: "#a1b2c3"
+        """)
+        XCTAssertEqual(config.problems, [])
+        XCTAssertEqual(config.agentColors[.working], .system(.teal))
+        XCTAssertEqual(config.agentColors[.done], .rgb(red: 0x33, green: 0x66, blue: 0xff))
+        XCTAssertEqual(config.agentColors[.failed], .rgb(red: 0xa1, green: 0xb2, blue: 0xc3))
+        XCTAssertEqual(config.agentColors[.blocked], .system(.orange))
+        for name in SystemColorName.allCases {
+            XCTAssertEqual(try load("ui:\n  agent_colors:\n    done: \(name.rawValue)").agentColors[.done], .system(name))
+        }
+    }
+
+    func testAnInvalidAgentColorKeepsTheDefaultAndAnUnknownKeyIsAProblem() throws {
+        let config = try load("""
+        ui:
+          agent_colors:
+            working: accent
+            done: #3366ff
+            failed: '#12345'
+            blocked: 7
+            idle: gray
+        """)
+        XCTAssertEqual(config.agentColors, AgentColors())
+        let expected = "expected one of blue, orange, red, green, yellow, purple, pink, teal, gray, or a quoted '#RRGGBB'"
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 3, message: "ui.agent_colors.working: " + expected),
+            ConfigProblem(path: root, line: 4, message: "ui.agent_colors.done: " + expected),
+            ConfigProblem(path: root, line: 5, message: "ui.agent_colors.failed: " + expected),
+            ConfigProblem(path: root, line: 6, message: "ui.agent_colors.blocked: " + expected),
+            ConfigProblem(path: root, line: 7, message: "unknown key \"ui.agent_colors.idle\""),
+        ])
+    }
+
     func testFocusTerminalCanBeRemappedToMultipleShortcutsOrDisabled() throws {
         let remapped = try load("keybindings:\n  focus_terminal: [ctrl+cmd+t, cmd+backquote]")
         XCTAssertNil(remapped.keybinds.action(for: trigger("ctrl+backquote")))
