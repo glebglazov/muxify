@@ -255,12 +255,14 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
                    '-s', name, '-c', str(self.beta), 'sleep 600',
                    ';', 'set-option', '-p', '@muxify_agent', 'claude',
                    ';', 'set-option', '-p', '@muxify_agent_status', status]
-        if unread:
-            command += [';', 'set-option', '-p', '@muxify_agent_unread', '1']
         if topic:
             command += [';', 'set-option', '@muxify_topic', topic]
         sid, window, pane = self.s.tmux(*command).split()
         self.addCleanup(self.end_session, sid)
+        if unread:
+            wait(lambda: self.s.tmux('display-message', '-p', '-t', pane, '#{pane_current_command}') == 'sleep',
+                 'the Agent fixture process did not start', seconds=10)
+            self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_unread', '1')
         return sid, window, pane
 
     def press_menu_item(self, title):
