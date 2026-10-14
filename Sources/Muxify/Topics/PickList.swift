@@ -95,7 +95,7 @@ struct PickCandidate<Payload: Equatable> {
     /// The right column: "2m", "Reopen · 2d", "Active".
     var trailing = ""
     /// The Agent mark that the row's Sidebar card shows.
-    var mark: AgentMark? = nil
+    var mark: RowMark? = nil
     var lastVisit: Date? = nil
     /// The Active Topic or the current Session: first after the Pinned rows on an empty query.
     var isCurrent = false
@@ -121,7 +121,7 @@ struct PickRow<Payload: Equatable>: Identifiable, Equatable {
     let title: Highlighted
     let detail: Highlighted
     let trailing: String
-    let mark: AgentMark?
+    let mark: RowMark?
     let pick: Pick<Payload>
     let paste: String?
     let snooze: String?

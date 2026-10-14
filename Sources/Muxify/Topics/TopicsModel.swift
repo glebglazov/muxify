@@ -225,8 +225,8 @@ struct TopicsModel {
         let id: TopicGroupID
         let title: String
         let kind: Kind
-        /// The strongest Agent mark of the Topic's Agents; nil while the Topic is quiet.
-        let mark: AgentMark?
+        /// The Topic Unread mark or its strongest Agent mark; nil while the Topic is quiet.
+        let mark: RowMark?
         let isPinned: Bool
         let sessions: [Session]
         let isExpanded: Bool
@@ -378,7 +378,7 @@ struct TopicsModel {
             let id = TopicGroupID.topic(record.id)
             let kind: Row.Kind = (record.isSnoozed(at: now) ? record.snoozeDeadline : nil).map { .snoozed(wake: $0.wakeLabel) } ?? .open
             let agents = isQuiet(id) ? [] : agentsByGroup[id] ?? []
-            return Row(id: id, title: title, kind: kind, mark: mark(agents), isPinned: record.isPinned,
+            return Row(id: id, title: title, kind: kind, mark: isQuiet(id) ? nil : RowMark(unread: record.isUnread, agent: mark(agents)), isPinned: record.isPinned,
                        sessions: sessions(of: id, members: grouped[id] ?? [], record: record), isExpanded: openTopics.contains(id))
         }
         /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
@@ -386,7 +386,7 @@ struct TopicsModel {
             let id = TopicGroupID.locked(lock.sessionID)
             let agents = agentsByGroup[id] ?? []
             let members = grouped[id] ?? []
-            return Row(id: id, title: members.first?.sessionName ?? lock.sessionID, kind: .open, mark: mark(agents), isPinned: false,
+            return Row(id: id, title: members.first?.sessionName ?? lock.sessionID, kind: .open, mark: mark(agents).map(RowMark.agent), isPinned: false,
                        sessions: sessions(of: id, members: members, record: nil), isExpanded: openTopics.contains(id))
         }
         let untitledRecords = open.filter { $0.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }
@@ -516,7 +516,7 @@ struct TopicsModel {
                            branch: label.branch, contents: .remembered(windows))
         }
         return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
-                   mark: nil, isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id))
+                   mark: RowMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id))
     }
 
     /// A Session in a Worktree is named as the Project names that Worktree. Its branch badge shows only

@@ -194,7 +194,7 @@ final class AgentMarkViewTests: XCTestCase {
                                   windowID: "@1", sessionID: "$1", sessionName: "test", windowIndex: 1,
                                   windowTitle: "Agent", label: "Agent")
                 let item = PaletteItem(kind: .agent, ref: .agent(agent), path: "/test", target: "%1", logo: "pi",
-                                       status: agent.status, mark: mark)
+                                       status: agent.status, mark: mark.map(RowMark.agent))
                 let image = try render(PaletteIcon(source: .item(item), theme: PaletteTheme(nil)), scheme: scheme, width: 48, height: 48)
                 var colored = 0
                 for y in 0..<image.pixelsHigh {

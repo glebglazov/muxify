@@ -134,9 +134,9 @@ final class PaletteCatalogTests: XCTestCase {
         let agents = [agent("%1", windows[0], .done), agent("%2", windows[1], .working), agent("%3", windows[2], .blocked)]
         let list = catalog(records: records, windows: windows, agents: agents).list(goTo, query: "")
         func row(_ id: String) -> PickRow<PaletteItem>? { list.rows.first { $0.id == id } }
-        XCTAssertEqual(row("topic-a")?.mark, .done)
-        XCTAssertEqual(row("topic-b")?.mark, .working)
-        XCTAssertEqual(row("session:$scratch")?.mark, .blocked)
+        XCTAssertEqual(row("topic-a")?.mark, .agent(.done))
+        XCTAssertEqual(row("topic-b")?.mark, .agent(.working))
+        XCTAssertEqual(row("session:$scratch")?.mark, .agent(.blocked))
     }
 
     func testDuringZenANoTopicSessionShowsNoNotificationMark() {

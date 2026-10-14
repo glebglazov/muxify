@@ -187,20 +187,22 @@ Active Topic. Its default shortcut is ⌘⇧R. A palette row also offers Mark Re
 for that Topic, Session, Window or Agent. A blocked mark stays until the Agent
 is no longer blocked.
 
-**Mark Unread** marks read Agents with done, failed or blocked Status as Unread.
+**Mark Unread** marks any Topic as Unread, including an empty, Dormant, Snoozed
+or Settled Topic. The mark is saved with the Topic and does not require an Agent.
+Mark Read clears it. A Snoozed Topic keeps its mark but hides it until Snooze ends.
 Its Command and shortcut, ⌘⇧U, use the same target as Mark Read. A palette row
-also offers Mark Unread for that Topic, Session, Window or Agent. Working Agents
-and Agents without a Status are not eligible.
+also offers Mark Unread for that Topic, Session, Window or Agent. For Agents,
+Mark Unread applies to done, failed or blocked Status. It does not change Status.
 
-**Mark All as Read** clears Unread in the Active Environment, including Unread
-working Agents. It has no default shortcut. Set `keybindings.mark_all_read` to
+**Mark All as Read** clears Unread in the Active Environment, including all Topic marks and Unread
+working Agents. This includes hidden, Snoozed and Settled Topics. It has no default shortcut. Set `keybindings.mark_all_read` to
 assign one. Use `keybindings.mark_unread` to change the Mark Unread shortcut.
 The palette row Action has no default shortcut. Set
 `keybindings.command_palette.mark_unread` to assign one.
 
 Set `manual_read: false` to restore automatic reading. A new visit to a Window or
 Topic clears Unread. Mark Unread stays set while you continue to view the same
-Window, until the next visit. Updates in the Window being viewed do not become
+Window or empty Topic, until the next visit. Updates in the Window being viewed do not become
 Unread.
 
 Set a `*_enabled` key to `false` to turn off that type of Notification on every surface:

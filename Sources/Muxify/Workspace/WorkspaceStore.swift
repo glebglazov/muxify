@@ -84,10 +84,12 @@ final class WorkspaceStore {
     /// Puts a Topic with no live Session in place of the terminal and makes it the Active Topic: an empty Topic
     /// offers Add a Project, a Dormant or Settled one offers Reopen and Start Fresh. Selecting a Window ends it.
     func showEmptyTopic(_ id: String) {
+        let entering = topicSelection.emptyTopicID != id
         topicSelection.showsEmptyNoTopic = false
         topicSelection.emptyTopicID = id
         sidebarMode = .topics
         updateTopicSelection()
+        if entering { readTopicsOnVisit([id]) }
         if !palette.isOpen { surface?.window?.makeFirstResponder(nil) }
     }
 
@@ -1000,7 +1002,11 @@ final class WorkspaceStore {
         // Coming back to Muxify reads the Agents in the Window on screen.
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
+        ) { [weak self] _ in MainActor.assumeIsolated {
+            guard let self else { return }
+            self.readActiveTopicOnEntry()
+            self.refresh()
+        } }
         startConnection()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
@@ -1504,18 +1510,69 @@ final class WorkspaceStore {
         }
     }
 
+    private func topicReadIDs(in target: ReadTarget) -> Set<String> {
+        guard !isRemote else { return [] }
+        switch target {
+        case .topic(let id): return topicWatcher.records.contains { $0.id == id } ? [id] : []
+        case .environment: return Set(topicWatcher.records.map(\.id))
+        default: return []
+        }
+    }
+
+    private var canWriteAgentRead: Bool {
+        connection != nil && isConnected && pendingReads == 0 && !readSnapshotPending
+    }
+
     func canChangeRead(_ change: ReadChange, in target: ReadTarget?) -> Bool {
-        guard let target, connection != nil, !isTransitioning, !isRemote || isConnected,
-              pendingReads == 0, !readSnapshotPending, pendingReadNavigations.isEmpty, pendingSelection == nil else { return false }
-        return !agents(for: change, in: target).isEmpty
+        guard let target, !isTransitioning, pendingReadNavigations.isEmpty,
+              pendingSelection == nil else { return false }
+        if isConnected, pendingReads > 0 || readSnapshotPending { return false }
+        let ids = topicReadIDs(in: target)
+        if case .topic = target, !ids.isEmpty { return true }
+        if change == .read, topicWatcher.records.contains(where: { ids.contains($0.id) && $0.isUnread }) { return true }
+        return canWriteAgentRead && !agents(for: change, in: target).isEmpty
     }
 
     func changeRead(_ change: ReadChange, in target: ReadTarget?) {
         guard let target, canChangeRead(change, in: target) else { return }
-        // Apply earlier visits first so they cannot clear the new explicit mark.
-        var commands = unreadChanges(panes)
-        commands += agents(for: change, in: target).map { unreadCommand(change == .unread, paneID: $0.paneID) }
-        writeUnread(commands)
+        // Earlier visits must not clear a later explicit mark.
+        var commands = canWriteAgentRead ? unreadChanges(panes) : []
+        if !canWriteAgentRead {
+            explicitReadVisits = AgentReadVisits()
+            unreadVisit = topicSelection.emptyTopicID == nil && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
+        }
+        guard writeTopicUnread(change == .unread, ids: topicReadIDs(in: target)) else { return }
+        if canWriteAgentRead {
+            commands += agents(for: change, in: target).map { unreadCommand(change == .unread, paneID: $0.paneID) }
+            if !commands.isEmpty { writeUnread(commands) }
+        }
+    }
+
+    @discardableResult
+    private func writeTopicUnread(_ unread: Bool, ids: Set<String>) -> Bool {
+        guard !isRemote, !isTransitioning, !ids.isEmpty else { return true }
+        do {
+            try topicWatcher.write { transaction in
+                for record in transaction.records where ids.contains(record.id) && record.isUnread != unread {
+                    try transaction.update(record.id) { $0.isUnread = unread }
+                }
+            }
+            return true
+        } catch {
+            showTopicFailure(error)
+            return false
+        }
+    }
+
+    func readActiveTopicOnEntry() {
+        guard NSApp.isActive, terminalHost.window?.isKeyWindow == true,
+              let id = topicSelection.emptyTopicID else { return }
+        readTopicsOnVisit([id])
+    }
+
+    private func readTopicsOnVisit(_ ids: Set<String>) {
+        guard !config.notifications.manualRead else { return }
+        writeTopicUnread(false, ids: ids)
     }
 
     private func unreadCommand(_ unread: Bool, paneID: String) -> [String] {
@@ -1537,12 +1594,13 @@ final class WorkspaceStore {
     }
 
     private func unreadChanges(_ panes: [TmuxPane]) -> [[String]] {
-        let lookingAt = NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
+        let lookingAt = topicSelection.emptyTopicID == nil && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
         let entering = lookingAt != unreadVisit
         let topic = entering ? lookingAt.flatMap { id in windows.first { $0.id == id }?.topicID } : nil
         unreadVisit = lookingAt
         let visited = Set(windows.filter { (entering && $0.id == lookingAt) || (topic != nil && $0.topicID == topic) }.map(\.id))
             .union(explicitReadVisits.consume(in: windows))
+        readTopicsOnVisit(Set(windows.filter { visited.contains($0.id) }.compactMap(\.topicID)))
         var commands: [[String]] = []
         for pane in panes {
             let reading: AgentReading = visited.contains(pane.windowID) ? .visiting : pane.windowID == lookingAt ? .viewing : .away

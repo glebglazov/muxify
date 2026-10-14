@@ -119,7 +119,7 @@ final class ZenTests: XCTestCase {
             XCTAssertEqual(during.agentMarks, ["%2": .done, "%4": .working], "an Agent's own row keeps only its Working mark")
             XCTAssertEqual(during.visibleAgents.map(\.paneID), ["%2"], "\(mode)")
         }
-        XCTAssertEqual(model(selected: "@1", zen: zen).rows.first { $0.id == .topic("made") }?.mark, .done)
+        XCTAssertEqual(model(selected: "@1", zen: zen).rows.first { $0.id == .topic("made") }?.mark, .agent(.done))
     }
 
     func testWithOrWithoutZenTheTopicListHasNoNoTopicRowAndAnEmptyNoTopicSlotWhileATopicIsActive() {

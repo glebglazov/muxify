@@ -28,7 +28,7 @@ struct PaletteItem: Equatable {
     var logo: String?
     /// An Agent's Status, which its row shows as text.
     var status: AgentStatus?
-    var mark: AgentMark?
+    var mark: RowMark?
 }
 
 enum MoveDestination: Hashable {
@@ -149,7 +149,7 @@ struct PaletteCatalog {
         return PickCandidate(
             id: row.id.accessibilityID, symbol: "✓", title: row.title,
             fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]),
-            note: settledOn, trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "),
+            note: settledOn, trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "), mark: row.mark,
             lastVisit: visits.last(.topic(row.id)),
             pick: .available(PaletteItem(kind: .settledTopic, ref: .topic(id: record.id, window: nil))))
     }
@@ -186,7 +186,7 @@ struct PaletteCatalog {
             fields: [.typeWord(choice.isWorktree ? "worktree" : "project"), .detail(Paths.tildify(choice.directory, home: homeDirectory))]
                 + choice.nameFields + names.filter { $0 != choice.name }.map { .hidden($0) },
             trailing: sessions.isEmpty ? "↩ open" : isCurrent ? "Current" : visit.map { VisitAge.short(since: $0, now: now) } ?? "",
-            mark: ids.compactMap { topics?.sessionMarks[$0] }.max(),
+            mark: ids.compactMap { topics?.sessionMarks[$0] }.max().map(RowMark.agent),
             lastVisit: visit, isCurrent: isCurrent, unopened: sessions.isEmpty,
             activity: sessions.flatMap { $0.map(\.sessionActivity) }.max() ?? 0,
             pick: .available(PaletteItem(kind: choice.isWorktree ? .worktree : .project,
@@ -211,7 +211,7 @@ struct PaletteCatalog {
                 fields: [.typeWord("session"), .detail("\(count) window\(count == 1 ? "" : "s")"),
                          .detail(Paths.tildify(folder, home: homeDirectory))],
                 trailing: isCurrent ? "Current" : age(.session(name: session.name)) ?? "",
-                mark: topics?.sessionMarks[session.id],
+                mark: topics?.sessionMarks[session.id].map(RowMark.agent),
                 lastVisit: visits.last(.session(name: session.name)), isCurrent: isCurrent, activity: active.sessionActivity,
                 pick: .available(PaletteItem(kind: .session, ref: .session(session), path: folder, target: session.name)),
                 paste: Self.shellWord(folder))
@@ -252,7 +252,7 @@ struct PaletteCatalog {
                 isCurrent: agent.windowID == selectedWindowID, activity: window?.sessionActivity ?? 0,
                 pick: .available(PaletteItem(kind: .agent, ref: .agent(agent), path: path, target: agent.paneID,
                                              logo: agent.kind.rawValue, status: agent.status,
-                                             mark: agentMarks[agent.paneID])),
+                                             mark: agentMarks[agent.paneID].map(RowMark.agent))),
                 paste: path.isEmpty ? nil : Self.shellWord(path))
         }
     }

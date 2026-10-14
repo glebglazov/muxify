@@ -291,11 +291,11 @@ private struct SpotlightPalette: View {
                 }
             }
             Spacer(minLength: 12)
-            if let mark = row.mark { AgentMarkView(mark: mark) }
+            if let mark = row.mark { RowMarkView(mark: mark) }
             if let item, let status = item.status {
-                Text(item.mark == .done ? "Done · Unread" : status.rawValue.capitalized)
+                Text(item.mark == .agent(.done) ? "Done · Unread" : status.rawValue.capitalized)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(item.mark.map { agentColors[$0].color } ?? .secondary)
+                    .foregroundStyle(item.mark.map { $0.color(agentColors) } ?? .secondary)
             } else if !row.trailing.isEmpty {
                 Text(row.trailing).font(.system(size: 12.5)).foregroundStyle(.secondary)
             }
@@ -403,15 +403,15 @@ struct PaletteIcon: View {
                 .frame(width: size, height: size)
                 .overlay(alignment: .bottomTrailing) {
                     if let mark = item.mark {
-                        AgentMarkView(mark: mark, dotSize: size * 0.36)
-                            .padding(mark == .working ? 2 : 0)
+                        RowMarkView(mark: mark, dotSize: size * 0.36)
+                            .padding(mark == .agent(.working) ? 2 : 0)
                             .background {
-                                if mark == .working {
+                                if mark == .agent(.working) {
                                     RoundedRectangle(cornerRadius: 3).fill(theme.background)
                                 }
                             }
                             .overlay {
-                                if mark.isNotification {
+                                if mark != .agent(.working) {
                                     Circle().strokeBorder(theme.background, lineWidth: 2)
                                 }
                             }

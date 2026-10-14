@@ -8,7 +8,7 @@ import MuxifyCore
 struct SidebarCard<Header: View, Content: View>: View {
     let isOpen: Bool
     let holdsSelection: Bool
-    let mark: AgentMark?
+    let mark: RowMark?
     /// The coordinate space of the scroll view around the list, in which the open card's header sticks to the top.
     var viewport: String? = nil
     var restingOpacity: Double = 1
@@ -60,7 +60,7 @@ struct SidebarCard<Header: View, Content: View>: View {
         }
         .overlay(alignment: .leading) {
             if let mark {
-                AgentMarkSpine(mark: mark)
+                RowMarkSpine(mark: mark)
                     .frame(width: 3)
                     .padding(.vertical, 8)
                     .padding(.leading, 4)
@@ -126,7 +126,7 @@ extension EnvironmentValues {
 struct CardHeader<Details: View>: View {
     let title: String
     let isOpen: Bool
-    let mark: AgentMark?
+    let mark: RowMark?
     var isPinned = false
     /// A Locked Session's card shows a lock where a Pinned Topic's card shows its pin.
     var isLocked = false

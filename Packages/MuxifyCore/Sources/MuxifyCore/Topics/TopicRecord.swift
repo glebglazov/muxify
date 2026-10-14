@@ -62,6 +62,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     public var hasManualSessionOrder = false
     /// The Topic stays above every Topic that is not Pinned (`pinned: true`).
     public var isPinned = false
+    public var isUnread = false
     public var unknownFields: [String: JSONValue] = [:]
 
     public func isSnoozed(at now: Date) -> Bool {
@@ -81,7 +82,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id, title, slug, outcome, order, sessions
         case homeProject = "home_project", createdAt = "created_at", settledAt = "settled_at"
-        case snoozedUntil = "snoozed_until", sessionOrder = "session_order", pinned
+        case snoozedUntil = "snoozed_until", sessionOrder = "session_order", pinned, unread
     }
 
     private struct FieldKey: CodingKey {
@@ -108,6 +109,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         sessions = try values.decodeIfPresent([JSONValue].self, forKey: .sessions) ?? []
         hasManualSessionOrder = (try? values.decodeIfPresent(String.self, forKey: .sessionOrder)) == "manual"
         isPinned = (try? values.decodeIfPresent(Bool.self, forKey: .pinned)) == true
+        isUnread = (try? values.decodeIfPresent(Bool.self, forKey: .unread)) == true
         let known = Set(CodingKeys.allCases.map(\.rawValue))
         let fields = try decoder.container(keyedBy: FieldKey.self)
         unknownFields = Dictionary(uniqueKeysWithValues: try fields.allKeys.filter { !known.contains($0.stringValue) }.map {
@@ -129,6 +131,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         try values.encodeIfPresent(snoozedUntil, forKey: .snoozedUntil)
         try values.encode(sessions, forKey: .sessions)
         if hasManualSessionOrder { try values.encode("manual", forKey: .sessionOrder) }
+        if isUnread { try values.encode(true, forKey: .unread) }
         if isPinned { try values.encode(true, forKey: .pinned) }
     }
 }

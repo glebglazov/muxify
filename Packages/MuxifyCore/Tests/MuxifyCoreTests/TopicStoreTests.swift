@@ -14,6 +14,27 @@ final class TopicStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testUnreadDefaultsRoundTripsAndPreservesOtherWriters() throws {
+        let old = try JSONDecoder().decode(TopicRecord.self, from: Data(#"{"id":"t","future":{"value":7}}"#.utf8))
+        XCTAssertFalse(old.isUnread)
+        let store = TopicStore(paths: paths)
+        try store.write { try $0.create(old) }
+        try store.write { try $0.update("t") { $0.isUnread = true } }
+        var renamed = old
+        renamed.title = "Renamed"
+        try store.write { try $0.apply(TopicRecordChange(before: old, after: renamed)) }
+        let read = try XCTUnwrap(store.read().records.first)
+        XCTAssertTrue(read.isUnread)
+        XCTAssertEqual(read.title, "Renamed")
+        XCTAssertEqual(read.unknownFields, old.unknownFields)
+        XCTAssertEqual(try JSONDecoder().decode(TopicRecord.self, from: JSONEncoder().encode(read)), read)
+        try store.write { try $0.update("t") { $0.isUnread = false } }
+        let cleared = try XCTUnwrap(store.read().records.first)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(cleared)) as? [String: Any])
+        XCTAssertNil(json["unread"])
+        XCTAssertEqual(cleared.title, "Renamed")
+    }
+
     func testForgetEndsZenAndStaleEditsCannotCreateTheTopicAgain() throws {
         let store = TopicStore(paths: paths)
         let kept = TopicRecord(id: "kept", title: "Kept")

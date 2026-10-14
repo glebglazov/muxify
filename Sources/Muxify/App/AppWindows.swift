@@ -104,7 +104,10 @@ final class AppWindows {
         let center = NotificationCenter.default
         observers[id] = [
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.focus(id) }
+                MainActor.assumeIsolated {
+                    self?.focus(id)
+                    self?.stores[id]?.readActiveTopicOnEntry()
+                }
             },
             center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.close(id) }

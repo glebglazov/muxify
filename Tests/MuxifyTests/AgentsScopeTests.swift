@@ -37,7 +37,7 @@ final class AgentsScopeTests: XCTestCase {
         XCTAssertEqual(onAlpha.visibleAgents.map(\.paneID), ["%1"])
         XCTAssertEqual(onAlpha.agentsScope, .topic(.topic("a"), title: "Alpha"))
         XCTAssertEqual(onAlpha.agentGroups, [:], "the header names the Topic, so rows show the Agent only")
-        XCTAssertEqual(onAlpha.rows.first { $0.id == .topic("b") }?.mark, .blocked)
+        XCTAssertEqual(onAlpha.rows.first { $0.id == .topic("b") }?.mark, .agent(.blocked))
 
         let onBeta = model([alpha, beta], windows, agents, selected: "@2")
         XCTAssertEqual(onBeta.visibleAgents.map(\.paneID), ["%2"])

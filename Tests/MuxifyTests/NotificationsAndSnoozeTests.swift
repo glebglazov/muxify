@@ -22,6 +22,28 @@ final class NotificationsAndSnoozeTests: XCTestCase {
               sessionID: "$1", sessionName: "app/topic", windowIndex: 1, windowTitle: "Agent", label: "Agent")
     }
 
+    func testTopicUnreadIsIndependentOfAgentsAndNotificationSettings() {
+        var topic = TopicRecord(id: "a")
+        topic.isUnread = true
+        var config = Config()
+        config.notifications.doneEnabled = false
+        func model(_ agents: [Agent] = [], windows: [TmuxWindow] = []) -> TopicsModel {
+            TopicsModel(records: [topic], windows: windows, config: config, selection: TopicSelection(), agents: agents, now: now)
+        }
+        XCTAssertEqual(model().rows.first?.mark, .unread)
+        XCTAssertEqual(model([agent(.working)], windows: [window("@1", topic: "a")]).rows.first?.mark, .unread)
+        XCTAssertEqual(model([agent(.failed)], windows: [window("@1", topic: "a")]).rows.first?.mark, .agent(.failed))
+        XCTAssertEqual(model([agent(.blocked)], windows: [window("@1", topic: "a")]).rows.first?.mark, .agent(.blocked))
+        XCTAssertEqual(model([agent(.working)], windows: [window("@1", topic: "a")]).agentMarks["%1"], .working)
+        topic.snoozedUntil = "never"
+        XCTAssertNil(model().groups.first?.topics.first?.mark)
+        topic.snoozedUntil = SnoozeDeadline.at(now).stored
+        XCTAssertEqual(model().dueWakes.first?.count, 0)
+        XCTAssertEqual(model().rows.first?.mark, .unread)
+        topic.settledAt = "2026-10-07T08:00:00Z"
+        XCTAssertEqual(model().groups.first { $0.kind == .settled }?.topics.first?.mark, .unread)
+    }
+
     func testEveryScheduleFormAndTypedShorthand() throws {
         let forms = ["+5m": "2026-10-07T08:05:00Z", "+2h": "2026-10-07T10:00:00Z",
                      "+2d": "2026-10-09T08:00:00Z", "today": "2026-10-07T09:00:00Z",
@@ -98,23 +120,23 @@ final class NotificationsAndSnoozeTests: XCTestCase {
         func model(_ config: Config, _ agents: [Agent]) -> TopicsModel {
             TopicsModel(records: [topic], windows: windows, config: config, selection: TopicSelection(), agents: agents, now: now)
         }
-        XCTAssertEqual(model(Config(), agents).rows[0].mark, .blocked)
+        XCTAssertEqual(model(Config(), agents).rows[0].mark, .agent(.blocked))
         XCTAssertEqual(model(Config(), agents).dueWakes[0].count, 3)
         for (key, disabled, expected) in [(\Config.Notifications.blockedEnabled, AgentStatus.blocked, AgentMark.failed),
                                          (\Config.Notifications.failedEnabled, .failed, .blocked),
                                          (\Config.Notifications.doneEnabled, .done, .blocked)] {
             var config = Config()
             config.notifications[keyPath: key] = false
-            XCTAssertEqual(model(config, agents).rows[0].mark, expected)
+            XCTAssertEqual(model(config, agents).rows[0].mark, .agent(expected))
             XCTAssertEqual(model(config, agents).dueWakes[0].count, 2)
             XCTAssertNil(model(config, [agent(disabled)]).rows[0].mark)
             XCTAssertEqual(model(config, [agent(disabled)]).dueWakes[0].count, 0)
         }
-        XCTAssertEqual(model(Config(), Array(agents.prefix(2))).rows[0].mark, .failed)
-        XCTAssertEqual(model(Config(), [agents[0]]).rows[0].mark, .done)
-        XCTAssertEqual(model(Config(), [agent(.done, unread: false), agent(.working, id: "%2")]).rows[0].mark, .working)
+        XCTAssertEqual(model(Config(), Array(agents.prefix(2))).rows[0].mark, .agent(.failed))
+        XCTAssertEqual(model(Config(), [agents[0]]).rows[0].mark, .agent(.done))
+        XCTAssertEqual(model(Config(), [agent(.done, unread: false), agent(.working, id: "%2")]).rows[0].mark, .agent(.working))
         XCTAssertNil(model(Config(), [agent(.done, unread: false)]).rows[0].mark, "a read, done Agent has no mark")
-        XCTAssertEqual(model(Config(), [agent(.blocked, unread: false), agent(.done, id: "%2")]).rows[0].mark, .blocked)
+        XCTAssertEqual(model(Config(), [agent(.blocked, unread: false), agent(.done, id: "%2")]).rows[0].mark, .agent(.blocked))
         var noBlocked = Config()
         noBlocked.notifications.blockedEnabled = false
         XCTAssertNil(model(noBlocked, [agent(.blocked, unread: false)]).rows[0].mark)

@@ -461,6 +461,7 @@ private struct GroupedTopicRow: View {
                     Image(systemName: topic.isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .bold)).frame(width: 10)
                     Text(topic.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    if let mark = topic.mark { RowMarkView(mark: mark) }
                     if topic.isPinned { PinMark() }
                     Spacer(minLength: 4)
                     Text(details.joined(separator: " · ")).font(.system(size: 10)).lineLimit(1).truncationMode(.tail)
@@ -470,7 +471,7 @@ private struct GroupedTopicRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier(topic.id.accessibilityID)
-            .accessibilityValue(([topic.isExpanded ? "expanded" : "collapsed"] + (topic.isPinned ? ["Pinned"] : []) + details)
+            .accessibilityValue(([topic.isExpanded ? "expanded" : "collapsed"] + (topic.isPinned ? ["Pinned"] : []) + details + [topic.mark?.rawValue].compactMap { $0 })
                 .joined(separator: ", "))
             .accessibilityActions {
                 if let topicID { Button("Forget Topic…") { store.presentForgetTopic(topicID) }.disabled(store.changingTopic) }
@@ -963,7 +964,7 @@ private struct SessionCard<Row: View>: View {
     var body: some View {
         let isOpen = store.openSessionCards.contains(session.name)
         let isSnoozed = session.windows.first?.topicID.map { model.snoozedTopicIDs.contains($0) } ?? false
-        let mark = model.sessionMarks[session.id]
+        let mark = model.sessionMarks[session.id].map(RowMark.agent)
         let isLocked = model.lockedSessionIDs.contains(session.id)
         SidebarCard(isOpen: isOpen, holdsSelection: session.windows.contains { $0.id == store.selectedWindowID }, mark: mark,
                     viewport: viewport, restingOpacity: isSnoozed ? 0.45 : 1) {
