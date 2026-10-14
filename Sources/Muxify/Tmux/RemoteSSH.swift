@@ -144,7 +144,8 @@ final class RemoteSSH {
         // not flash raw Session/Browser records in the terminal before exit.
         let reportSnapshot = """
         if snapshot=$(\(snapshotCommand) 2>/dev/null); then
-            printf '\\033Pmuxify;\\n%s\\n%s\\n%s\\n%s\\n\\033\\\\' \(Tmux.shellQuote(snapshotStart)) "${HOME}\(Tmux.separator)$(uname -n)" "$snapshot" \(Tmux.shellQuote(snapshotEnd)) >&2
+            reports=$(printf '%s\\n' "$snapshot" | /bin/sh -c \(Tmux.shellQuote(Tmux.codexReportsForInventoryScript)))
+            printf '\\033Pmuxify;\\n%s\\n%s\\n%s\\n%s\\n%s\\n\\033\\\\' \(Tmux.shellQuote(snapshotStart)) "${HOME}\(Tmux.separator)$(uname -n)" "$snapshot" "$reports" \(Tmux.shellQuote(snapshotEnd)) >&2
         elif absence=$(tmux -u has-session 2>&1); then
             :
         else

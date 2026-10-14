@@ -19,7 +19,7 @@ class AgentFormatsSidebar(unittest.TestCase):
             '-s', 'format-session', '-n', 'stable-window', 'sleep 600').split()
         s.tmux('set-option', '-t', cls.session, '@muxify_topic', 'formats')
         s.tmux('set-window-option', '-t', cls.window, 'automatic-rename', 'off')
-        s.tmux('set-option', '-p', '-t', cls.pane, '@muxify_agent', 'codex')
+        s.tmux('set-option', '-p', '-t', cls.pane, '@muxify_agent', 'claude')
         s.tmux('set-option', '-p', '-t', cls.pane, '@muxify_agent_status', 'working')
         s.tmux('select-pane', '-t', cls.pane, '-T', 'Agent task')
         cls.other = s.tmux('split-window', '-d', '-t', cls.window, '-P', '-F', '#{pane_id}', 'sleep 600')

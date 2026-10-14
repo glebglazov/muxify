@@ -13,7 +13,7 @@ doing. There is one folder per Agent:
 
 ## What an Extension does
 
-Each Extension writes three tmux pane options on the Agent's own Pane
+Claude Code, OpenCode and Pi write three tmux pane options on the Agent's own Pane
 ([ADR 0004](../docs/adr/0004-agents-report-status-through-pane-options.md)):
 
 | Option                | Values                                  |
@@ -28,6 +28,8 @@ Each Extension writes three tmux pane options on the Agent's own Pane
 - When the Agent exits normally, all three options are unset (`set -p -u`).
 - Outside tmux (`TMUX_PANE` empty) an Extension does nothing, and it never
   fails the Agent's hook: tmux errors are ignored.
+
+Codex writes conversation reports instead. See [Codex](#codex).
 
 Muxify reads these options in its once-a-second tmux poll and lists the Agent in
 the sidebar's Agents section. An Agent whose Pane is back at a plain shell is
@@ -44,8 +46,8 @@ directory exists under your home directory, installs the Extension (or updates
 it if it is already there) and prints one line per Agent, such as
 `claude: installed`, `opencode: updated` or `pi: not found` (or
 `claude: failed (<reason>)`). After a `codex: installed` or `codex: updated`
-line it adds two indented reminders: trust the hooks once via `/hooks` in
-Codex, and launch Codex with `codex --no-daemon` (see [Codex](#codex)).
+line it adds two reminders. Trust the hooks once through `/hooks` in Codex.
+Restart existing Codex TUIs to load the conversation title setting.
 Running it again changes nothing but the Extension files themselves, so it is
 also how you update.
 
@@ -79,10 +81,15 @@ For Claude Code (detected by `~/.claude`), the installer:
 - needs `jq`; without it, it prints `claude: failed (jq not found)` and changes
   nothing.
 
-For Codex (detected by `~/.codex`), the installer:
+For Codex, the installer uses `$CODEX_HOME` when set, else `~/.codex`:
 
-- copies `codex/muxify-status.sh` to `~/.codex/muxify-status.sh` (a copy, not
-  a symlink; a symlink already there is replaced);
+- requires `jq`, `python3` and `codex` on PATH;
+- uses Codex's config editor to put `thread-id` first in `tui.terminal_title`,
+  while it preserves the other title items and unrelated settings. When the
+  setting is absent, it preserves Codex's default title items. An empty list
+  becomes `["thread-id"]`. A changed config gets a `config.toml.bak` backup;
+- copies `codex/muxify-status.sh` to the Codex home as `muxify-status.sh`.
+  An existing symlink is replaced;
 - adds one hook entry per event in the [Codex](#codex) table to
   `~/.codex/hooks.json` (creating it if missing), each
   `{"hooks": [{"type": "command", "command": "sh \"$HOME/.codex/muxify-status.sh\"", "timeout": 5}]}`:
@@ -91,8 +98,7 @@ For Codex (detected by `~/.codex`), the installer:
   line that fish, zsh and bash all read the same way;
 - follows the same rules as for Claude Code: `hooks.json.bak` before changing
   it, an entry only when that event has no hook with the identical command yet,
-  other entries (herdr, lavish …) and keys left alone, nothing written when
-  nothing is missing, and `codex: failed (jq not found)` without `jq`.
+  other entries and keys left alone, and nothing written when nothing is missing.
 
 For OpenCode 2 (detected by `~/.config/opencode`), the installer replaces
 `~/.config/opencode/plugins/muxify-status/` with a copy of
@@ -133,61 +139,53 @@ blocked) until the next event, such as your next prompt.
 
 ## Codex
 
-`codex/muxify-status.sh` is a POSIX `sh` script that handles every hook event
-of Codex CLI (written against Codex 0.157). Codex passes the event as JSON on
-stdin; the script reads `hook_event_name` (and `tool_name`) with `jq`, ignores
-payloads carrying a non-empty `agent_id` (Codex adds it only to tool, prompt
-and permission events sent by a subagent; `Stop`, `Interrupt` and `SessionEnd`
-never fire for subagents), prints nothing and always exits 0.
+Codex works in its default shared-daemon mode. Its Extension records Status by
+conversation ID. The Codex TUI puts that ID in its own terminal title. Muxify
+joins the two during its normal poll, so a daemon's inherited `TMUX_PANE`
+cannot send Status to the wrong Pane.
 
-| Hook event                                  | Status                          |
-| ------------------------------------------- | ------------------------------- |
-| `SessionStart` (at the first prompt)        | sets the Agent and conversation id       |
-| `UserPromptSubmit`, `PostToolUse`           | working                         |
-| `PreToolUse`, `tool_name` `request_user_input` | blocked                      |
-| `PreToolUse`, any other tool                | working                         |
-| `PermissionRequest`                         | blocked                         |
-| `Stop`                                      | done                            |
-| `Interrupt` (Esc)                           | done                            |
-| `SessionEnd`                                | unsets all three options             |
-| anything else                               | nothing                         |
+The installer adds `thread-id` to Codex's title settings. Muxify hides the ID
+from its normal Sidebar labels. Restart existing Codex TUIs after installation
+to load this setting. Run `/hooks` in Codex and trust the Muxify entries.
+A project or profile that overrides `tui.terminal_title` must also include
+`thread-id`.
 
-**Launch Codex with `--no-daemon`.** By default Codex runs conversations in a
-shared background daemon (`codex app-server --managed-daemon`), and the hooks
-run inside that daemon with the environment of whichever Pane happened to start
-it, so their `TMUX_PANE` would point at the wrong Pane. The script therefore
-looks at its ancestor processes (a handful of levels, up to pid 1) and writes
-nothing when one of them has `--managed-daemon` in its arguments: under the
-daemon, Codex shows no Agent at all rather than a wrong one. With
-`--no-daemon` each Codex runs in its own process in its own Pane and its hooks
-report there. In fish, add to `~/.config/fish/config.fish`:
+`codex/muxify-status.sh` receives JSON on stdin. It ignores subagent events and
+invalid conversation IDs. It writes one small JSON report, by atomic rename,
+to `$HOME/.local/state/muxify/codex/<conversation-id>.json`. This fixed location
+is independent of `CODEX_HOME` and `XDG_STATE_HOME`, which can differ between
+the daemon and the app. Reports contain only a version, conversation ID and
+Status. The Extension needs no tmux environment and writes no tmux options.
 
-```fish
-alias codex 'command codex --no-daemon'
-```
+| Hook event | Status |
+| --- | --- |
+| `SessionStart`, `SessionEnd` | no Status |
+| `UserPromptSubmit`, `PostToolUse` | working |
+| `PreToolUse`, tool `request_user_input` | blocked |
+| `PreToolUse`, any other tool | working |
+| `PermissionRequest` | blocked |
+| `Stop`, `Interrupt` | done |
 
-or, as a function file `~/.config/fish/functions/codex.fish`:
+Muxify detects a foreground `codex` command even before its first report.
+A report supplies Status and the full conversation ID only when it matches the
+Pane title without ambiguity. Codex 0.162.1 truncates the title ID, so Muxify
+accepts a prefix only when it matches one report. Two Panes can show the same
+conversation. A shell or another program does not become an Agent from a stale
+title. Old Codex pane options do not override these reports and are ignored after
+Codex exits. Other Agents continue to use their pane options.
 
-```fish
-function codex --wraps codex
-    command codex --no-daemon $argv
-end
-```
-
-**Trust the hooks once.** Codex does not run hooks from `hooks.json` until
-you have reviewed and trusted them: after installing, open Codex, run `/hooks`
-and trust the Muxify entries.
+The app and CLI read reports on the Environment's machine through the selected
+tmux server. Normal polls read only reports for current title prefixes. Reports
+remain after `SessionEnd` with no Status, because another TUI can still show the
+same conversation. The foreground command determines whether an Agent runs.
 
 Known gaps:
 
-- No failed: Codex fires no hook when a turn ends with an error, so the Status
-  stays working until the next event.
-- Blocked lasts until an approved command finishes: Codex fires nothing when
-  you answer a permission prompt, so the Status goes from blocked back to
-  working only at that tool's `PostToolUse`.
-- The Agent appears only at its first prompt: Codex fires `SessionStart` when
-  the first prompt is sent, not at launch, so a freshly started Codex has no
-  row until then.
+- Codex has no turn-failure hook, so it cannot report failed Status.
+- After approval, Status changes from blocked to working at `PostToolUse`.
+- Before a matching report arrives, the Agent has no Status or full conversation ID.
+- Identity matching depends on Codex's terminal title format. This is verified
+  against Codex 0.162.1. A changed format requires a matching parser update.
 
 ## OpenCode 2
 

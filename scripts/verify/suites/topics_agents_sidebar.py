@@ -120,7 +120,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
         sid, first, first_pane = self.agent_session('scope-window-session', topic='scope-window')
         second, second_pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}',
                                           '-t', sid + ':', '-c', str(self.beta), 'sleep 600').split()
-        self.s.tmux('set-option', '-p', '-t', second_pane, '@muxify_agent', 'codex')
+        self.s.tmux('set-option', '-p', '-t', second_pane, '@muxify_agent', 'claude')
         self.s.tmux('set-option', '-p', '-t', second_pane, '@muxify_agent_status', 'working')
         for window, pane, title in [(first, first_pane, 'Scope first'), (second, second_pane, 'Scope second')]:
             self.s.tmux('select-pane', '-t', pane, '-T', title)

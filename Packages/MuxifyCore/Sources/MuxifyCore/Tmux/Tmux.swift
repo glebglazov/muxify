@@ -16,8 +16,8 @@ public struct TmuxWindow: Identifiable, Hashable {
     public let paneCount: Int
     public let hasBell: Bool
     public let sessionActivity: Int
-    /// The active Pane's `@muxify_agent`, empty when no Agent reports there.
-    public let agent: String
+    /// The active Pane's Agent kind, empty when no Agent reports there.
+    public var agent: String
     /// The Window's Browser as last written to its tmux options.
     public var storedBrowser: StoredBrowser
     /// URLs a program asked to open via `@muxify_open` (not yet consumed).
@@ -42,7 +42,8 @@ public struct TmuxWindow: Identifiable, Hashable {
     /// `~/w/project`), so it is the best human label. tmux defaults it to the
     /// hostname, in which case we fall back to the window name or the path.
     public var displayTitle: String {
-        if let title = Tmux.label(fromPaneTitle: withoutSSHHostPrefix(paneTitle.trimmingCharacters(in: .whitespaces)), hostName: hostName) { return title }
+        let visibleTitle = command == "codex" ? CodexReports.titleForDisplay(paneTitle) : paneTitle
+        if let title = Tmux.label(fromPaneTitle: withoutSSHHostPrefix(visibleTitle.trimmingCharacters(in: .whitespaces)), hostName: hostName) { return title }
         if !Tmux.shellNames.contains(name) { return name }
         return Paths.fishStyle(path, home: homeDirectory)
     }
@@ -152,10 +153,10 @@ public struct TmuxPane: Hashable {
     /// `#{pane_current_command}`. It can't identify an Agent (Claude Code's is
     /// its version number), but a plain shell here means no Agent is running.
     public let command: String
-    /// `@muxify_agent`, empty when unset.
-    public let agent: String
-    /// `@muxify_agent_status`, empty when unset.
-    public let agentStatus: String
+    /// The reported Agent kind, or Codex identified by its foreground command.
+    public var agent: String
+    /// The Extension's Status, empty before a report or after SessionEnd.
+    public var agentStatus: String
     /// `@muxify_agent_unread`, which Muxify itself sets.
     public let unread: Bool
     public var agentConversation: String = ""
@@ -164,7 +165,8 @@ public struct TmuxPane: Hashable {
 
     /// What the Sidebar calls this Pane.
     public var label: String {
-        if let title = Tmux.label(fromPaneTitle: title) { return title }
+        let visibleTitle = command == "codex" ? CodexReports.titleForDisplay(title) : title
+        if let title = Tmux.label(fromPaneTitle: visibleTitle) { return title }
         if Agent.runs(in: self) { return agent }
         if !Tmux.shellNames.contains(command) { return command }
         return Paths.fishStyle(path)
@@ -298,10 +300,32 @@ public enum Tmux {
         ["send-keys", "-c", client ?? ""] + (literal ? ["-l", "-t", target, "--"] : ["-t", target]) + keys
     }
 
-    /// One round trip that lists every window on the server, every client and
-    /// every pane (for the Agents in them).
+    /// Reads tmux inventory and the reports for its Codex conversations.
     public static func readSnapshot(using execute: ([String]) throws -> String) throws -> TmuxSnapshot {
-        parseSnapshot(try execute(snapshotArguments))
+        let output = try execute(snapshotArguments)
+        let snapshot = parseSnapshot(output)
+        let prefixes = CodexReports.prefixes(in: snapshot)
+        guard !prefixes.isEmpty else { return snapshot }
+        let reports = (try? execute(["run-shell", CodexReports.readScript(prefixes: prefixes)])) ?? ""
+        return parseSnapshot(output + "\n" + reports)
+    }
+
+    /// The foreground SSH owner sends its final inventory on stdin before
+    /// disconnecting. Read only reports that can belong to that inventory.
+    public static var codexReportsForInventoryScript: String {
+        """
+        prefixes=$(awk -F '\(separator)' '$1 == "P" && $4 == "codex" { print $12 }' |
+            grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{5}' | sort -u)
+        directory="$HOME/.local/state/muxify/codex"
+        for prefix in $prefixes; do
+            for file in "$directory/$prefix"*.json; do
+                [ -f "$file" ] || continue
+                printf 'D\(separator)'
+                head -c 512 "$file" 2>/dev/null | tr -d '\\n\\r'
+                printf '\\n'
+            done
+        done
+        """
     }
 
     /// Also used by the foreground SSH owner to report the final inventory
@@ -339,6 +363,7 @@ public enum Tmux {
         var panes: [TmuxPane] = []
         var lastWindowID: String?
         var serverID: String?
+        var codexReports: [String] = []
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let f = line.components(separatedBy: s)
             // Fields Topics added are optional, so older recorded snapshots still parse.
@@ -371,12 +396,16 @@ public enum Tmux {
                 ))
             } else if f.first == "S", f.count >= 2 {
                 serverID = f[1]
+            } else if f.first == "D", f.count == 2 {
+                codexReports.append(f[1])
             }
         }
-        return TmuxSnapshot(
+        var snapshot = TmuxSnapshot(
             windows: windows, clients: clients, panes: panes,
             lastWindowID: lastWindowID, serverRunning: true, serverID: serverID
         )
+        CodexReports.apply(codexReports, to: &snapshot)
+        return snapshot
     }
 
     public static func shellQuote(_ value: String) -> String {

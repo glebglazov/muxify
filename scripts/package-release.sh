@@ -71,7 +71,8 @@ Ghostty is bundled; you do not need to install Ghostty, Zig, or Xcode.
    for Muxify, then confirm. Only do this for a download you trust.
 
 The **Muxify** menu can install the optional command-line tool and Agent Extensions.
-Claude Code and Codex Extensions also need \`jq\`.
+Claude Code and Codex Extensions also need \`jq\`. The Codex installer needs
+\`python3\` and \`codex\` on PATH.
 
 ## Verify the download
 

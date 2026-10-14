@@ -10,7 +10,6 @@ Run from the repo root after `make build`:
 """
 
 import json
-import shutil
 import time
 import unittest
 
@@ -91,13 +90,12 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.write_topic('move-target', 'Move target', self.alpha, created_at='2026-10-07T00:00:00Z', order=0,
                          sessions=[dict(project_path=str(self.alpha))])
         self.new_session('alpha/move-target', self.alpha, topic='move-target')
-        codex = shutil.which('codex', path=s.env.get('PATH')) or '/opt/homebrew/bin/codex'
         session, window, pane, pane_pid = s.tmux(
             'new-session', '-d', '-P', '-F', '#{session_id} #{window_id} #{pane_id} #{pane_pid}', '-s', 'agent-src',
-            '-c', str(self.beta), '-n', 'agent', 'env CODEX_HOME=' + str(s.root/'codex-home') + ' ' + codex).split()
+            '-c', str(self.beta), '-n', 'agent', 'sleep 600').split()
         # A second Window keeps the source Session alive after the move.
         s.tmux('new-window', '-d', '-t', session + ':', '-n', 'spare', '-c', str(self.beta), SHELL)
-        s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'codex')
+        s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'claude')
         s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', 'working')
         s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_conversation', 'verify-conversation')
         for key, value in [('@muxify_tabs', 'https://example.com/ https://example.org/'), ('@muxify_active_tab', '1'),
@@ -121,7 +119,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         rs = s.wait_rows(lambda rs: self.card_of('topic-window-' + window, rs) == 'topic-move-target' and s.has('agent-' + pane, rs),
                          'the moved Window row is not under its Topic, or its Agent row is missing')
         agent_rows = [r for r in rs if r.get('accessibilityIdentifier') == 'agent-' + pane]
-        self.assertTrue(any(r.get('accessibilityHelp') == 'Codex — working' for r in agent_rows),
+        self.assertTrue(any(r.get('accessibilityHelp') == 'Claude Code — working' for r in agent_rows),
                         'Agent rows %s' % json.dumps(agent_rows, ensure_ascii=False))
         # The Sidebar shows the moved Window only after the app read tmux again, so options it lost would show now.
         after = s.tmux('display-message', '-p', '-t', window, AGENT_WINDOW).split('|')
