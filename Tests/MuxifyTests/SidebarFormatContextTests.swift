@@ -16,7 +16,7 @@ final class SidebarFormatContextTests: XCTestCase {
         let pane = TmuxPane(id: "%1", windowID: "@1", index: 3, isActive: true, title: "Agent task",
                             path: "/trees/feature/src", command: "sleep", agent: "codex", agentStatus: "working", unread: true)
         let agents = Agent.list(panes: [pane], windows: [window])
-        let branches = TopicBranches(records: [record], paths: [window.sessionPath, pane.path]) {
+        let branches = TopicBranches(records: [record], paths: [window.sessionPath, pane.path].map(Folder.local)) {
             $0 == "/trees/feature/.git/HEAD" ? "ref: refs/heads/feature" : nil
         }
         let model = TopicsModel(records: [record], windows: [window], config: Config(), selection: TopicSelection(),
@@ -86,10 +86,10 @@ final class SidebarFormatContextTests: XCTestCase {
 
     func testRemoteContextsDoNotExposeLocalBranches() throws {
         let window = window(remote: true)
-        let branches = TopicBranches(paths: [window.sessionPath]) {
+        let branches = TopicBranches(paths: [window.sessionPath].map(Folder.local)) {
             $0 == window.sessionPath + "/.git/HEAD" ? "ref: refs/heads/local" : nil
         }
-        XCTAssertEqual(branches[window.sessionPath], "local")
+        XCTAssertEqual(branches[.local(window.sessionPath)], "local")
         let pane = TmuxPane(id: "%1", windowID: window.id, path: window.sessionPath, command: "sleep",
                             agent: "codex", agentStatus: "working", unread: false)
         let model = TopicsModel(records: [], windows: [window], config: Config(), selection: TopicSelection())

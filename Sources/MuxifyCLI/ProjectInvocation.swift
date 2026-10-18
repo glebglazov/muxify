@@ -39,7 +39,7 @@ extension ProjectInvocation {
             print(String(decoding: try encoder.encode(ProjectList(rows: rows)), as: UTF8.self))
         case .text:
             for row in rows {
-                print([row.choice.directory, row.choice.displayName, row.alsoIn.map(\.label).joined(separator: ", ")]
+                print([row.choice.directory.path, row.choice.displayName, row.alsoIn.map(\.label).joined(separator: ", ")]
                     .map(\.oneLineField).joined(separator: "\t"))
             }
         }
@@ -87,8 +87,8 @@ private struct ProjectList: Encodable {
 
     init(rows: [ProjectRow]) {
         projects = rows.map { row in
-            Entry(label: row.choice.displayName, name: row.choice.name, directory: row.choice.directory, project: row.choice.project.path,
-                  worktree: row.choice.worktree.map { Entry.Checkout(path: $0.path, branch: $0.branch) }, topics: row.alsoIn)
+            Entry(label: row.choice.displayName, name: row.choice.name, directory: row.choice.directory.path, project: row.choice.project.folder.path,
+                  worktree: row.choice.worktree.map { Entry.Checkout(path: $0.folder.path, branch: $0.branch) }, topics: row.alsoIn)
         }
     }
 }

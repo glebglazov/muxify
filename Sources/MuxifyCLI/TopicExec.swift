@@ -30,17 +30,17 @@ struct TopicExec {
 
     /// The Sessions of `topic` to run in. A `project` directory keeps only the Session in that folder, else the one
     /// Session of that Project.
-    static func sessions(of topic: TopicDetail, project: String?) throws -> [Target] {
+    static func sessions(of topic: TopicDetail, project: Folder?) throws -> [Target] {
         let all = topic.sessions.map { Target(session: $0, directory: $0.worktree?.path ?? $0.project.path) }
         guard !all.isEmpty else { throw CLIError("the Topic \(topic.label) has no live Session") }
         guard let project else { return all }
-        var matches = all.filter { real($0.directory) == project }
-        if matches.isEmpty { matches = all.filter { real($0.session.project.path) == project } }
+        var matches = all.filter { Folder.local($0.directory) == project }
+        if matches.isEmpty { matches = all.filter { Folder.local($0.session.project.path) == project } }
         switch matches.count {
-        case 0: throw CLIError("no live Session of the Topic \(topic.label) uses \(project)")
+        case 0: throw CLIError("no live Session of the Topic \(topic.label) uses \(project.real)")
         case 1: return matches
         default:
-            throw CLIError("more than one live Session of the Topic \(topic.label) uses \(project): "
+            throw CLIError("more than one live Session of the Topic \(topic.label) uses \(project.real): "
                            + matches.map(\.session.name).joined(separator: ", ") + "; give the folder of one of them")
         }
     }
@@ -180,12 +180,6 @@ struct TopicExec {
                 return FileManager.default.fileExists(atPath: candidate, isDirectory: &isDirectory) && !isDirectory.boolValue
                     && FileManager.default.isExecutableFile(atPath: candidate)
             }
-    }
-
-    private static func real(_ path: String) -> String {
-        guard let resolved = realpath(path, nil) else { return (path as NSString).standardizingPath }
-        defer { free(resolved) }
-        return String(cString: resolved)
     }
 
     private static func endingInNewline(_ data: Data) -> Data {

@@ -102,7 +102,7 @@ final class CommandPalette {
 
     var catalog: PaletteCatalog? {
         guard let store else { return nil }
-        return PaletteCatalog(windows: store.windows, agents: store.agents, projects: store.projects,
+        return PaletteCatalog(windows: store.windows, agents: store.agents, projects: store.projects, folders: store.folders,
                               selectedWindowID: store.selectedWindowID, homeDirectory: store.homeDirectory,
                               topics: store.isRemote ? nil : store.topics, records: store.topicWatcher.records,
                               lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,

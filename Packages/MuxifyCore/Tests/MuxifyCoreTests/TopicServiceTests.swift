@@ -54,10 +54,10 @@ final class TopicServiceTests: XCTestCase {
 
     func testConfirmationRejectsChangedSessionsBeforeAnyEdits() throws {
         for dormant in [false, true] {
-            let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: dormant ? "Dormant" : "Live", project: dormant ? nil : project.path)))).topicID)
+            let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: dormant ? "Dormant" : "Live", project: dormant ? nil : project.folder.path)))).topicID)
             var reviewed = try service().settleChoices(for: .topic(.id(id))).get()
             for index in reviewed.indices { reviewed[index].disposition = .keep }
-            _ = try change(service().handle(TopicRequest(.addProject(project: tools.path, workingCopy: .project), target: .topic(.id(id)))))
+            _ = try change(service().handle(TopicRequest(.addProject(project: tools.folder.path, workingCopy: .project), target: .topic(.id(id)))))
             let before = try records()
             let windows = server.snapshot().windows
             for command in [TopicCommand.settle(choices: reviewed, outcome: "Done"), .forget(choices: reviewed, worktrees: [])] {
@@ -79,7 +79,7 @@ final class TopicServiceTests: XCTestCase {
 
     func testConfirmationRejectsNewWindowsAndPanesInReviewedSessions() throws {
         for addWindow in [false, true] {
-            let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Changed impact", project: project.path)))).topicID)
+            let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Changed impact", project: project.folder.path)))).topicID)
             let choices = try service().settleChoices(for: .topic(.id(id))).get()
             let session = try XCTUnwrap(choices.first)
             let window = try XCTUnwrap(server.snapshot().windows.first { $0.sessionID == session.id })
@@ -107,8 +107,8 @@ final class TopicServiceTests: XCTestCase {
 
     func testConfirmationAcceptsTheSameSessionSet() throws {
         for forget in [false, true] {
-            let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: forget ? "Forget reviewed" : "Settle reviewed", project: project.path)))).topicID)
-            _ = try change(service().handle(TopicRequest(.addProject(project: tools.path, workingCopy: .project), target: .topic(.id(id)))))
+            let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: forget ? "Forget reviewed" : "Settle reviewed", project: project.folder.path)))).topicID)
+            _ = try change(service().handle(TopicRequest(.addProject(project: tools.folder.path, workingCopy: .project), target: .topic(.id(id)))))
             var choices = try service().settleChoices(for: .topic(.id(id))).get()
             for index in choices.indices { choices[index].disposition = .keep }
             let command: TopicCommand = forget ? .forget(choices: choices, worktrees: []) : .settle(choices: choices, outcome: "Done")
@@ -125,8 +125,8 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testForgetKillsOrKeepsLiveSessionsAndCannotReopenTheTopic() throws {
-        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Forget", project: project.path)))).topicID)
-        _ = try change(service().handle(TopicRequest(.addProject(project: tools.path, workingCopy: .project), target: .topic(.id(id)))))
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Forget", project: project.folder.path)))).topicID)
+        _ = try change(service().handle(TopicRequest(.addProject(project: tools.folder.path, workingCopy: .project), target: .topic(.id(id)))))
         var choices = try service().forgetChoices(for: .topic(.id(id))).get().sessions
         choices[0].disposition = .kill
         choices[1].disposition = .keep
@@ -165,7 +165,7 @@ final class TopicServiceTests: XCTestCase {
         try assertThrowawayServer()
         _ = try change(service.handle(TopicRequest(.forget(choices: [], worktrees: [path]), target: .topic(.id(id)))))
         XCTAssertFalse(FileManager.default.fileExists(atPath: path))
-        XCTAssertFalse(try git(["branch", "--list", "forget-clean"], in: app.path).isEmpty)
+        XCTAssertFalse(try git(["branch", "--list", "forget-clean"], in: app.folder.path).isEmpty)
     }
 
     func testForgetOfASettledTopicRemovesItsRememberedWorktree() throws {
@@ -205,7 +205,7 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testCreateInAProjectWritesTheRecordAndStartsItsSession() throws {
-        let created = try change(service().handle(TopicRequest(.create(title: "Fix reward", project: project.path))))
+        let created = try change(service().handle(TopicRequest(.create(title: "Fix reward", project: project.folder.path))))
         let record = try XCTUnwrap(records().first)
         XCTAssertEqual(created.topicID, record.id)
         XCTAssertTrue(created.created)
@@ -228,7 +228,7 @@ final class TopicServiceTests: XCTestCase {
         let service = service()
         let responses = Responses()
         DispatchQueue.concurrentPerform(iterations: 2) { _ in
-            responses.append(service.handle(TopicRequest(.create(title: "Fix", project: project.path))))
+            responses.append(service.handle(TopicRequest(.create(title: "Fix", project: project.folder.path))))
         }
         for response in responses.all { _ = try change(response) }
         XCTAssertEqual(Set(try records().compactMap(\.slug)), ["fix", "fix-2"])
@@ -236,7 +236,7 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testMoveTakesAWholeSessionIntoTheTopicThatARefNames() throws {
-        try server.run(["new-session", "-d", "-s", "loose", "-c", project.path])
+        try server.run(["new-session", "-d", "-s", "loose", "-c", project.folder.path])
         let topic = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Release", project: nil)))).topicID)
         let loose = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "loose" })
         let moved = try change(service().handle(TopicRequest(.move(to: .topic(.named("Release"))),
@@ -261,9 +261,9 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testLockPutsANoTopicSessionLastAmongTheTopicsAndUnlockEndsIt() throws {
-        try server.run(["new-session", "-d", "-s", "notes", "-c", project.path])
+        try server.run(["new-session", "-d", "-s", "notes", "-c", project.folder.path])
         _ = try change(service().handle(TopicRequest(.create(title: "First", project: nil))))
-        _ = try change(service().handle(TopicRequest(.create(title: "Second", project: project.path))))
+        _ = try change(service().handle(TopicRequest(.create(title: "Second", project: project.folder.path))))
         let locked = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
         XCTAssertNil(locked.topicID)
         XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"])
@@ -282,8 +282,8 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
-        try server.run(["new-session", "-d", "-s", "notes", "-c", project.path])
-        try server.run(["new-session", "-d", "-s", "chores", "-c", tools.path])
+        try server.run(["new-session", "-d", "-s", "notes", "-c", project.folder.path])
+        try server.run(["new-session", "-d", "-s", "chores", "-c", tools.folder.path])
         _ = try change(service().handle(TopicRequest(.create(title: "First", project: nil))))
         _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
         _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("chores"))))
@@ -306,7 +306,7 @@ final class TopicServiceTests: XCTestCase {
         _ = try change(top.handle(TopicRequest(.create(title: "First", project: nil))))
         let returning = try XCTUnwrap(change(top.handle(TopicRequest(.create(title: "Returning", project: nil)))).topicID)
         XCTAssertEqual(try topicList(), ["Returning", "First"])
-        try server.run(["new-session", "-d", "-s", "notes", "-c", project.path])
+        try server.run(["new-session", "-d", "-s", "notes", "-c", project.folder.path])
         try server.run(["set-option", "-t", "notes", SessionLock.option, String(Double.greatestFiniteMagnitude)])
         try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
         _ = try change(service().handle(TopicRequest(.reopen, target: .topic(.id(returning)))))
@@ -316,6 +316,21 @@ final class TopicServiceTests: XCTestCase {
         try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
         _ = try change(top.handle(TopicRequest(.startFresh, target: .topic(.id(returning)))))
         XCTAssertEqual(try topicList(), ["Returning", "First", "lock:notes"])
+    }
+
+    func testAPathThroughASymlinkFindsTheProjectThatTheConfigNames() throws {
+        // The Config names the Projects through dev, a symlink to work, as ~/Dev can be; the CLI gives the real path.
+        let dev = root.appendingPathComponent("dev")
+        try FileManager.default.createSymbolicLink(atPath: dev.path, withDestinationPath: "work")
+        let game = Project(path: dev.appendingPathComponent("game").path, name: "game")
+        let tools = Project(path: dev.appendingPathComponent("tools").path, name: "tools")
+        let service = TopicService(paths: paths, server: server, projects: [game, tools])
+        let real = { (project: Project) in String(cString: realpath(project.folder.path, nil)) }
+        let id = try XCTUnwrap(change(service.handle(TopicRequest(.create(title: "Ship", project: real(game))))).topicID)
+        _ = try change(service.handle(TopicRequest(.addProject(project: real(tools), workingCopy: .project), target: .topic(.id(id)))))
+        let record = try XCTUnwrap(records().first { $0.id == id })
+        XCTAssertEqual(record.homeProject, game.folder.path, "the record keeps the path that the Config wrote")
+        XCTAssertEqual(record.sessions.map { $0["project_path"]?.string }, [game.folder.path, tools.folder.path])
     }
 
     func testAFailureSaysHowFarTheRequestGot() throws {
@@ -374,7 +389,7 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testTheSettlePreviewOffersEachLiveSessionAndChangesNothing() throws {
-        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Ship", project: project.path)))).topicID)
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Ship", project: project.folder.path)))).topicID)
         let before = try Data(contentsOf: paths.topics.appendingPathComponent(id + ".json"))
         let choices = try service().settleChoices(for: .topic(.id(id))).get()
         XCTAssertEqual(choices.map(\.name), ["game/ship"])
@@ -383,8 +398,8 @@ final class TopicServiceTests: XCTestCase {
 
     /// A Topic with a Session in game and one in tools.
     private func twoProjectTopic(_ title: String) throws -> String {
-        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: title, project: project.path)))).topicID)
-        _ = try change(service().handle(TopicRequest(.addProject(project: tools.path, workingCopy: .project), target: .topic(.id(id)))))
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: title, project: project.folder.path)))).topicID)
+        _ = try change(service().handle(TopicRequest(.addProject(project: tools.folder.path, workingCopy: .project), target: .topic(.id(id)))))
         return id
     }
 
@@ -420,7 +435,7 @@ final class TopicServiceTests: XCTestCase {
         let record = try XCTUnwrap(records().first { $0.id == id })
         XCTAssertNotNil(record.settledAt)
         XCTAssertEqual(record.outcome, "Shipped 1.2")
-        XCTAssertEqual(record.sessions.compactMap { $0["project_path"]?.string }, [project.path, tools.path])
+        XCTAssertEqual(record.sessions.compactMap { $0["project_path"]?.string }, [project.folder.path, tools.folder.path])
         let names = server.snapshot().windows.map(\.sessionName)
         XCTAssertFalse(names.contains("game/ship"), "the killed Session is gone")
         XCTAssertEqual(server.snapshot().windows.filter { $0.sessionName == "tools/ship" }.map(\.topicID), [nil],
@@ -440,10 +455,10 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testReopenCreatesTheRememberedSessionsAndWindowsOfASettledTopic() throws {
-        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Ship", project: project.path)))).topicID)
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Ship", project: project.folder.path)))).topicID)
         try server.run(["rename-window", "-t", "=game/ship:", "notes"])
         try server.run(["new-window", "-d", "-t", "=game/ship:", "-n", "logs", "-c", root.path])
-        try waitForPath(project.path, of: "=game/ship:notes")
+        try waitForPath(project.folder.path, of: "=game/ship:notes")
         try waitForPath(root.path, of: "=game/ship:logs")
         _ = try change(service().handle(TopicRequest(.settle(choices: [], outcome: "Paused"), target: .topic(.id(id)))))
         XCTAssertEqual(sessions(of: id), [])
@@ -455,13 +470,13 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(windows.map(\.sessionName), ["game/ship", "game/ship"])
         XCTAssertEqual(windows.map(\.name), ["notes", "logs"])
         // tmux reports /tmp as /private/tmp.
-        XCTAssertEqual(windows.map { ($0.path as NSString).resolvingSymlinksInPath }, [project.path, root.path])
+        XCTAssertEqual(windows.map { ($0.path as NSString).resolvingSymlinksInPath }, [project.folder.path, root.path])
         XCTAssertEqual(reopened.shown, WindowID(rawValue: windows[0].id).map { .window($0) })
     }
 
     func testNewTopicFromPaneMovesThePanesWindowIntoANewUntitledTopic() throws {
-        try server.run(["new-session", "-d", "-s", "loose", "-c", project.path])
-        let windowID = try server.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=loose:", "-c", project.path])
+        try server.run(["new-session", "-d", "-s", "loose", "-c", project.folder.path])
+        let windowID = try server.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=loose:", "-c", project.folder.path])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let paneID = try server.run(["display-message", "-p", "-t", windowID, "#{pane_id}"]).trimmingCharacters(in: .whitespacesAndNewlines)
         let extracted = try change(service().handle(TopicRequest(.extract(project: nil), target: .pane(try XCTUnwrap(PaneID(rawValue: paneID))))))
@@ -469,7 +484,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(extracted.topicID, record.id)
         XCTAssertTrue(extracted.created)
         XCTAssertNil(record.title)
-        XCTAssertEqual(record.homeProject, project.path)
+        XCTAssertEqual(record.homeProject, project.folder.path)
         XCTAssertEqual(extracted.shown, WindowID(rawValue: windowID).map { .window($0) })
         let topicWindows = server.snapshot().windows.filter { $0.topicID == record.id }
         XCTAssertEqual(topicWindows.map(\.id), [windowID], "the new Session holds only the moved Window")
@@ -478,8 +493,8 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testNewTopicFromPaneTakesOnlyThatPaneOutOfASplitWindow() throws {
-        try server.run(["new-session", "-d", "-s", "loose", "-c", project.path])
-        let paneID = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=loose:", "-c", project.path])
+        try server.run(["new-session", "-d", "-s", "loose", "-c", project.folder.path])
+        let paneID = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=loose:", "-c", project.folder.path])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let source = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "loose" })
         let extracted = try change(service().handle(TopicRequest(.extract(project: nil), target: .pane(try XCTUnwrap(PaneID(rawValue: paneID))))))
@@ -496,7 +511,7 @@ final class TopicServiceTests: XCTestCase {
         for existing in [false, true] {
             for split in [false, true] {
                 let suffix = "\(existing)-\(split)"
-                try server.run(["new-session", "-d", "-s", "source-" + suffix, "-c", project.path])
+                try server.run(["new-session", "-d", "-s", "source-" + suffix, "-c", project.folder.path])
                 let source = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "source-" + suffix })
                 let pane: String
                 if split {
@@ -511,7 +526,7 @@ final class TopicServiceTests: XCTestCase {
                 var expectedTopic: String?
                 var previousWindow: String?
                 if existing {
-                    expectedTopic = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: suffix, project: project.path)))).topicID)
+                    expectedTopic = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: suffix, project: project.folder.path)))).topicID)
                     previousWindow = server.snapshot().windows.first { $0.topicID == expectedTopic }?.id
                     destination = .topic(.id(expectedTopic!))
                 } else {
@@ -544,7 +559,7 @@ final class TopicServiceTests: XCTestCase {
         let pane = try server.run(["display-message", "-p", "-t", "=main:", "#{pane_id}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         try assertThrowawayServer()
-        let extracted = try change(service().handle(TopicRequest(.extract(project: project.path, title: " Named work "),
+        let extracted = try change(service().handle(TopicRequest(.extract(project: project.folder.path, title: " Named work "),
                                                                  target: .pane(try XCTUnwrap(PaneID(rawValue: pane))))))
         XCTAssertEqual(try records().first { $0.id == extracted.topicID }?.title, "Named work")
         XCTAssertTrue(server.snapshot().panes.contains { $0.id == pane })
@@ -573,9 +588,9 @@ final class TopicServiceTests: XCTestCase {
 
     func testRemoveWindowFromTopicKeepsItsPanesAndSiblingWindowInTheTopic() throws {
         for existing in [false, true] {
-            let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Remove-\(existing)", project: project.path)))).topicID)
+            let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Remove-\(existing)", project: project.folder.path)))).topicID)
             let source = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
-            let sibling = try server.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", source.sessionID + ":", "-c", project.path])
+            let sibling = try server.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", source.sessionID + ":", "-c", project.folder.path])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", source.id])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -622,7 +637,7 @@ final class TopicServiceTests: XCTestCase {
     private func addNewWorktree(of app: Project, base: String?, title: String) throws -> JSONValue {
         let service = TopicService(paths: paths, server: server, projects: [project, app])
         let id = try XCTUnwrap(change(service.handle(TopicRequest(.create(title: title, project: nil)))).topicID)
-        _ = try change(service.handle(TopicRequest(.addProject(project: app.path, workingCopy: .newWorktree(from: app.path, base: base)),
+        _ = try change(service.handle(TopicRequest(.addProject(project: app.folder.path, workingCopy: .newWorktree(from: app.folder.path, base: base)),
                                                    target: .topic(.id(id)))))
         return try XCTUnwrap(records().first { $0.id == id }?.sessions.first)
     }
@@ -630,7 +645,7 @@ final class TopicServiceTests: XCTestCase {
     func testANewWorktreeStartsAtTheBaseHeadAndTheRecordKeepsThatCommit() throws {
         let app = try repository()
         let session = try addNewWorktree(of: app, base: nil, title: "Ship")
-        let head = try git(["rev-parse", "HEAD"], in: app.path)
+        let head = try git(["rev-parse", "HEAD"], in: app.folder.path)
         let worktree = paths.worktrees.appendingPathComponent("app/ship").path
         XCTAssertEqual(session["base"], .string(head))
         XCTAssertEqual(session["worktree_path"], .string(worktree))
@@ -643,8 +658,8 @@ final class TopicServiceTests: XCTestCase {
     func testANewWorktreeFromABaseRefStartsAtTheCommitThatTheRefNames() throws {
         let app = try repository()
         let session = try addNewWorktree(of: app, base: "v1", title: "Hotfix")
-        let tagged = try git(["rev-parse", "v1^{commit}"], in: app.path)
-        XCTAssertNotEqual(tagged, try git(["rev-parse", "HEAD"], in: app.path))
+        let tagged = try git(["rev-parse", "v1^{commit}"], in: app.folder.path)
+        XCTAssertNotEqual(tagged, try git(["rev-parse", "HEAD"], in: app.folder.path))
         XCTAssertEqual(session["base"], .string(tagged))
         XCTAssertEqual(try git(["rev-parse", "HEAD"], in: paths.worktrees.appendingPathComponent("app/hotfix").path), tagged)
     }
@@ -653,9 +668,9 @@ final class TopicServiceTests: XCTestCase {
         let app = try repository()
         let service = TopicService(paths: paths, server: server, projects: [project, app])
         let id = try XCTUnwrap(change(service.handle(TopicRequest(.create(title: "Ship", project: nil)))).topicID)
-        let failed = try failure(service.handle(TopicRequest(.addProject(project: app.path, workingCopy: .newWorktree(from: app.path, base: "nope")),
+        let failed = try failure(service.handle(TopicRequest(.addProject(project: app.folder.path, workingCopy: .newWorktree(from: app.folder.path, base: "nope")),
                                                              target: .topic(.id(id)))))
-        XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged, message: "No commit matches nope in \(app.path)."))
+        XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged, message: "No commit matches nope in \(app.folder.path)."))
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.worktrees.appendingPathComponent("app/ship").path))
         XCTAssertEqual(try records().first { $0.id == id }?.sessions, [])
     }
@@ -667,10 +682,10 @@ final class TopicServiceTests: XCTestCase {
         let base = try XCTUnwrap(session["base"]?.string)
         let service = TopicService(paths: paths, server: server, projects: [project, app])
         _ = try change(service.handle(TopicRequest(.settle(choices: [], outcome: "Paused"), target: .topic(.id(id)))))
-        try git(["worktree", "remove", "--force", paths.worktrees.appendingPathComponent("app/ship").path], in: app.path)
-        try git(["branch", "-D", "ship"], in: app.path)
-        try git(["commit", "-q", "--allow-empty", "-m", "third"], in: app.path)
-        XCTAssertNotEqual(try git(["rev-parse", "HEAD"], in: app.path), base)
+        try git(["worktree", "remove", "--force", paths.worktrees.appendingPathComponent("app/ship").path], in: app.folder.path)
+        try git(["branch", "-D", "ship"], in: app.folder.path)
+        try git(["commit", "-q", "--allow-empty", "-m", "third"], in: app.folder.path)
+        XCTAssertNotEqual(try git(["rev-parse", "HEAD"], in: app.folder.path), base)
         return (id, base)
     }
 
@@ -680,7 +695,7 @@ final class TopicServiceTests: XCTestCase {
         let service = TopicService(paths: paths, server: server, projects: [project, app])
         _ = try change(service.handle(TopicRequest(.reopen, target: .topic(.id(id)))))
         let worktree = paths.worktrees.appendingPathComponent("app/ship").path
-        XCTAssertEqual(try git(["rev-parse", "ship"], in: app.path), base, "the new branch starts at the recorded base, not at HEAD")
+        XCTAssertEqual(try git(["rev-parse", "ship"], in: app.folder.path), base, "the new branch starts at the recorded base, not at HEAD")
         XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], in: worktree), "ship")
         let record = try XCTUnwrap(records().first { $0.id == id })
         XCTAssertNil(record.settledAt)
@@ -701,7 +716,7 @@ final class TopicServiceTests: XCTestCase {
                        + "and the repository does not have their base commit \(missing). Muxify did not make the Worktree again."))
         XCTAssertEqual(try records(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktree))
-        XCTAssertEqual(try git(["branch", "--list", "ship"], in: app.path), "")
+        XCTAssertEqual(try git(["branch", "--list", "ship"], in: app.folder.path), "")
         XCTAssertEqual(sessions(of: id), [])
     }
 

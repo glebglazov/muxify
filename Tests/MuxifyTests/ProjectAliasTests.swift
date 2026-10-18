@@ -82,10 +82,10 @@ final class ProjectAliasTests: XCTestCase {
         XCTAssertEqual(titles("vault"), ["My Obsidian"], "typing the folder name finds the aliased row")
         XCTAssertEqual(titles("game/main"), ["Game Server/main"])
         let row = catalog.list([.sessions], query: "obsidian").rows[0]
-        XCTAssertEqual(row.pick.payload?.ref, .project(OpenDirectory(directory: "/work/vault", name: "vault", reach: .noTopicOnly)))
+        XCTAssertEqual(row.pick.payload?.ref, .project(OpenDirectory(directory: .local("/work/vault"), name: "vault", reach: .noTopicOnly)))
         let sessions = self.catalog(mode: .sessions).list([.sessions], query: "").rows
         XCTAssertEqual(sessions.map(\.title.text), ["My Obsidian", "Game Server/main"])
-        XCTAssertEqual(sessions[1].pick.payload?.ref, .project(OpenDirectory(directory: "/work/game/main", name: "game/main", reach: .anySession)))
+        XCTAssertEqual(sessions[1].pick.payload?.ref, .project(OpenDirectory(directory: .local("/work/game/main"), name: "game/main", reach: .anySession)))
     }
 
     func testProjectListsShowTheAliasAndFindTheRowByAliasOrFolder() {

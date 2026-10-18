@@ -50,19 +50,16 @@ enum TopicEditFailure: Error, CustomStringConvertible {
 }
 
 private enum TopicEditProjects {
-    public static func path(_ value: String) -> String { (value as NSString).standardizingPath }
-
     public static func validate(_ project: Project) throws {
-        guard !project.path.isEmpty, !project.name.isEmpty,
+        guard !project.folder.path.isEmpty, !project.name.isEmpty,
               !project.name.contains("."), !project.name.contains(":"),
               !project.name.contains("\n"), !project.name.contains("\0") else {
             throw TopicEditFailure.invalidProject
         }
     }
 
-    public static func project(at path: String, projects: [Project]) -> Project {
-        Project.containing(path, in: projects)
-            ?? Project(path: self.path(path), name: (self.path(path) as NSString).lastPathComponent)
+    public static func project(at folder: Folder, projects: [Project]) -> Project {
+        Project.containing(folder, in: projects) ?? Project(folder: folder, name: (folder.path as NSString).lastPathComponent)
     }
 
     public static func sessions(in windows: [TmuxWindow], topic: TopicRecord) -> [TmuxWindow] {
@@ -77,16 +74,16 @@ struct TopicRenamePlan {
     public init(topic: TopicRecord, title: String, records: [TopicRecord], windows: [TmuxWindow], projects: [Project]) throws {
         let members = TopicEditProjects.sessions(in: windows, topic: topic)
         let locations = members.map { TopicLocation(of: $0, record: topic, projects: projects).project }
-        guard Set(locations.map { TopicEditProjects.path($0.path) }).count == locations.count else {
+        guard Set(locations.map(\.folder)).count == locations.count else {
             throw TopicEditFailure.duplicateProject
         }
         guard Set(locations.map(\.name)).count == locations.count else {
             throw TopicEditFailure.sessionNameInUse
         }
         var affected = locations
-        if let home = topic.homeProject { affected.append(TopicEditProjects.project(at: home, projects: projects)) }
+        if let home = topic.homeProject { affected.append(TopicEditProjects.project(at: .local(home), projects: projects)) }
         for session in topic.sessions {
-            if let path = session["project_path"]?.string { affected.append(TopicEditProjects.project(at: path, projects: projects)) }
+            if let path = session["project_path"]?.string { affected.append(TopicEditProjects.project(at: .local(path), projects: projects)) }
         }
         for project in affected { try TopicEditProjects.validate(project) }
         let home = affected.first ?? Project(path: "/", name: "topic")
@@ -126,12 +123,12 @@ struct TopicSessionOrderPlan {
         case .before: ordered.insert(moved, at: anchor)
         case .after: ordered.insert(moved, at: anchor + 1)
         }
-        let paths = ordered.map { TopicSessionOrder.standardized(key($0).projectPath) }
-        func path(_ entry: JSONValue) -> String? { entry["project_path"]?.string.map(TopicSessionOrder.standardized) }
+        let live = ordered.map { key($0).project }
+        let entries = topic.sessions.map { (session: $0, project: $0["project_path"]?.string.map(Folder.local)) }
         var record = topic
         // A remembered entry with no live Session keeps its place after the live ones.
-        record.sessions = paths.map { live in topic.sessions.first { path($0) == live } ?? .object(["project_path": .string(live)]) }
-            + topic.sessions.filter { path($0).map { !paths.contains($0) } ?? true }
+        record.sessions = live.map { folder in entries.first { $0.project == folder }?.session ?? .object(["project_path": .string(folder.path)]) }
+            + entries.filter { $0.project.map { !live.contains($0) } ?? true }.map(\.session)
         record.hasManualSessionOrder = true
         edit = TopicEdit(record: record, commands: [], selection: .unchanged)
     }
@@ -150,9 +147,8 @@ struct TopicProjectPlan {
     public init(topic: TopicRecord, project: Project, workingCopy: TopicWorkingCopy, windows: [TmuxWindow], projects: [Project],
                 order: SessionOrder = .oldestFirst) throws {
         try TopicEditProjects.validate(project)
-        let path = TopicEditProjects.path(project.path)
         let members = TopicEditProjects.sessions(in: windows, topic: topic).filter {
-            TopicEditProjects.path(TopicLocation(of: $0, record: topic, projects: projects).project.path) == path
+            TopicLocation(of: $0, record: topic, projects: projects).project.folder == project.folder
         }
         guard members.count <= 1 else { throw TopicEditFailure.duplicateProject }
         if let existing = members.first {
@@ -163,16 +159,14 @@ struct TopicProjectPlan {
         let name = project.name + "/" + slug
         guard !windows.contains(where: { $0.sessionName == name }) else { throw TopicEditFailure.sessionNameInUse }
         var record = topic
-        if record.homeProject == nil { record.homeProject = project.path }
-        let remembered = record.sessions.first { session in
-            session["project_path"]?.string.map { TopicEditProjects.path($0) == path } ?? false
-        }
+        if record.homeProject == nil { record.homeProject = project.folder.path }
+        let remembered = record.rememberedSessions(by: "project_path")[project.folder]
         var session: [String: JSONValue] = [:]
         if case .object(let fields)? = remembered { session = fields }
         let start = workingCopy.sessionStart(in: project, slug: slug)
         for key in ["worktree_path", "branch", TopicWorktrees.createdKey, TopicWorktrees.baseKey] { session[key] = nil }
         session.merge(start.worktreeFields) { _, new in new }
-        session["project_path"] = .string(path)
+        session["project_path"] = .string(project.folder.path)
         record.recordingNewSession(session, order: order)
         edit = TopicEdit(record: record, newWorktree: start.newWorktree, commands: [
             .tmux(["new-session", "-d", "-s", name, "-c", start.directory]),
@@ -195,21 +189,14 @@ struct TopicPanePlan {
         let window = source.window
         guard window.paneCount > 0, windows.contains(where: { $0.id == window.id && $0.sessionID == window.sessionID }),
               source.paneID.hasPrefix("%") else { throw TopicEditFailure.sourceUnavailable }
-        let directory = TopicEditProjects.path(window.sessionPath)
-        let record = records.first { $0.id == window.topicID } ?? records.first { record in
-            record.sessions.contains { session in
-                guard let worktree = session["worktree_path"]?.string else { return false }
-                let path = TopicEditProjects.path(worktree)
-                return directory == path || directory.hasPrefix(path + "/")
-            }
-        }
+        let record = TopicMembershipPlan.sourceRecord(for: window, records: records)
         let project = homeProject ?? TopicLocation(of: window, record: record, projects: projects).project
         try TopicEditProjects.validate(project)
         let topic = TopicPlan(title: title.trimmingCharacters(in: .whitespacesAndNewlines), project: project, records: records,
                               sessionNames: Set(windows.map(\.sessionName)), id: id, now: now)
         let target = "=" + topic.sessionName + ":"
         var commands: [TopicPlan.Command] = [
-            .newTopicSession(name: topic.sessionName, directory: project.path),
+            .newTopicSession(name: topic.sessionName, directory: project.folder.path),
             .tmux(["set-option", "-t", target, "@muxify_topic", topic.record.id]),
         ]
         if let clientTTY { commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", target])) }

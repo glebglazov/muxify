@@ -72,7 +72,7 @@ final class CreatedWorktreeTests: XCTestCase {
         var topic = TopicRecord(id: "topic", homeProject: work)
         topic.sessions = [session("created", inside("created"), created: .bool(true)), session("picked", inside("picked"), created: .bool(false)),
                           session("legacy", inside("legacy"), created: nil), session("outside", path("outside"), created: .bool(true))]
-        XCTAssertEqual(TopicWorktrees.mergedPaths(in: topic, root: path("worktrees")), [inside("created"), inside("legacy")],
+        XCTAssertEqual(Set(TopicWorktrees.merged(in: topic, root: path("worktrees")).map(\.path)), [inside("created"), inside("legacy")],
                        "a picked Worktree and one outside Muxify's folder are never removed")
     }
 }

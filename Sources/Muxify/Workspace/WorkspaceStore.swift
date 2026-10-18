@@ -32,6 +32,8 @@ final class WorkspaceStore {
     private(set) var visits = VisitLog(defaults: .standard)
     /// The Projects on this App Window's Environment, as `refreshProjects` found them last.
     private(set) var projects: [Project] = []
+    /// Resolves a path on this App Window's Environment: with `realpath` on this Mac, else through the Projects found there.
+    var folders: FolderResolver { isRemote ? .remote(projects) : .local }
     var topicConfig: Config.Topics { configStore.config.topics }
 
     /// Looks for the Config's Projects again, on the Environment's machine and off the main thread. A sheet
@@ -134,7 +136,7 @@ final class WorkspaceStore {
     func openDirectory(_ target: OpenDirectory) {
         guard pendingOpenings[target.directory] == nil else { return }
         let openTopicIDs = Set(topicWatcher.records.filter { $0.settledAt == nil }.map(\.id))
-        let resolver = SessionResolver(windows: windows, openTopicIDs: openTopicIDs, projects: projects, visits: visits)
+        let resolver = SessionResolver(windows: windows, openTopicIDs: openTopicIDs, projects: projects, folders: folders, visits: visits)
         switch resolver.target(directory: target.directory, name: target.name, reach: target.reach) {
         case .go(let window): select(window)
         case .create(let name): startSession(in: target.directory, named: name)
@@ -150,19 +152,19 @@ final class WorkspaceStore {
 
     /// Starts a tmux Session at `directory` and switches to it. tmux refusing a duplicate name means an
     /// earlier press won the race, so that Session is selected instead; two presses end on one Session.
-    private func startSession(in directory: String, named name: String) {
+    private func startSession(in directory: Folder, named name: String) {
         pendingOpenings[directory] = (name, Date().addingTimeInterval(5))
-        runAsync(["new-session", "-d", "-P", "-F", "#{session_id}:#{window_id}", "-s", name, "-c", directory]) { [weak self] result in
+        runAsync(["new-session", "-d", "-P", "-F", "#{session_id}:#{window_id}", "-s", name, "-c", directory.path]) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let output):
                 let ids = output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":").map(String.init)
                 guard ids.count == 2 else { return }
-                self.switchClient(to: Target(sessionID: ids[0], windowID: ids[1], path: directory))
+                self.switchClient(to: Target(sessionID: ids[0], windowID: ids[1], path: directory.path))
             case .failure(let error):
                 self.pendingOpenings[directory] = nil
                 if String(describing: error).contains("duplicate session") { self.selectSession(named: name) }
-                else { self.showGoFailure("Could not start a Session in \(directory). \(error)") }
+                else { self.showGoFailure("Could not start a Session in \(directory.path). \(error)") }
             }
         }
     }
@@ -399,7 +401,7 @@ final class WorkspaceStore {
 
     /// `newWorktree` opens the Session on a new Worktree from the chosen one; it needs a repository row.
     func addProject(_ choice: ProjectChoice, toTopic id: String, newWorktree: Bool) {
-        perform(TopicRequest(.addProject(project: choice.project.path, workingCopy: choice.workingCopy(newWorktree: newWorktree)),
+        perform(TopicRequest(.addProject(project: choice.project.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree)),
                              target: .topic(.id(id))))
     }
 
@@ -752,7 +754,7 @@ final class WorkspaceStore {
         } ?? .noTopic
         // A mutating call on `visits` notifies its readers even when it records nothing, and this runs on each refresh.
         var log = visits
-        guard log.record(window, group: group, projects: projects, at: Date()) else { return }
+        guard log.record(window, group: group, projects: projects, folders: folders, at: Date()) else { return }
         visits = log
         visits.save(to: .standard)
     }
@@ -955,7 +957,7 @@ final class WorkspaceStore {
     /// may not list yet: Muxify is just launching, or it was just created.
     @ObservationIgnored private var pendingSession: (name: String, deadline: Date)?
     /// Sessions a Project row is creating, by directory, until a snapshot lists them or a few seconds pass.
-    @ObservationIgnored private var pendingOpenings: [String: (name: String, deadline: Date)] = [:]
+    @ObservationIgnored private var pendingOpenings: [Folder: (name: String, deadline: Date)] = [:]
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var isRefreshing = false
@@ -1211,7 +1213,7 @@ final class WorkspaceStore {
             }
             let snapshot = try? result.get()
             let paths = (snapshot?.windows.map(\.sessionPath) ?? []) + (snapshot?.panes.map(\.path) ?? [])
-            let branches = remote ? TopicBranches() : TopicBranches(records: records, paths: paths) {
+            let branches = remote ? TopicBranches() : TopicBranches(records: records, paths: paths.map(Folder.local)) {
                 try? String(contentsOfFile: $0, encoding: .utf8)
             }
             DispatchQueue.main.async {
@@ -1734,7 +1736,7 @@ final class WorkspaceStore {
 
     func newSession() {
         let cwd = selectedWindow?.path ?? homeDirectory
-        startSession(in: cwd, named: SessionResolver.sessionName((cwd as NSString).lastPathComponent, taken: Set(windows.map(\.sessionName))))
+        startSession(in: Folder(path: cwd, real: folders.folder(cwd).real), named: SessionResolver.sessionName((cwd as NSString).lastPathComponent, taken: Set(windows.map(\.sessionName))))
     }
 
     /// Kills the Window, or its whole Session with `session`, only while its Panes are the ones the user reviewed.

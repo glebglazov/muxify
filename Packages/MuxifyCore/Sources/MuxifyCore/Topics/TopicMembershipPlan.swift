@@ -57,7 +57,7 @@ public struct TopicMembershipPlan: Sendable {
         let sourceRecord = Self.sourceRecord(for: window, records: records)
         let location = TopicLocation(of: window, record: sourceRecord, projects: projects)
         let project = location.project
-        guard !project.path.isEmpty, !project.name.contains("."), !project.name.contains(":"), !project.name.contains("\n") else {
+        guard !project.folder.path.isEmpty, !project.name.contains("."), !project.name.contains(":"), !project.name.contains("\n") else {
             throw Failure.invalidProject
         }
         let existing = Self.occupant(of: destination, project: project, windows: windows, projects: projects)
@@ -86,10 +86,10 @@ public struct TopicMembershipPlan: Sendable {
             if let clientTTY {
                 commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", window.sessionID + ":" + window.id]))
             }
-            var remembered: [String: JSONValue] = ["project_path": .string(project.path)]
-            if let worktree = location.worktreePath {
-                remembered["worktree_path"] = .string(worktree)
-                remembered["branch"] = sourceRecord?.sessions.first { $0["worktree_path"]?.string == worktree }?["branch"]
+            var remembered: [String: JSONValue] = ["project_path": .string(project.folder.path)]
+            if let worktree = location.worktree {
+                remembered["worktree_path"] = .string(worktree.path)
+                remembered["branch"] = sourceRecord?.rememberedSessions(by: "worktree_path")[worktree]?["branch"]
             }
             record.recordingNewSession(remembered, order: order)
         case .window, .pane:
@@ -99,10 +99,10 @@ public struct TopicMembershipPlan: Sendable {
                 guard !windows.contains(where: { $0.sessionName == sessionName }) else { throw Failure.sessionNameInUse }
                 target = "=" + sessionName + ":"
                 commands = [
-                    .newTopicSession(name: sessionName, directory: project.path),
+                    .newTopicSession(name: sessionName, directory: project.folder.path),
                     .tmux(["set-option", "-t", target, "@muxify_topic", record.id]),
                 ]
-                record.recordingNewSession(["project_path": .string(project.path)], order: order)
+                record.recordingNewSession(["project_path": .string(project.folder.path)], order: order)
             }
             if let clientTTY {
                 commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", target]))
@@ -140,18 +140,17 @@ public struct TopicMembershipPlan: Sendable {
     /// move into a Topic that has one; the Move form dims such a Topic by this rule.
     public static func occupant(of destination: TopicRecord, project: Project, windows: [TmuxWindow], projects: [Project]) -> TmuxWindow? {
         windows.first {
-            $0.topicID == destination.id && TopicLocation(of: $0, record: destination, projects: projects).project.path == project.path
+            $0.topicID == destination.id && TopicLocation(of: $0, record: destination, projects: projects).project.folder == project.folder
         }
     }
 
-    private static func sourceRecord(for window: TmuxWindow, records: [TopicRecord]) -> TopicRecord? {
+    /// The record that a Window's Session belongs to: its Topic, else a Topic that remembers its Worktree.
+    static func sourceRecord(for window: TmuxWindow, records: [TopicRecord]) -> TopicRecord? {
         if let linked = records.first(where: { $0.id == window.topicID }) { return linked }
-        let directory = (window.sessionPath as NSString).standardizingPath
+        let directory = Folder.local(window.sessionPath)
         return records.first { record in
             record.sessions.contains { session in
-                guard let path = session["worktree_path"]?.string else { return false }
-                let tree = (path as NSString).standardizingPath
-                return directory == tree || directory.hasPrefix(tree + "/")
+                session["worktree_path"]?.string.map { Folder.local($0).contains(directory) } ?? false
             }
         }
     }

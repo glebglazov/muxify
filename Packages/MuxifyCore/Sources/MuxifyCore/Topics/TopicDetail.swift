@@ -110,17 +110,18 @@ public struct TopicDetail: Codable, Hashable, Sendable {
         let sessionIDs = windows.map(\.sessionID).reduce(into: [String]()) { ids, id in
             if !ids.contains(id) { ids.append(id) }
         }
+        let byWorktree = record.rememberedSessions(by: "worktree_path")
         let sessions = sessionIDs.compactMap { sessionID -> Session? in
             let members = windows.filter { $0.sessionID == sessionID }
             guard let first = members.first else { return nil }
             let location = TopicLocation(of: first, record: record, projects: projects)
-            let worktree = location.worktreePath.map { path in
-                let remembered = record.sessions.first { $0["worktree_path"]?.string == path }
-                return WorktreeEntry(path: path, branch: branches[path] ?? remembered?["branch"]?.string,
+            let worktree = location.worktree.map { folder in
+                let remembered = byWorktree[folder]
+                return WorktreeEntry(path: folder.path, branch: branches[folder] ?? remembered?["branch"]?.string,
                                      base: remembered?[TopicWorktrees.baseKey]?.string)
             }
             return Session(id: sessionID, name: first.sessionName,
-                           project: ProjectEntry(label: location.project.displayName, path: location.project.path),
+                           project: ProjectEntry(label: location.project.displayName, path: location.project.folder.path),
                            worktree: worktree,
                            windows: members.map { window in
                                Window(id: window.id, index: window.index, name: window.name, active: window.isActive,

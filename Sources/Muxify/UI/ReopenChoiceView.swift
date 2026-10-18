@@ -62,7 +62,7 @@ struct ReopenChoiceView: View {
     private func windowLine(_ window: TopicReopening.Window, in session: TopicReopening.Session) -> some View {
         let tabs = window.browser.tabURLs.count
         let agents = window.agents.map(\.kind.displayName)
-        let details = [window.directory == session.directory ? nil : (window.directory as NSString).abbreviatingWithTildeInPath,
+        let details = [Folder.local(window.directory) == Folder.local(session.directory) ? nil : (window.directory as NSString).abbreviatingWithTildeInPath,
                        window.panes.count == 1 ? nil : "\(window.panes.count) Panes",
                        tabs == 0 ? nil : tabs == 1 ? "1 Tab" : "\(tabs) Tabs",
                        agents.isEmpty ? nil : "resumes " + agents.joined(separator: ", ")].compactMap { $0 }

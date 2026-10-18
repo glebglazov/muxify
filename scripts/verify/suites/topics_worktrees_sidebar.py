@@ -102,11 +102,11 @@ class TopicsWorktreesSidebar(TopicsSidebar):
             row = s.row(self.project_row(self.gamma/folder))
             self.assertTrue(row.get('accessibilityLabel', '').startswith('gamma/' + folder), json.dumps(row))
         s.act('set', 'palette-search', 'gamma/main')
-        rs = s.wait_rows(lambda rs: s.has('palette-row-' + str(self.gamma/'main'), rs), 'search by repo/folder found no gamma/main row')
-        self.assertFalse(s.has('palette-row-' + str(self.gamma), rs), 'the bare folder itself is a row')
+        rs = s.wait_rows(lambda rs: s.has('palette-row-' + os.path.realpath(self.gamma/'main'), rs), 'search by repo/folder found no gamma/main row')
+        self.assertFalse(s.has('palette-row-' + os.path.realpath(self.gamma), rs), 'the bare folder itself is a row')
         s.act('set', 'palette-search', 'gamma/rel')
-        rs = s.wait_rows(lambda rs: not s.has('palette-row-' + str(self.gamma/'main'), rs), 'search did not narrow the list')
-        self.assertTrue(s.has('palette-row-' + str(self.gamma/'release'), rs), 'search by repo/folder lost the Worktree row')
+        rs = s.wait_rows(lambda rs: not s.has('palette-row-' + os.path.realpath(self.gamma/'main'), rs), 'search did not narrow the list')
+        self.assertTrue(s.has('palette-row-' + os.path.realpath(self.gamma/'release'), rs), 'search by repo/folder lost the Worktree row')
 
     def test_worktree_of_another_open_topic_says_also_in_it_and_can_be_picked(self):
         s = self.s
@@ -116,6 +116,8 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         s.wait_rows(lambda rs: s.has('topic-shared-owner', rs), 'no row for Topic shared-owner')
         record = self.create_topic('Shared picker')
         self.open_add_project()
+        s.act('focus', 'palette-search')
+        s.act('set', 'palette-search', str(self.gamma/'main'))
         key = self.project_row(self.gamma/'main')
         s.wait_rows(lambda rs: 'Also in Shared owner' in s.row(key, rs).get('accessibilityLabel', ''),
                     'the Worktree row does not say Also in Shared owner')

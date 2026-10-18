@@ -8,6 +8,7 @@ to test the empty-Topic view and its Add a Project button.
 """
 
 import json
+import os
 import subprocess
 import time
 import unittest
@@ -179,8 +180,9 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
 
     def project_row(self, directory):
         """The New Topic or Add Project row of a Project or Worktree directory. Worktree rows follow git, a moment after the palette opens.
-        The list builds only the rows it shows, so a row further down is found through the search."""
-        key = 'palette-row-' + str(directory)
+        The list builds only the rows it shows, so a row further down is found through the search.
+        A row's id is its folder's real path, which differs from the Config spelling under /tmp."""
+        key = 'palette-row-' + os.path.realpath(directory)
         if self.rows_until(lambda rs: self.s.has(key, rs), seconds=3)[0] is not None:
             return key
         def searched():

@@ -103,9 +103,9 @@ final class ProjectDiscoveryTests: XCTestCase {
             environment: ["HOME": home, "PATH": "/usr/bin:/bin:/opt/homebrew/bin"]
         )
         let projects = ProjectDiscovery.projects(in: output, roots: roots, aliases: ["~/dotfiles": "Dotfiles"])
-        // Foundation's standardized paths drop /private.
-        let shown = (home as NSString).standardizingPath
-        XCTAssertEqual(projects.map { $0.path.replacingOccurrences(of: shown, with: "~") },
+        // A Project shows the Config's spelling, here through $HOME, so it keeps the /private that git gives too.
+        let shown = home
+        XCTAssertEqual(projects.map { $0.folder.path.replacingOccurrences(of: shown, with: "~") },
                        ["~/projects/app", "~/projects/lib", "~/projects/lib/nested", "~/dotfiles"],
                        "no repository subfolder, Worktree, hidden or missing folder is a Project")
         XCTAssertEqual(projects[0].layout, .plainRepository([
@@ -128,9 +128,9 @@ final class ProjectDiscoveryTests: XCTestCase {
         let folders = ["\(home)/projects/app/src", "\(home)/projects/lib/nested/deep"]
         let within = ProjectDiscovery.discover(roots, aliases: [:], within: folders)
         XCTAssertEqual(within.map(\.name), ["app", "lib", "nested"])
-        XCTAssertEqual(within, all.filter { project in within.contains { $0.path == project.path } })
+        XCTAssertEqual(within, all.filter { project in within.contains { $0.folder.path == project.folder.path } })
         for folder in folders {
-            XCTAssertEqual(Project.containing(folder, in: within), Project.containing(folder, in: all), folder)
+            XCTAssertEqual(Project.containing(.local(folder), in: within), Project.containing(.local(folder), in: all), folder)
         }
         XCTAssertEqual(ProjectDiscovery.discover(roots, aliases: [:], within: []), [])
     }

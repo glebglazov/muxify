@@ -6,26 +6,26 @@ import Foundation
 public struct TopicLocation {
     public let project: Project
     public let isHome: Bool
-    public let worktreePath: String?
+    public let worktree: Folder?
 
+    /// Topics are local, so the record's paths and the Session directory resolve on this Mac.
     public init(of window: TmuxWindow, record: TopicRecord?, projects: [Project]) {
-        let directory = (window.sessionPath as NSString).standardizingPath
-        var candidates: [(directory: String, project: String, worktreePath: String?)] = []
-        if let home = record?.homeProject { candidates.append((home, home, nil)) }
+        let directory = Folder.local(window.sessionPath)
+        let home = record?.homeProject.map(Folder.local)
+        var candidates: [(directory: Folder, project: Folder, worktree: Folder?)] = []
+        if let home { candidates.append((home, home, nil)) }
         for session in record?.sessions ?? [] {
             guard let path = session["project_path"]?.string else { continue }
-            candidates.append((path, path, nil))
-            if let worktree = session["worktree_path"]?.string { candidates.append((worktree, path, worktree)) }
+            let project = Folder.local(path)
+            candidates.append((project, project, nil))
+            if let worktree = session["worktree_path"]?.string.map(Folder.local) { candidates.append((worktree, project, worktree)) }
         }
-        let match = candidates.filter {
-            let path = ($0.directory as NSString).standardizingPath
-            return !path.isEmpty && (directory == path || directory.hasPrefix(path == "/" ? path : path + "/"))
-        }.max { ($0.directory.count, $0.worktreePath != nil ? 1 : 0) < ($1.directory.count, $1.worktreePath != nil ? 1 : 0) }
-        let path = match?.project ?? Project.containing(directory, in: projects)?.path ?? directory
-        let project = Project.named(at: path, in: projects)
-        let isHome = match.map { ($0.project as NSString).standardizingPath == (record?.homeProject as NSString?)?.standardizingPath } ?? false
-        self.project = project.name.isEmpty ? Project(path: path, name: "Unknown Project") : project
-        self.isHome = isHome
-        worktreePath = match?.worktreePath
+        let match = candidates.filter { $0.directory.contains(directory) }
+            .max { ($0.directory.real.count, $0.worktree != nil ? 1 : 0) < ($1.directory.real.count, $1.worktree != nil ? 1 : 0) }
+        let folder = match?.project ?? Project.containing(directory, in: projects)?.folder ?? directory
+        let project = Project.named(at: folder, in: projects)
+        self.project = project.name.isEmpty ? Project(folder: folder, name: "Unknown Project") : project
+        isHome = match.map { $0.project == home } ?? false
+        worktree = match?.worktree
     }
 }

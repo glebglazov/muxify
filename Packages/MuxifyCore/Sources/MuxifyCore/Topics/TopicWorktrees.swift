@@ -10,19 +10,21 @@ enum TopicWorktrees {
 
     public static func isCreated(_ session: JSONValue) -> Bool { session[createdKey] != .bool(false) }
 
-    /// Whether `path` sits inside Muxify's worktrees folder `root`. Settle never removes a Worktree outside it, so the
+    /// Whether `worktree` sits inside Muxify's worktrees folder `root`. Settle never removes a Worktree outside it, so the
     /// user's own Worktrees, and those Muxify made before the folder existed, stay wherever they are.
-    public static func isInside(_ path: String, root: String) -> Bool {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().path.hasPrefix(URL(fileURLWithPath: root).resolvingSymlinksInPath().path + "/")
+    public static func isInside(_ worktree: Folder, root: Folder) -> Bool {
+        worktree != root && root.contains(worktree)
     }
 
     /// The Worktrees Settle may remove: those inside `root` that the Topic created, with their branch merged.
-    public static func mergedPaths(in topic: TopicRecord, root: String) -> Set<String> {
-        Set(topic.sessions.compactMap { session in
+    public static func merged(in topic: TopicRecord, root: String) -> Set<Folder> {
+        let root = Folder.local(root)
+        return Set(topic.sessions.compactMap { session in
             guard isCreated(session), let project = session["project_path"]?.string, let path = session["worktree_path"]?.string,
-                  let branch = session["branch"]?.string, isInside(path, root: root),
-                  isMerged(.init(projectPath: project, path: path, branch: branch)) else { return nil }
-            return path
+                  let branch = session["branch"]?.string else { return nil }
+            let worktree = Folder.local(path)
+            guard isInside(worktree, root: root), isMerged(.init(projectPath: project, path: path, branch: branch)) else { return nil }
+            return worktree
         })
     }
 
@@ -32,9 +34,9 @@ enum TopicWorktrees {
     public static func commit(_ ref: String?, in base: Worktree) throws -> String {
         do {
             return try Shell.run("/usr/bin/git", ["rev-parse", "--verify", "--quiet", "--end-of-options", (ref ?? "HEAD") + "^{commit}"],
-                                 directory: base.path).trimmingCharacters(in: .whitespacesAndNewlines)
+                                 directory: base.folder.path).trimmingCharacters(in: .whitespacesAndNewlines)
         } catch is ShellError {
-            throw TopicRequestError.baseUnavailable(ref: ref ?? "HEAD", worktree: base.path)
+            throw TopicRequestError.baseUnavailable(ref: ref ?? "HEAD", worktree: base.folder.path)
         }
     }
 
@@ -58,8 +60,11 @@ enum TopicWorktrees {
     public static func restore(_ worktree: TopicPlan.WorktreeSpec, base: String?) throws {
         guard !FileManager.default.fileExists(atPath: worktree.path) else { return }
         let listed = try Shell.run("/usr/bin/git", ["worktree", "list", "--porcelain"], directory: worktree.projectPath)
-        if listed.components(separatedBy: "\n").contains("worktree " + worktree.path) {
-            _ = try Shell.run("/usr/bin/git", ["worktree", "remove", worktree.path], directory: worktree.projectPath)
+        let folder = Folder.local(worktree.path)
+        // git lists real paths, and a stale entry is removed by the path that git knows it by.
+        if let stale = listed.components(separatedBy: "\n").filter({ $0.hasPrefix("worktree ") }).map({ String($0.dropFirst(9)) })
+            .first(where: { Folder(path: $0, real: $0) == folder }) {
+            _ = try Shell.run("/usr/bin/git", ["worktree", "remove", stale], directory: worktree.projectPath)
         }
         try FileManager.default.createDirectory(at: URL(fileURLWithPath: worktree.path).deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
@@ -100,17 +105,17 @@ enum TopicWorktrees {
     /// `windows` are the live Windows of the tmux server whose Sessions may use the Worktree.
     public static func removeMerged(_ worktree: TopicPlan.WorktreeSpec, root: String,
                              windows: [TmuxWindow]) throws {
-        guard isInside(worktree.path, root: root) else { throw Failure.notMuxifys }
+        let folder = Folder.local(worktree.path)
+        guard isInside(folder, root: .local(root)) else { throw Failure.notMuxifys }
         guard isMerged(worktree) else { throw Failure.notMerged }
-        guard !windows.contains(where: { $0.path == worktree.path || $0.path.hasPrefix(worktree.path + "/")
-            || $0.sessionPath == worktree.path || $0.sessionPath.hasPrefix(worktree.path + "/") }) else { throw Failure.inUse }
+        guard !windows.contains(where: { $0.folders.contains(where: folder.contains) }) else { throw Failure.inUse }
         _ = try Shell.run("/usr/bin/git", ["worktree", "remove", worktree.path], directory: worktree.projectPath)
     }
 
     public static func removeClean(_ worktree: TopicPlan.WorktreeSpec, root: String, windows: [TmuxWindow]) throws {
-        guard isInside(worktree.path, root: root) else { throw Failure.notMuxifys }
-        guard !windows.contains(where: { $0.path == worktree.path || $0.path.hasPrefix(worktree.path + "/")
-            || $0.sessionPath == worktree.path || $0.sessionPath.hasPrefix(worktree.path + "/") }) else { throw Failure.inUse }
+        let folder = Folder.local(worktree.path)
+        guard isInside(folder, root: .local(root)) else { throw Failure.notMuxifys }
+        guard !windows.contains(where: { $0.folders.contains(where: folder.contains) }) else { throw Failure.inUse }
         try check([.removeCleanWorktree(worktree)])
         _ = try Shell.run("/usr/bin/git", ["worktree", "remove", worktree.path], directory: worktree.projectPath)
     }
@@ -125,4 +130,9 @@ enum TopicWorktrees {
             }
         }
     }
+}
+
+extension TmuxWindow {
+    /// The folders the Window's Pane and its Session work in. Topics are local, so both resolve on this Mac.
+    var folders: [Folder] { [.local(path), .local(sessionPath)] }
 }

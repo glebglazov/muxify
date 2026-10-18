@@ -36,7 +36,7 @@ final class ProjectRowsTests: XCTestCase {
         return [Project(path: bare, name: "game_server"), Project(path: plain, name: "app", alias: "The App"), Project(path: path("notes"), name: "notes")]
             .map { project in
                 var detected = project
-                detected.layout = ProjectLayout.detect(at: project.path)
+                detected.layout = ProjectLayout.detect(at: project.folder.path)
                 return detected
             }
     }
@@ -45,7 +45,7 @@ final class ProjectRowsTests: XCTestCase {
         let projects = try projects()
         let rows = ProjectRows.build(projects: projects, windows: [], records: [], titles: [:])
         XCTAssertEqual(rows.map(\.choice), projects.flatMap(ProjectChoice.choices))
-        XCTAssertEqual(rows.map { [$0.choice.directory, $0.choice.name, $0.choice.displayName] }, [
+        XCTAssertEqual(rows.map { [$0.choice.directory.path, $0.choice.name, $0.choice.displayName] }, [
             [path("game_server/main"), "game_server/main", "game_server/main"],
             [path("game_server/release"), "game_server/release", "game_server/release"],
             [path("app"), "app", "The App"],
@@ -58,11 +58,11 @@ final class ProjectRowsTests: XCTestCase {
     func testARowNamesTheOtherOpenTopicsWhoseLiveSessionsUseItsFolderByIdAndLabel() throws {
         let projects = try projects()
         let release = path("game_server/release")
-        var fix = TopicRecord(id: "fix", slug: "fix-drops", homeProject: projects[0].path)
-        fix.sessions = [.object(["project_path": .string(projects[0].path), "worktree_path": .string(release), "branch": .string("release-line")])]
-        var titled = TopicRecord(id: "ui", title: "Polish UI", homeProject: projects[0].path)
+        var fix = TopicRecord(id: "fix", slug: "fix-drops", homeProject: projects[0].folder.path)
+        fix.sessions = [.object(["project_path": .string(projects[0].folder.path), "worktree_path": .string(release), "branch": .string("release-line")])]
+        var titled = TopicRecord(id: "ui", title: "Polish UI", homeProject: projects[0].folder.path)
         titled.sessions = fix.sessions
-        var settled = TopicRecord(id: "old", title: "Old", homeProject: projects[0].path)
+        var settled = TopicRecord(id: "old", title: "Old", homeProject: projects[0].folder.path)
         settled.sessions = fix.sessions
         settled.settledAt = "2026-10-01T00:00:00Z"
         let windows = [window("@1", session: "$1", topic: "fix", directory: release + "/src"),

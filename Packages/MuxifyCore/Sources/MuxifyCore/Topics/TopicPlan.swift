@@ -60,14 +60,14 @@ extension TopicWorkingCopy {
     public func sessionStart(in project: Project, slug: String) -> SessionStart {
         switch self {
         case .homeProject:
-            return SessionStart(directory: project.path, worktreeFields: [:], newWorktree: nil)
+            return SessionStart(directory: project.folder.path, worktreeFields: [:], newWorktree: nil)
         case .worktree(let worktree):
-            var fields: [String: JSONValue] = ["worktree_path": .string(worktree.path), TopicWorktrees.createdKey: .bool(false)]
+            var fields: [String: JSONValue] = ["worktree_path": .string(worktree.folder.path), TopicWorktrees.createdKey: .bool(false)]
             fields["branch"] = worktree.branch.map(JSONValue.string)
-            return SessionStart(directory: worktree.path, worktreeFields: fields, newWorktree: nil)
+            return SessionStart(directory: worktree.folder.path, worktreeFields: fields, newWorktree: nil)
         case .newWorktree(let commit, let root):
-            let path = URL(fileURLWithPath: root).appendingPathComponent(project.name).appendingPathComponent(slug).standardizedFileURL.path
-            let worktree = TopicPlan.WorktreeSpec(projectPath: project.path, path: path, branch: slug)
+            let path = Folder.lexical(((root as NSString).appendingPathComponent(project.name) as NSString).appendingPathComponent(slug))
+            let worktree = TopicPlan.WorktreeSpec(projectPath: project.folder.path, path: path, branch: slug)
             return SessionStart(directory: worktree.path,
                                 worktreeFields: ["worktree_path": .string(worktree.path), "branch": .string(worktree.branch),
                                                  TopicWorktrees.createdKey: .bool(true), TopicWorktrees.baseKey: .string(commit)],
@@ -121,12 +121,12 @@ public struct TopicPlan: Sendable {
         let slug = TopicNaming.slug(title: title, project: project, records: records, sessionNames: sessionNames)
         sessionName = project.name + "/" + slug
         var record = TopicRecord(newTopic: id, title: title, slug: slug, now: now)
-        record.homeProject = project.path
-        record.sessions = [.object(["project_path": .string(project.path)])]
+        record.homeProject = project.folder.path
+        record.sessions = [.object(["project_path": .string(project.folder.path)])]
         self.record = record
         let target = "=" + sessionName + ":"
         var commands: [Command] = [
-            .tmux(["new-session", "-d", "-s", sessionName, "-c", project.path]),
+            .tmux(["new-session", "-d", "-s", sessionName, "-c", project.folder.path]),
             .tmux(["set-option", "-t", target, "@muxify_topic", id]),
         ]
         if let clientTTY { commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", target])) }

@@ -9,20 +9,20 @@ public enum SessionOrder: String, CaseIterable, Sendable {
 /// What the order of a Topic's Sessions reads from one live Session.
 public struct TopicSessionKey: Equatable, Sendable {
     public let sessionID: String
-    /// The Project path the Topic record names the Session by, `project_path` of its entry in `sessions`.
-    public let projectPath: String
+    /// The Project folder the Topic record names the Session by, `project_path` of its entry in `sessions`.
+    public let project: Folder
     /// tmux `#{session_created}`, in seconds since 1970.
     public let created: Int
 
-    public init(sessionID: String, projectPath: String, created: Int) {
+    public init(sessionID: String, project: Folder, created: Int) {
         self.sessionID = sessionID
-        self.projectPath = projectPath
+        self.project = project
         self.created = created
     }
 
     /// The key of the Session that `window` belongs to, named as `record` names it.
     public init(of window: TmuxWindow, record: TopicRecord?, projects: [Project]) {
-        self.init(sessionID: window.sessionID, projectPath: TopicLocation(of: window, record: record, projects: projects).project.path,
+        self.init(sessionID: window.sessionID, project: TopicLocation(of: window, record: record, projects: projects).project.folder,
                   created: window.sessionCreated)
     }
 }
@@ -45,27 +45,28 @@ public enum TopicSessionOrder {
             }
         }
         guard let record, record.hasManualSessionOrder else { return byCreation(keyed).map(\.item) }
-        let positions = record.sessions.enumerated().reduce(into: [String: Int]()) { positions, entry in
-            if let path = entry.element["project_path"]?.string { positions[standardized(path)] = positions[standardized(path)] ?? entry.offset }
+        let positions = record.sessions.enumerated().reduce(into: [Folder: Int]()) { positions, entry in
+            if let path = entry.element["project_path"]?.string {
+                let folder = Folder.local(path)
+                positions[folder] = positions[folder] ?? entry.offset
+            }
         }
-        let known = keyed.filter { positions[standardized($0.key.projectPath)] != nil }
+        let known = keyed.filter { positions[$0.key.project] != nil }
             .sorted { a, b in
-                let (first, second) = (positions[standardized(a.key.projectPath)]!, positions[standardized(b.key.projectPath)]!)
+                let (first, second) = (positions[a.key.project]!, positions[b.key.project]!)
                 return first != second ? first < second : (a.key.created, a.key.sessionID) < (b.key.created, b.key.sessionID)
             }
-        let new = byCreation(keyed.filter { positions[standardized($0.key.projectPath)] == nil })
+        let new = byCreation(keyed.filter { positions[$0.key.project] == nil })
         return (order == .oldestFirst ? known + new : new + known).map(\.item)
     }
-
-    static func standardized(_ path: String) -> String { (path as NSString).standardizingPath }
 }
 
 extension TopicRecord {
     /// Records a new Session's entry, in place of any entry of the same Project. A Topic in manual order puts it
     /// at the end that the Config's order gives new Sessions, so it shows where an unnamed Session would.
     mutating func recordingNewSession(_ entry: [String: JSONValue], order: SessionOrder) {
-        let path = entry["project_path"]?.string.map(TopicSessionOrder.standardized)
-        sessions.removeAll { $0["project_path"]?.string.map(TopicSessionOrder.standardized) == path }
+        let project = entry["project_path"]?.string.map(Folder.local)
+        sessions.removeAll { $0["project_path"]?.string.map(Folder.local) == project }
         if hasManualSessionOrder && order == .newestFirst { sessions.insert(.object(entry), at: 0) }
         else { sessions.append(.object(entry)) }
     }

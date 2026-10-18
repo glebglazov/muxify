@@ -18,14 +18,14 @@ final class TopicLifecycleTests: XCTestCase {
     }
 
     private var topic: TopicRecord {
-        var topic = TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.path)
-        topic.sessions = [.object(["project_path": .string(game.path), "worktree_path": .string("/trees/game"), "branch": .string("old-branch")])]
+        var topic = TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.folder.path)
+        topic.sessions = [.object(["project_path": .string(game.folder.path), "worktree_path": .string("/trees/game"), "branch": .string("old-branch")])]
         return topic
     }
 
     func testSettleDefaultsKeepWorkingAgentsInAnyPaneAndKillOtherSessions() {
         let windows = [window("@1", session: "$1", directory: "/trees/game"),
-                       window("@2", session: "$2", directory: tools.path)]
+                       window("@2", session: "$2", directory: tools.folder.path)]
         let panes = [TmuxPane(id: "%99", windowID: "@1", command: "claude", agent: "claude", agentStatus: "working", unread: false),
                      TmuxPane(id: "%2", windowID: "@2", command: "zsh", agent: "claude", agentStatus: "working", unread: false)]
         let live = snapshot(windows, panes: panes)
@@ -42,18 +42,18 @@ final class TopicLifecycleTests: XCTestCase {
     }
 
     func testSettleHonoursChoicesAndOnlyRemovesMergedUnusedWorktrees() throws {
-        let live = snapshot([window("@1", session: "$1", directory: "/trees/game"), window("@2", session: "$2", directory: tools.path)])
-        var choices = TopicSettleSession.choices(topic: topic, snapshot: live, projects: [game, tools], mergedWorktrees: ["/trees/game"])
+        let live = snapshot([window("@1", session: "$1", directory: "/trees/game"), window("@2", session: "$2", directory: tools.folder.path)])
+        var choices = TopicSettleSession.choices(topic: topic, snapshot: live, projects: [game, tools], mergedWorktrees: [.local("/trees/game")])
         choices[0].removeWorktree = true
         choices[1].disposition = .keep
-        let merged = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: choices, outcome: "", mergedWorktrees: ["/trees/game"]).edit
+        let merged = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: choices, outcome: "", mergedWorktrees: [.local("/trees/game")]).edit
         XCTAssertEqual(merged.commands, [.tmux(["kill-session", "-t", "$1"]), .tmux(["set-option", "-u", "-t", "$2", "@muxify_topic"]),
                                          .tmux(["set-option", "-u", "-t", "$2", "@muxify_lock"]),
-                                         .removeMergedWorktree(.init(projectPath: game.path, path: "/trees/game", branch: "old-branch"))])
+                                         .removeMergedWorktree(.init(projectPath: game.folder.path, path: "/trees/game", branch: "old-branch"))])
         let unmerged = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: choices, outcome: "").edit
         XCTAssertEqual(unmerged.commands.count, 3)
         choices[0].disposition = .keep
-        let kept = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: choices, outcome: "", mergedWorktrees: ["/trees/game"]).edit
+        let kept = TopicSettlePlan(topic: topic, snapshot: live, projects: [game, tools], choices: choices, outcome: "", mergedWorktrees: [.local("/trees/game")]).edit
         XCTAssertEqual(kept.commands.count, 4, "two kept Sessions, each without its Topic and its Lock")
         XCTAssertEqual(kept.commands.first, .tmux(["set-option", "-u", "-t", "$1", "@muxify_topic"]))
     }
@@ -61,19 +61,19 @@ final class TopicLifecycleTests: XCTestCase {
     func testSettleLeavesAWorktreeThatALiveSessionOfAnotherTopicUses() {
         let path = "/state/muxify/worktrees/game/fix-reward"
         var settling = topic
-        settling.sessions = [.object(["project_path": .string(game.path), "worktree_path": .string(path), "branch": .string("fix-reward"),
+        settling.sessions = [.object(["project_path": .string(game.folder.path), "worktree_path": .string(path), "branch": .string("fix-reward"),
                                       "worktree_created": .bool(true)])]
         var other = window("@2", session: "$2", directory: path)
         other.topicID = "other"
         let live = snapshot([window("@1", session: "$1", directory: path), other])
-        var choices = TopicSettleSession.choices(topic: settling, snapshot: live, projects: [game], mergedWorktrees: [path])
+        var choices = TopicSettleSession.choices(topic: settling, snapshot: live, projects: [game], mergedWorktrees: [.local(path)])
         XCTAssertEqual(choices.map(\.id), ["$1"])
         choices[0].removeWorktree = true
-        let edit = TopicSettlePlan(topic: settling, snapshot: live, projects: [game], choices: choices, outcome: "", mergedWorktrees: [path]).edit
+        let edit = TopicSettlePlan(topic: settling, snapshot: live, projects: [game], choices: choices, outcome: "", mergedWorktrees: [.local(path)]).edit
         XCTAssertEqual(edit.commands, [.tmux(["kill-session", "-t", "$1"])], "the other Topic's Session keeps the Worktree")
         let alone = TopicSettlePlan(topic: settling, snapshot: snapshot([window("@1", session: "$1", directory: path)]), projects: [game],
-                                    choices: choices, outcome: "", mergedWorktrees: [path]).edit
-        XCTAssertEqual(alone.commands.last, .removeMergedWorktree(.init(projectPath: game.path, path: path, branch: "fix-reward")))
+                                    choices: choices, outcome: "", mergedWorktrees: [.local(path)]).edit
+        XCTAssertEqual(alone.commands.last, .removeMergedWorktree(.init(projectPath: game.folder.path, path: path, branch: "fix-reward")))
     }
 
     func testDormantSettleKeepsRememberedSessions() {
@@ -88,14 +88,14 @@ final class TopicLifecycleTests: XCTestCase {
         saved.settledAt = "2026-10-07T12:00:00Z"
         saved.outcome = "Done"
         let windows: [JSONValue] = AgentKind.allCases.enumerated().map { index, kind in
-            .object(["name": .string("window-\(index)"), "directory": .string(index == 0 ? "/trees/game" : game.path),
+            .object(["name": .string("window-\(index)"), "directory": .string(index == 0 ? "/trees/game" : game.folder.path),
                      "pane_count": .integer(3), "agent": .string(kind.rawValue), "agent_conversation": .string("conversation-'\(index)"),
                      "browser_tabs": .array([.string("about:blank"), .string("https://example.com")]),
                      "browser_active_tab": .integer(1), "browser_open": .bool(false)])
         }
-        saved.sessions = [.object(["project_path": .string(game.path), "worktree_path": .string("/trees/game"),
+        saved.sessions = [.object(["project_path": .string(game.folder.path), "worktree_path": .string("/trees/game"),
                                   "branch": .string("old-branch"), "windows": .array(windows)]),
-                          .object(["project_path": .string(tools.path), "windows": .array([.object(["name": .string("shell"), "directory": .string(tools.path), "start_command": .string("do-not-run")])])])]
+                          .object(["project_path": .string(tools.folder.path), "windows": .array([.object(["name": .string("shell"), "directory": .string(tools.folder.path), "start_command": .string("do-not-run")])])])]
         return saved
     }
 
@@ -110,9 +110,9 @@ final class TopicLifecycleTests: XCTestCase {
         XCTAssertEqual(edit.savedCompletionRecord?.outcome, "Done")
         XCTAssertEqual(edit.savedCompletionRecord?.sessions, saved.sessions)
         XCTAssertEqual(edit.selection, .sessionName("game/fix-reward-2"))
-        XCTAssertEqual(edit.commands.first, .restoreWorktree(.init(projectPath: game.path, path: "/trees/game", branch: "old-branch"), base: nil))
+        XCTAssertEqual(edit.commands.first, .restoreWorktree(.init(projectPath: game.folder.path, path: "/trees/game", branch: "old-branch"), base: nil))
         XCTAssertTrue(edit.commands.contains(.reopenSession(name: "game/fix-reward-2", directory: "/trees/game", windowName: "window-0")))
-        XCTAssertTrue(edit.commands.contains(.reopenSession(name: "tools/fix-reward-2", directory: tools.path, windowName: "shell")))
+        XCTAssertTrue(edit.commands.contains(.reopenSession(name: "tools/fix-reward-2", directory: tools.folder.path, windowName: "shell")))
         let tmux = edit.commands.compactMap { command -> [String]? in if case .tmux(let args) = command { return args }; return nil }
         XCTAssertEqual(tmux.filter { $0.first == "new-window" }.count, 3)
         XCTAssertTrue(tmux.filter { $0.first == "new-window" }.allSatisfy { $0.contains("-a") && $0.contains("=game/fix-reward-2:$") })
@@ -128,9 +128,9 @@ final class TopicLifecycleTests: XCTestCase {
     }
 
     func testReopenShowsTheBrowserAloneWhenTheTopicRememberedItSo() throws {
-        var alone = window("@1", session: "$1", directory: game.path, command: "zsh")
+        var alone = window("@1", session: "$1", directory: game.folder.path, command: "zsh")
         alone.storedBrowser.layout = PanelLayout(shown: .browser, maximized: .terminal)
-        var saved = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.path)
+        var saved = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.folder.path)
             .remembering(snapshot([alone]), projects: [game], order: .oldestFirst))
         saved.settledAt = "2026-10-07T12:00:00Z"
         let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: []).edit
@@ -143,11 +143,11 @@ final class TopicLifecycleTests: XCTestCase {
         let saved = settledWithAgentsAndTabs
         let edit = try TopicReopenPlan(topic: saved, records: [saved, slugCollision], windows: [], projects: [game, tools],
                                        existingDirectories: [], choice: .startFresh).edit
-        XCTAssertEqual(edit.commands.first, .restoreWorktree(.init(projectPath: game.path, path: "/trees/game", branch: "old-branch"), base: nil),
+        XCTAssertEqual(edit.commands.first, .restoreWorktree(.init(projectPath: game.folder.path, path: "/trees/game", branch: "old-branch"), base: nil),
                        "a missing Worktree is created again")
         let sessions = edit.commands.filter { if case .reopenSession = $0 { return true }; return false }
         XCTAssertEqual(sessions, [.reopenSession(name: "game/fix-reward-2", directory: "/trees/game", windowName: "shell"),
-                                  .reopenSession(name: "tools/fix-reward-2", directory: tools.path, windowName: "shell")])
+                                  .reopenSession(name: "tools/fix-reward-2", directory: tools.folder.path, windowName: "shell")])
         let tmux = edit.commands.compactMap { command -> [String]? in if case .tmux(let args) = command { return args }; return nil }
         XCTAssertFalse(tmux.contains { $0.first == "new-window" || $0.first == "respawn-window" }, "\(tmux)")
         XCTAssertFalse(tmux.joined().contains("example.com"), "no Tab comes back")
@@ -158,7 +158,7 @@ final class TopicLifecycleTests: XCTestCase {
 
     func testReopeningListsOnlyTheAgentsThatCanResume() throws {
         var saved = settledWithAgentsAndTabs
-        saved.sessions = [.object(["project_path": .string(game.path), "windows": .array([
+        saved.sessions = [.object(["project_path": .string(game.folder.path), "windows": .array([
             .object(["name": .string("with-id"), "agent": .string("claude"), "agent_conversation": .string("abc")]),
             .object(["name": .string("without-id"), "agent": .string("claude")]),
         ])])]
@@ -175,8 +175,8 @@ final class TopicLifecycleTests: XCTestCase {
         let layout = "5e2c,160x40,0,0{80x40,0,0,1,79x40,81,0[79x20,81,0,2,79x19,81,21,3]}"
         var snapshot = Tmux.parseSnapshot([
             ["W", "@1", "$1", "game/fix-reward", "0", "edit", "", "/work/game/api", "zsh", "1", "3", "0", "0", "", "", "", "", "",
-             "", "topic", game.path, "%3", "", "", "0", layout],
-            ["P", "%1", "@1", "2.1.0", "claude", "done", "0", "conversation-1", "0", "0", game.path, "", "/dev/ttys010"],
+             "", "topic", game.folder.path, "%3", "", "", "0", layout],
+            ["P", "%1", "@1", "2.1.0", "claude", "done", "0", "conversation-1", "0", "0", game.folder.path, "", "/dev/ttys010"],
             ["P", "%2", "@1", "node", "", "", "0", "", "1", "0", "/work/game/web", "", "/dev/ttys011"],
             ["P", "%3", "@1", "zsh", "", "", "0", "", "2", "1", "/work/game/api", "", "/dev/ttys012"],
         ].map { $0.joined(separator: s) }.joined(separator: "\n"))
@@ -188,12 +188,12 @@ final class TopicLifecycleTests: XCTestCase {
     }
 
     func testRememberingASplitWindowRecordsItsLayoutAndEachPane() throws {
-        let record = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.path)
+        let record = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.folder.path)
             .remembering(splitSnapshot, projects: [game], order: .oldestFirst))
         let window = try XCTUnwrap(record.sessions.first?["windows"]?[0])
         XCTAssertEqual(window["layout"], .string("5e2c,160x40,0,0{80x40,0,0,1,79x40,81,0[79x20,81,0,2,79x19,81,21,3]}"))
         XCTAssertEqual(window["panes"], .array([
-            .object(["index": .integer(0), "directory": .string(game.path), "active": .bool(false),
+            .object(["index": .integer(0), "directory": .string(game.folder.path), "active": .bool(false),
                      "agent": .string("claude"), "agent_conversation": .string("conversation-1")]),
             .object(["index": .integer(1), "directory": .string("/work/game/web"), "active": .bool(false),
                      "command": .string("node /usr/local/bin/npm run dev")]),
@@ -202,7 +202,7 @@ final class TopicLifecycleTests: XCTestCase {
     }
 
     func testReopenOfASplitWindowMakesEachPaneResumesItsAgentAndTypesItsProgramWithoutRunningIt() throws {
-        let record = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.path)
+        let record = try XCTUnwrap(TopicRecord(id: "topic", title: "Fix reward", slug: "fix-reward", homeProject: game.folder.path)
             .remembering(splitSnapshot, projects: [game], order: .oldestFirst))
         let edit = try TopicReopenPlan(topic: record, records: [record], windows: [], projects: [game], existingDirectories: []).edit
         let target = "=game/fix-reward:$"
@@ -217,18 +217,18 @@ final class TopicLifecycleTests: XCTestCase {
             .sendKeys(target: target + ".+2", keys: ["node /usr/local/bin/npm run dev"], literal: true),
             .tmux(["select-layout", "-t", target, "5e2c,160x40,0,0{80x40,0,0,1,79x40,81,0[79x20,81,0,2,79x19,81,21,3]}"]),
         ], "the last Pane is active after the splits, so .+1 is the first; the shell gets no keys and needs no select-pane")
-        XCTAssertEqual(edit.commands.first, .reopenSession(name: "game/fix-reward", directory: game.path, windowName: "edit"),
+        XCTAssertEqual(edit.commands.first, .reopenSession(name: "game/fix-reward", directory: game.folder.path, windowName: "edit"),
                        "the first Pane is made in its own folder")
     }
 
     func testReopenSelectsTheRememberedActivePaneWhenItIsNotTheLast() throws {
         var saved = topic
-        saved.sessions = [.object(["project_path": .string(game.path), "windows": .array([.object(["name": .string("edit"), "panes": .array([
-            .object(["directory": .string(game.path), "active": .bool(false)]),
-            .object(["directory": .string(game.path), "active": .bool(true)]),
-            .object(["directory": .string(game.path), "active": .bool(false)]),
+        saved.sessions = [.object(["project_path": .string(game.folder.path), "windows": .array([.object(["name": .string("edit"), "panes": .array([
+            .object(["directory": .string(game.folder.path), "active": .bool(false)]),
+            .object(["directory": .string(game.folder.path), "active": .bool(true)]),
+            .object(["directory": .string(game.folder.path), "active": .bool(false)]),
         ])])])])]
-        let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: [game.path]).edit
+        let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: [game.folder.path]).edit
         XCTAssertEqual(edit.commands.suffix(2), [.tmux(["select-pane", "-t", "=game/fix-reward:$.+2"]),
                                                  .tmux(["select-layout", "-t", "=game/fix-reward:$", "tiled"])],
                        "two steps on from the last Pane, which wraps to the second, whatever pane-base-index is")
@@ -236,14 +236,14 @@ final class TopicLifecycleTests: XCTestCase {
 
     func testReopenOfARecordWithoutPanesMakesOnePaneForEachWindowAsBefore() throws {
         var saved = topic
-        saved.sessions = [.object(["project_path": .string(game.path), "windows": .array([
+        saved.sessions = [.object(["project_path": .string(game.folder.path), "windows": .array([
             .object(["name": .string("agent"), "directory": .string("/work/game/api"), "pane_count": .integer(3),
                      "agent": .string("claude"), "agent_conversation": .string("abc")]),
         ])])]
         let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: []).edit
         let target = "=game/fix-reward:$"
         XCTAssertEqual(edit.commands, [
-            .reopenSession(name: "game/fix-reward", directory: game.path, windowName: "agent"),
+            .reopenSession(name: "game/fix-reward", directory: game.folder.path, windowName: "agent"),
             .tmux(["set-option", "-t", "=game/fix-reward:", "@muxify_topic", "topic"]),
             .tmux(["respawn-window", "-k", "-t", target, "-c", "/work/game/api"]),
             .tmux(StoredBrowser().setOptionArgs(windowID: target)),
@@ -254,16 +254,16 @@ final class TopicLifecycleTests: XCTestCase {
 
     func testReopenKeepsSessionWorktreeWhenFirstWindowUsesMainWorkingCopy() throws {
         var saved = topic
-        saved.sessions = [.object(["project_path": .string(game.path), "worktree_path": .string("/trees/game"),
-                                  "branch": .string("old-branch"), "windows": .array([.object(["name": .string("main"), "directory": .string(game.path)])])])]
+        saved.sessions = [.object(["project_path": .string(game.folder.path), "worktree_path": .string("/trees/game"),
+                                  "branch": .string("old-branch"), "windows": .array([.object(["name": .string("main"), "directory": .string(game.folder.path)])])])]
         let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game], existingDirectories: ["/trees/game"]).edit
         XCTAssertEqual(edit.commands.first, .reopenSession(name: "game/fix-reward", directory: "/trees/game", windowName: "main"))
-        XCTAssertTrue(edit.commands.contains(.tmux(["respawn-window", "-k", "-t", "=game/fix-reward:$", "-c", game.path])))
+        XCTAssertTrue(edit.commands.contains(.tmux(["respawn-window", "-k", "-t", "=game/fix-reward:$", "-c", game.folder.path])))
     }
 
     func testReopenRestoresACreatedWorktreeAndReusesAPickedOneThatStillExists() throws {
         var saved = topic
-        saved.sessions.append(.object(["project_path": .string(tools.path), "worktree_path": .string("/work/tools/main"),
+        saved.sessions.append(.object(["project_path": .string(tools.folder.path), "worktree_path": .string("/work/tools/main"),
                                        "branch": .string("main"), "worktree_created": .bool(false)]))
         let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], projects: [game, tools],
                                        existingDirectories: ["/work/tools/main"]).edit
@@ -275,16 +275,16 @@ final class TopicLifecycleTests: XCTestCase {
 
     func testReopenExistingWorktreeAndSessionNameCollisionInSecondProject() throws {
         var saved = topic
-        saved.sessions.append(.object(["project_path": .string(tools.path)]))
-        var outside = window("@9", session: "$9", directory: tools.path)
+        saved.sessions.append(.object(["project_path": .string(tools.folder.path)]))
+        var outside = window("@9", session: "$9", directory: tools.folder.path)
         outside.topicID = nil
         let collision = TmuxWindow(id: outside.id, sessionID: outside.sessionID, sessionName: "tools/fix-reward", index: 7,
-                                   name: "shell", paneTitle: "", path: tools.path, command: "zsh", isActive: true,
+                                   name: "shell", paneTitle: "", path: tools.folder.path, command: "zsh", isActive: true,
                                    paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [])
         let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [collision], projects: [game, tools], existingDirectories: ["/trees/game"]).edit
         XCTAssertEqual(edit.savedCompletionRecord?.slug, "fix-reward-2")
         XCTAssertFalse(edit.commands.contains { if case .restoreWorktree = $0 { return true }; return false })
-        XCTAssertThrowsError(try TopicReopenPlan(topic: saved, records: [saved], windows: [window("@1", session: "$1", directory: game.path)], projects: [game, tools], existingDirectories: []))
+        XCTAssertThrowsError(try TopicReopenPlan(topic: saved, records: [saved], windows: [window("@1", session: "$1", directory: game.folder.path)], projects: [game, tools], existingDirectories: []))
     }
 }
 

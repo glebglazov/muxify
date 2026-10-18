@@ -13,15 +13,15 @@ extension TopicRecord {
                                                    order: hasManualSessionOrder ? order : .oldestFirst) {
             TopicSessionKey(of: $0, record: self, projects: projects)
         }.map(\.sessionID)
+        let byProject = rememberedSessions(by: "project_path")
         let remembered = sessionIDs.compactMap { sessionID -> JSONValue? in
             let members = windows.filter { $0.sessionID == sessionID }
             guard let first = members.first else { return nil }
             let location = TopicLocation(of: first, record: self, projects: projects)
-            let previous = sessions.first { $0["project_path"]?.string == location.project.path }
-            var session = previous?.object ?? [:]
-            session["project_path"] = .string(location.project.path)
-            session["worktree_path"] = location.worktreePath.map(JSONValue.string)
-            session["branch"] = location.worktreePath.flatMap { branches[$0].map(JSONValue.string) ?? session["branch"] }
+            var session = byProject[location.project.folder]?.object ?? [:]
+            session["project_path"] = .string(location.project.folder.path)
+            session["worktree_path"] = location.worktree.map { .string($0.path) }
+            session["branch"] = location.worktree.flatMap { branches[$0].map(JSONValue.string) ?? session["branch"] }
             let previousWindows = session["windows"]?.array ?? []
             session["windows"] = .array(members.enumerated().map { index, window in
                 let previous = previousWindows.first { $0["window_id"]?.string == window.id }
@@ -52,6 +52,12 @@ extension TopicRecord {
         var updated = self
         updated.sessions = remembered
         return updated
+    }
+
+    /// The first remembered Session of each folder that its `field` names, such as `project_path`, resolved on this Mac.
+    func rememberedSessions(by field: String) -> [Folder: JSONValue] {
+        Dictionary(sessions.compactMap { session in session[field]?.string.map { (Folder.local($0), session) } },
+                   uniquingKeysWith: { first, _ in first })
     }
 
     /// An Agent Pane keeps its conversation, a Pane that runs another program keeps its command line, and a shell

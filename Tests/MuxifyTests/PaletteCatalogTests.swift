@@ -42,7 +42,7 @@ final class PaletteCatalogTests: XCTestCase {
             let window = window("@v", session: { if case .session(let name) = key { return name }; return "v" }(),
                                 directory: { if case .directory(let path) = key { return path }; return "/elsewhere" }())
             let group: TopicGroupID = { if case .topic(let group) = key { return group }; return .noTopic }()
-            _ = log.record(window, group: group, projects: [game, notes], at: Date(timeIntervalSince1970: seconds))
+            _ = log.record(window, group: group, projects: [game, notes], folders: .local, at: Date(timeIntervalSince1970: seconds))
         }
         return log
     }
@@ -93,7 +93,7 @@ final class PaletteCatalogTests: XCTestCase {
                                                  "project:/work/game/main", "project:/work/game/release"],
                        "the Topic's Session is left out, and its Worktree is offered for a No Topic Session")
         XCTAssertEqual(sessions.first { $0.id == "project:/work/game/main" }?.pick.payload?.ref,
-                       .project(OpenDirectory(directory: "/work/game/main", name: "game/main", reach: .noTopicOnly)))
+                       .project(OpenDirectory(directory: .local("/work/game/main"), name: "game/main", reach: .noTopicOnly)))
         let notes = sessions.first { $0.id == "project:/work/notes" }
         XCTAssertEqual(notes?.symbol, "■")
         XCTAssertEqual(notes?.pick.payload?.target, "notes-2", "Copy tmux Target names the Session ↩ goes to")
@@ -117,9 +117,9 @@ final class PaletteCatalogTests: XCTestCase {
                        "the current Session's Project first, then by activity, then the Project with no Session")
         XCTAssertEqual(rows[0].trailing, "Current")
         XCTAssertEqual(rows[2].pick.payload?.ref,
-                       .project(OpenDirectory(directory: "/work/game/main", name: "game/main", reach: .anySession)),
+                       .project(OpenDirectory(directory: .local("/work/game/main"), name: "game/main", reach: .anySession)),
                        "a Topic's Session joins its Project row")
-        XCTAssertEqual(rows.last?.pick.payload?.ref, .project(OpenDirectory(directory: "/work/notes", name: "notes", reach: .anySession)))
+        XCTAssertEqual(rows.last?.pick.payload?.ref, .project(OpenDirectory(directory: .local("/work/notes"), name: "notes", reach: .anySession)))
         XCTAssertEqual(rows.last?.trailing, "↩ open")
         XCTAssertNil(rows.last?.pick.payload?.target)
     }

@@ -19,9 +19,9 @@ final class TitleSuggestionTests: XCTestCase {
     }
 
     func testBuildsTheCompleteRequestFromLiveAndRememberedConversationIDs() throws {
-        var topic = TopicRecord(id: "topic", homeProject: project.path)
+        var topic = TopicRecord(id: "topic", homeProject: project.folder.path)
         topic.sessions = [.object([
-            "project_path": .string(project.path),
+            "project_path": .string(project.folder.path),
             "windows": .array([
                 .object(["agent": .string("codex"), "agent_conversation": .string("conversation-1")]),
                 .object(["agent": .string("claude"), "agent_conversation": .string("conversation-2")]),

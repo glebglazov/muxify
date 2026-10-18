@@ -297,19 +297,19 @@ extension TopicInvocation {
 
     private func request(projects: [Project], service: TopicService) throws -> TopicCommand {
         switch command {
-        case .new(nil, let project): return .extract(project: try project.map(Self.directory))
-        case .new(let title?, let project): return .create(title: title, project: try project.map(Self.directory))
+        case .new(nil, let project): return .extract(project: try project.map(Self.directory)?.real)
+        case .new(let title?, let project): return .create(title: title, project: try project.map(Self.directory)?.real)
         case .addProject(let path, let newWorktree, let base):
             let directory = try Self.directory(path)
             // A folder in no Project goes to the service as typed, which fails with the Config's own words.
             guard let choice = ProjectChoice.containing(directory, in: projects) else {
-                return .addProject(project: directory, workingCopy: .project)
+                return .addProject(project: directory.real, workingCopy: .project)
             }
             if newWorktree, choice.worktree == nil {
-                throw CLIError("--worktree needs a git repository, and \(choice.directory) is not one", exitCode: 2)
+                throw CLIError("--worktree needs a git repository, and \(choice.directory.path) is not one", exitCode: 2)
             }
             // The same choice as the Add Project sheet makes for this row.
-            return .addProject(project: choice.project.path, workingCopy: choice.workingCopy(newWorktree: newWorktree, base: base))
+            return .addProject(project: choice.project.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree, base: base))
         case .forget(let remove):
             guard remove, let target = target ?? caller.map(TopicTarget.pane),
                   let choices = try? service.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
@@ -326,15 +326,13 @@ extension TopicInvocation {
         }
     }
 
-    /// The directory `path` names, with symlinks resolved, as `cd -P` would reach it.
-    static func directory(_ path: String) throws -> String {
+    /// The directory `path` names. Its real path is where `cd -P` would reach it.
+    static func directory(_ path: String) throws -> Folder {
         var isDirectory: ObjCBool = false
-        guard let resolved = realpath(path, nil) else { throw CLIError(CLICommand.usage, exitCode: 2) }
-        defer { free(resolved) }
-        let result = String(cString: resolved)
-        guard FileManager.default.fileExists(atPath: result, isDirectory: &isDirectory), isDirectory.boolValue else {
+        let folder = Folder.local(path)
+        guard FileManager.default.fileExists(atPath: folder.real, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw CLIError(CLICommand.usage, exitCode: 2)
         }
-        return result
+        return folder
     }
 }

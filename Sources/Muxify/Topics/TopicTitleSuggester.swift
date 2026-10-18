@@ -152,8 +152,8 @@ struct TopicTitleSuggester {
 
             var names: [String] = []
             func project(at path: String) -> Project {
-                projects.first { $0.path == path }
-                    ?? Project(path: path, name: URL(fileURLWithPath: path).lastPathComponent)
+                let folder = Folder.local(path)
+                return projects.first { $0.folder == folder } ?? Project(folder: folder, name: URL(fileURLWithPath: path).lastPathComponent)
             }
             func append(_ project: Project?) {
                 guard let project, !names.contains(project.displayName) else { return }

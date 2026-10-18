@@ -82,31 +82,31 @@ public enum ProjectDiscovery {
             case "H" where fields.count == 2: home = fields[1]
             case "R" where fields.count == 2: root = Int(fields[1]) ?? root
             case "D" where fields.count == 4:
-                found.append(Found(root: root, path: (fields[1] as NSString).standardizingPath, kind: fields[2],
-                                   real: (fields[3] as NSString).standardizingPath))
+                found.append(Found(root: root, path: Folder.lexical(fields[1]), kind: fields[2], real: Folder.lexical(fields[3])))
             case "W" where fields.count == 2 && !found.isEmpty:
                 found[found.count - 1].worktrees.append(fields[1])
             default: continue
             }
         }
-        let expandedAliases = Dictionary(aliases.map { (expand($0.key, home: home), $0.value) }, uniquingKeysWith: { first, _ in first })
         var projects: [Project] = []
-        var repositoryFolders: [String] = []
+        var repositoryFolders: [Folder] = []
         let ordered = found.enumerated().sorted { ($0.element.root, $0.element.path) < ($1.element.root, $1.element.path) }.map(\.element)
-        let mainRepositories = ordered.filter(\.isMainRepository).map(\.real)
+        // git gives real paths. A checkout that the script also found under a root takes that root's spelling.
+        let resolver = FolderResolver.known(ordered.filter { roots.indices.contains($0.root) }.map(\.folder))
+        let folderAliases = Dictionary(aliases.map { (resolver.folder(expand($0.key, home: home)), $0.value) }, uniquingKeysWith: { first, _ in first })
+        let mainRepositories = ordered.filter(\.isMainRepository).map(\.folder)
         for entry in ordered where roots.indices.contains(entry.root) {
-            let inside = { (folder: String) in isInside(entry.path, folder) }
-            guard !projects.contains(where: { $0.path == entry.path }), !repositoryFolders.contains(where: inside) else { continue }
+            guard !projects.contains(where: { $0.folder == entry.folder }),
+                  !repositoryFolders.contains(where: { $0.contains(entry.folder) }) else { continue }
             // A linked Worktree whose repository was also found is a row of that Project, whichever sorts first.
             if entry.kind != "directory", !entry.isMainRepository, let main = entry.mainCheckout,
-               mainRepositories.contains(where: { isInside(main, $0) }) { continue }
-            let layout = ProjectLayout(kind: entry.kind, worktreeList: entry.worktrees.joined(separator: "\n"),
-                                       path: entry.path, realPath: entry.real)
-            if entry.kind != "directory" { repositoryFolders += [entry.path] + layout.worktrees.map(\.path) }
+               mainRepositories.contains(where: { $0.contains(main) }) { continue }
+            let layout = ProjectLayout(kind: entry.kind, worktrees: ProjectLayout.parse(worktreeList: entry.worktrees.joined(separator: "\n"), resolver: resolver))
+            if entry.kind != "directory" { repositoryFolders += [entry.folder] + layout.worktrees.map(\.folder) }
             let name = entry.path.split(separator: "/").suffix(roots[entry.root].displayDepth)
                 .map { Project.sessionName(String($0)) }.joined(separator: "/")
             guard !name.isEmpty else { continue }
-            projects.append(Project(path: entry.path, name: name, alias: expandedAliases[entry.path], layout: layout))
+            projects.append(Project(folder: entry.folder, name: name, alias: folderAliases[entry.folder], layout: layout))
         }
         return projects
     }
@@ -122,8 +122,8 @@ public enum ProjectDiscovery {
 
     private static func expand(_ path: String, home: String) -> String {
         if path == "~" { return home }
-        if path.hasPrefix("~/") { return ((home as NSString).appendingPathComponent(String(path.dropFirst(2))) as NSString).standardizingPath }
-        return (path as NSString).standardizingPath
+        if path.hasPrefix("~/") { return Folder.lexical((home as NSString).appendingPathComponent(String(path.dropFirst(2)))) }
+        return Folder.lexical(path)
     }
 }
 
@@ -136,18 +136,16 @@ private struct Found {
     let real: String
     var worktrees: [String] = []
 
-    /// git lists the main checkout, or the bare repository, first.
-    var mainCheckout: String? {
-        worktrees.first { $0.hasPrefix("worktree ") }.map { (String($0.dropFirst(9)) as NSString).standardizingPath }
+    var folder: Folder { Folder(path: path, real: real) }
+
+    /// git lists the main checkout, or the bare repository, first, by its real path.
+    var mainCheckout: Folder? {
+        worktrees.first { $0.hasPrefix("worktree ") }.map { String($0.dropFirst(9)) }.map { Folder(path: $0, real: $0) }
     }
 
     /// A repository's own folder, not one of its linked Worktrees. A bare layout's main entry is the
     /// `.bare` folder inside it.
     var isMainRepository: Bool {
-        kind != "directory" && mainCheckout.map { isInside($0, real) } == true
+        kind != "directory" && mainCheckout.map(folder.contains) == true
     }
-}
-
-private func isInside(_ path: String, _ folder: String) -> Bool {
-    path == folder || path.hasPrefix(folder + "/")
 }

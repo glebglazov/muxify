@@ -36,6 +36,7 @@ cli:
 	/bin/sh scripts/bundle-simulator-notices.sh build/bin/ThirdPartyNotices
 
 test: project
+	./scripts/check-folder-paths.sh
 	swift test
 	swift test --package-path Packages/MuxifyCore
 	node --test Tests/SimulatorWeb/*.test.mjs

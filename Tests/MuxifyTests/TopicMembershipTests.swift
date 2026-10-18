@@ -48,7 +48,7 @@ final class TopicMembershipTests: XCTestCase {
             .tmux(["move-window", "-d", "-s", "$1:@1", "-t", "=game/fix:"]),
             .removeTopicPlaceholder,
         ])
-        XCTAssertEqual(plan.record?.sessions, [.object(["project_path": .string(project.path)])])
+        XCTAssertEqual(plan.record?.sessions, [.object(["project_path": .string(project.folder.path)])])
     }
 
     func testNewTopicFromSessionLinksAndRenamesWithoutChangingWindows() throws {
@@ -59,7 +59,7 @@ final class TopicMembershipTests: XCTestCase {
             ["rename-session", "-t", "$1", "game/fix"],
             ["set-option", "-t", "$1", "@muxify_topic", "new"],
         ].map(TopicPlan.Command.tmux))
-        XCTAssertEqual(plan.record?.homeProject, project.path)
+        XCTAssertEqual(plan.record?.homeProject, project.folder.path)
         XCTAssertEqual(plan.record?.title, "Fix")
     }
 
@@ -91,7 +91,7 @@ final class TopicMembershipTests: XCTestCase {
 
     func testMainWorkingCopyBadgeAndDetachedWorktreeProjectIdentity() throws {
         var record = topic
-        record.sessions = [.object(["project_path": .string(project.path), "worktree_path": .string("/trees/fix"),
+        record.sessions = [.object(["project_path": .string(project.folder.path), "worktree_path": .string("/trees/fix"),
                                     "branch": .string("fix")])]
         for path in ["/work/game", "/work/game/src"] {
             XCTAssertTrue(TopicsModel.usesMainWorkingCopy(window(path: path, directory: "/trees/fix"),
@@ -103,12 +103,12 @@ final class TopicMembershipTests: XCTestCase {
         }
         let detached = window(directory: "/trees/fix")
         let existing = window("@2", session: "$2", topic: "other")
-        let other = TopicRecord(id: "other", title: "Other", slug: "other", homeProject: project.path)
+        let other = TopicRecord(id: "other", title: "Other", slug: "other", homeProject: project.folder.path)
         XCTAssertThrowsError(try TopicMembershipPlan(source: .session(detached), destination: other,
                                                       records: [record, other], windows: [detached, existing], projects: [project]))
         let plan = try TopicMembershipPlan(source: .session(detached), title: "Moved", records: [record],
                                            windows: [detached], projects: [project], id: "new")
-        XCTAssertEqual(plan.record?.homeProject, project.path)
+        XCTAssertEqual(plan.record?.homeProject, project.folder.path)
         XCTAssertEqual(plan.record?.sessions.first?["worktree_path"]?.string, "/trees/fix")
     }
 }

@@ -18,14 +18,14 @@ final class TopicEditTests: XCTestCase {
 
     func testRenameChangesEachSessionOnceAndKeepsRecordIdentityAndUnknownFields() throws {
         var record = topic
-        record.sessions = [.object(["project_path": .string(game.path), "future": .bool(true)])]
+        record.sessions = [.object(["project_path": .string(game.folder.path), "future": .bool(true)])]
         record.unknownFields = ["future": .array([.integer(42)])]
         record.createdAt = "1970-01-01T00:00:00Z"
         let windows = [
             window(),
             window("@2", active: false),
-            window("@3", session: "$2", name: "changed-by-hand", directory: tools.path),
-            window("@4", session: "$2", name: "changed-by-hand", directory: tools.path, active: false),
+            window("@3", session: "$2", name: "changed-by-hand", directory: tools.folder.path),
+            window("@4", session: "$2", name: "changed-by-hand", directory: tools.folder.path, active: false),
             window("@5", session: "$3", name: "outside", topicID: nil),
         ]
         let edit = try TopicRenamePlan(topic: record, title: "  New title  ", records: [record],
@@ -42,10 +42,10 @@ final class TopicEditTests: XCTestCase {
     }
 
     func testRenameUntitledUpdatesAllSessionNamesAndKeepsTopicID() throws {
-        let record = TopicRecord(id: "untitled", slug: "untitled-7", homeProject: game.path)
+        let record = TopicRecord(id: "untitled", slug: "untitled-7", homeProject: game.folder.path)
         let windows = [
             window(name: "game/untitled-7", topicID: record.id),
-            window("@2", session: "$2", name: "tools/untitled-7", topicID: record.id, directory: tools.path),
+            window("@2", session: "$2", name: "tools/untitled-7", topicID: record.id, directory: tools.folder.path),
         ]
         let edit = try TopicRenamePlan(topic: record, title: "Reward drop", records: [record],
                                        windows: windows, projects: [game, tools]).edit
@@ -68,8 +68,8 @@ final class TopicEditTests: XCTestCase {
     func testRenameCollisionInSecondProjectGivesEverySessionTheSameSuffix() throws {
         let windows = [
             window(),
-            window("@2", session: "$2", name: "tools/fix", directory: tools.path),
-            window("@3", session: "$3", name: "tools/next", topicID: nil, directory: tools.path),
+            window("@2", session: "$2", name: "tools/fix", directory: tools.folder.path),
+            window("@3", session: "$3", name: "tools/next", topicID: nil, directory: tools.folder.path),
         ]
         let edit = try TopicRenamePlan(topic: topic, title: "Next", records: [topic],
                                        windows: windows, projects: [game, tools]).edit
@@ -82,8 +82,8 @@ final class TopicEditTests: XCTestCase {
 
     func testDormantRenameChecksRememberedProjectsAndStoresBlankTitleAsUntitled() throws {
         var record = topic
-        record.sessions = [.object(["project_path": .string(tools.path)])]
-        let outside = window("@3", session: "$3", name: "tools/next", topicID: nil, directory: tools.path)
+        record.sessions = [.object(["project_path": .string(tools.folder.path)])]
+        let outside = window("@3", session: "$3", name: "tools/next", topicID: nil, directory: tools.folder.path)
         let named = try TopicRenamePlan(topic: record, title: "Next", records: [record],
                                         windows: [outside], projects: [game, tools]).edit
         XCTAssertEqual(named.record?.slug, "next-2")
@@ -117,10 +117,10 @@ final class TopicEditTests: XCTestCase {
     func testAddMissingProjectCreatesInProjectDirectoryAndRemembersIt() throws {
         var record = topic
         record.unknownFields = ["future": .string("keep")]
-        record.sessions = [.object(["project_path": .string(game.path), "future": .bool(true)])]
+        record.sessions = [.object(["project_path": .string(game.folder.path), "future": .bool(true)])]
         let edit = try TopicProjectPlan(topic: record, project: tools, workingCopy: .homeProject, windows: [window()], projects: [game, tools]).edit
         var expected = record
-        expected.sessions.append(.object(["project_path": .string(tools.path)]))
+        expected.sessions.append(.object(["project_path": .string(tools.folder.path)]))
         XCTAssertEqual(edit.record, expected)
         XCTAssertEqual(edit.commands, [
             ["new-session", "-d", "-s", "tools/fix", "-c", "/work/tools"],
@@ -131,7 +131,7 @@ final class TopicEditTests: XCTestCase {
 
     func testAddExistingWorktreeProjectRecognizesCanonicalProjectPath() throws {
         var record = topic
-        record.sessions = [.object(["project_path": .string(game.path), "worktree_path": .string("/trees/fix"),
+        record.sessions = [.object(["project_path": .string(game.folder.path), "worktree_path": .string("/trees/fix"),
                                     "branch": .string("fix")])]
         let existing = window(name: "hand-renamed", directory: "/trees/fix")
         let equivalent = Project(path: "/work/game/./", name: "game")
@@ -143,11 +143,11 @@ final class TopicEditTests: XCTestCase {
 
     func testAddDormantProjectReplacesOldWorktreeLocationAndKeepsUnknownSessionFields() throws {
         var record = topic
-        record.sessions = [.object(["project_path": .string(game.path), "worktree_path": .string("/trees/fix"),
+        record.sessions = [.object(["project_path": .string(game.folder.path), "worktree_path": .string("/trees/fix"),
                                     "branch": .string("fix"), "worktree_created": .bool(true), "base": .string("c0ffee"),
                                     "future": .bool(true)])]
         let edit = try TopicProjectPlan(topic: record, project: game, workingCopy: .homeProject, windows: [], projects: [game]).edit
-        XCTAssertEqual(edit.record?.sessions, [.object(["project_path": .string(game.path), "future": .bool(true)])])
+        XCTAssertEqual(edit.record?.sessions, [.object(["project_path": .string(game.folder.path), "future": .bool(true)])])
         XCTAssertEqual(edit.selection, .sessionName("game/fix"))
     }
 
@@ -171,12 +171,12 @@ final class TopicEditTests: XCTestCase {
         XCTAssertNil(edit.record?.title)
         XCTAssertEqual(edit.record?.id, "new")
         XCTAssertEqual(edit.record?.slug, "untitled-1")
-        XCTAssertEqual(edit.record?.homeProject, game.path)
+        XCTAssertEqual(edit.record?.homeProject, game.folder.path)
         XCTAssertEqual(edit.record?.createdAt, "1970-01-01T00:00:00Z")
         XCTAssertNil(edit.record?.order)
-        XCTAssertEqual(edit.record?.sessions, [.object(["project_path": .string(game.path)])])
+        XCTAssertEqual(edit.record?.sessions, [.object(["project_path": .string(game.folder.path)])])
         XCTAssertEqual(edit.commands, [
-            .newTopicSession(name: "game/untitled-1", directory: game.path),
+            .newTopicSession(name: "game/untitled-1", directory: game.folder.path),
             .tmux(["set-option", "-t", "=game/untitled-1:", "@muxify_topic", "new"]),
             .tmux(["switch-client", "-c", "/dev/tty1", "-t", "=game/untitled-1:"]),
             .tmux(["break-pane", "-d", "-s", "%7", "-t", "=game/untitled-1:"]),
@@ -190,7 +190,7 @@ final class TopicEditTests: XCTestCase {
         let edit = try TopicPanePlan(source: TopicPaneSource(paneID: "%7", window: source),
                                      records: [], windows: [source], projects: [game], id: "new").edit
         XCTAssertEqual(edit.commands, [
-            .newTopicSession(name: "game/untitled-1", directory: game.path),
+            .newTopicSession(name: "game/untitled-1", directory: game.folder.path),
             .tmux(["set-option", "-t", "=game/untitled-1:", "@muxify_topic", "new"]),
             .tmux(["move-window", "-d", "-s", "$1:@1", "-t", "=game/untitled-1:"]),
             .removeTopicPlaceholder,
@@ -204,23 +204,23 @@ final class TopicEditTests: XCTestCase {
         let source = window(panes: 3)
         let edit = try TopicPanePlan(source: TopicPaneSource(paneID: "%7", window: source), project: tools,
                                      records: [], windows: [source], projects: [game, tools], id: "new").edit
-        XCTAssertEqual(edit.record?.homeProject, tools.path)
-        XCTAssertEqual(edit.commands.first, .newTopicSession(name: "tools/untitled-1", directory: tools.path))
+        XCTAssertEqual(edit.record?.homeProject, tools.folder.path)
+        XCTAssertEqual(edit.commands.first, .newTopicSession(name: "tools/untitled-1", directory: tools.folder.path))
         XCTAssertTrue(edit.commands.contains(.tmux(["break-pane", "-d", "-s", "%7", "-t", "=tools/untitled-1:"])))
         XCTAssertEqual(edit.selection, .paneID("%7"))
     }
 
     func testExtractionUsesWorktreeProjectAndUntitledNumberFromOpenTopicsAndSessions() throws {
         var record = topic
-        record.sessions = [.object(["project_path": .string(game.path), "worktree_path": .string("/trees/fix")])]
+        record.sessions = [.object(["project_path": .string(game.folder.path), "worktree_path": .string("/trees/fix")])]
         let source = window(directory: "/trees/fix", panes: 3)
         let other = TopicRecord(id: "other", slug: "untitled-1")
         let occupied = window("@2", session: "$2", name: "game/untitled-2", topicID: nil)
         let edit = try TopicPanePlan(source: TopicPaneSource(paneID: "%7", window: source),
                                      records: [record, other], windows: [source, occupied], projects: [game], id: "new").edit
         XCTAssertEqual(edit.record?.slug, "untitled-3")
-        XCTAssertEqual(edit.record?.homeProject, game.path)
-        XCTAssertEqual(edit.commands.first, .newTopicSession(name: "game/untitled-3", directory: game.path))
+        XCTAssertEqual(edit.record?.homeProject, game.folder.path)
+        XCTAssertEqual(edit.commands.first, .newTopicSession(name: "game/untitled-3", directory: game.folder.path))
         XCTAssertEqual(edit.selection, .paneID("%7"))
     }
 
@@ -242,7 +242,7 @@ final class TopicEditTests: XCTestCase {
     }
 
     func testPlansRejectProjectNamesThatTmuxCannotUse() {
-        let invalid = Project(path: game.path, name: "bad.name")
+        let invalid = Project(path: game.folder.path, name: "bad.name")
         XCTAssertThrowsError(try TopicProjectPlan(topic: topic, project: invalid, workingCopy: .homeProject, windows: [], projects: [invalid]))
         XCTAssertThrowsError(try TopicRenamePlan(topic: topic, title: "Next", records: [topic],
                                                   windows: [window()], projects: [invalid]))

@@ -315,7 +315,7 @@ final class CLIIntegrationTests: XCTestCase {
                                    environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(result.status, 2, result.output)
         XCTAssertEqual(result.stdout, "")
-        XCTAssertEqual(result.stderr, "muxify: --worktree needs a git repository, and \((sandbox.tools.path as NSString).standardizingPath) is not one\n")
+        XCTAssertEqual(result.stderr, "muxify: --worktree needs a git repository, and \(sandbox.tools.path) is not one\n")
         XCTAssertEqual(try sandbox.records() as NSArray, before as NSArray)
         XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"])
     }
@@ -594,7 +594,7 @@ final class CLIIntegrationTests: XCTestCase {
         let result = try await run(cli, arguments: ["topic", "show"], environment: sandbox.cliEnvironment(pane: agent))
         XCTAssertEqual(result.status, 0, result.output)
         // The Config's glob spells /private/tmp as /tmp.
-        let work = (sandbox.root.path as NSString).standardizingPath + "/work"
+        let work = sandbox.root.path + "/work"
         XCTAssertEqual(result.stdout, "\(id)\tShip\ngame/ship\tgame\t\(work)/game\t\ntools/ship\ttools\t\(work)/tools\t\n")
     }
 
@@ -859,7 +859,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(text.status, 0, text.output)
         XCTAssertEqual(text.stderr, "")
         // The Config's glob spells /private/tmp as /tmp.
-        let work = (sandbox.root.path as NSString).standardizingPath + "/work"
+        let work = sandbox.root.path + "/work"
         let server = work + "/server"
         XCTAssertEqual(text.stdout, """
             \(work)/game\tgame\t
@@ -889,7 +889,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.stderr, "muxify: \(sandbox.config.path):4: unknown key \"projects.colour\"\n")
         XCTAssertEqual(result.stdout.split(separator: "\n").map { $0.split(separator: "\t").first.map(String.init) },
-                       [sandbox.game.path, sandbox.tools.path].map { ($0 as NSString).standardizingPath })
+                       [sandbox.game.path, sandbox.tools.path])
     }
 
 

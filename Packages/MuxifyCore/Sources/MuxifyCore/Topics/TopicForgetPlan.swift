@@ -18,17 +18,19 @@ public struct TopicForgetChoices: Sendable {
     init(topic: TopicRecord, snapshot: TmuxSnapshot, projects: [Project], root: String) {
         let record = topic.remembering(snapshot, projects: projects, order: .oldestFirst) ?? topic
         sessions = TopicSettleSession.choices(topic: record, snapshot: snapshot, projects: projects)
-        var seen: Set<String> = []
+        let root = Folder.local(root)
+        let windows = snapshot.windows.map { (sessionID: $0.sessionID, folders: $0.folders) }
+        var seen: Set<Folder> = []
         worktrees = (topic.sessions + record.sessions).compactMap { session in
             guard TopicWorktrees.isCreated(session), let project = session["project_path"]?.string,
-                  let path = session["worktree_path"]?.string, let branch = session["branch"]?.string,
-                  TopicWorktrees.isInside(path, root: root), FileManager.default.fileExists(atPath: path),
-                  seen.insert(path).inserted else { return nil }
+                  let path = session["worktree_path"]?.string, let branch = session["branch"]?.string else { return nil }
+            let folder = Folder.local(path)
+            guard TopicWorktrees.isInside(folder, root: root), FileManager.default.fileExists(atPath: path),
+                  seen.insert(folder).inserted else { return nil }
             let status = try? Shell.run("/usr/bin/git", ["status", "--porcelain", "--untracked-files=normal"], directory: path)
             return Worktree(spec: .init(projectPath: project, path: path, branch: branch),
                             isClean: status?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true,
-                            sessionIDs: Set(snapshot.windows.filter { $0.path == path || $0.path.hasPrefix(path + "/")
-                                || $0.sessionPath == path || $0.sessionPath.hasPrefix(path + "/") }.map(\.sessionID)))
+                            sessionIDs: Set(windows.filter { $0.folders.contains(where: folder.contains) }.map(\.sessionID)))
         }
     }
 }

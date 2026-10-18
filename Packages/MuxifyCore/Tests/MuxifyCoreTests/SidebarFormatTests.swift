@@ -220,13 +220,13 @@ final class SidebarFormatTests: XCTestCase {
         let files = ["/repo/.git/HEAD": "ref: refs/heads/main\n", "/work/.git": "gitdir: ../meta/work\n",
                      "/meta/work/HEAD": "ref: refs/heads/feature\n", "/detached/.git/HEAD": "abcdef\n"]
         var reads: [String: Int] = [:]
-        let branches = TopicBranches(paths: ["/repo", "/repo/sub", "/repo/sub/deep", "/work", "/detached"]) {
+        let branches = TopicBranches(paths: ["/repo", "/repo/sub", "/repo/sub/deep", "/work", "/detached"].map(Folder.local)) {
             reads[$0, default: 0] += 1
             return files[$0]
         }
-        XCTAssertEqual(branches["/repo/sub/deep"], "main")
-        XCTAssertEqual(branches["/work"], "feature")
-        XCTAssertNil(branches["/detached"])
+        XCTAssertEqual(branches[.local("/repo/sub/deep")], "main")
+        XCTAssertEqual(branches[.local("/work")], "feature")
+        XCTAssertNil(branches[.local("/detached")])
         XCTAssertTrue(reads.values.allSatisfy { $0 == 1 })
     }
 }

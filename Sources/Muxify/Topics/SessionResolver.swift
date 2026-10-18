@@ -4,7 +4,7 @@ import MuxifyCore
 /// A Project or Worktree row's ↩: go to the Session there, or start one. The store resolves it when
 /// pressed, with the Windows of that moment, so two presses end on one Session.
 struct OpenDirectory: Hashable {
-    let directory: String
+    let directory: Folder
     /// The row name, which names a created Session.
     let name: String
     let reach: SessionResolver.Reach
@@ -29,21 +29,22 @@ struct SessionResolver {
     private let openTopicIDs: Set<String>
     private let visits: VisitLog
     private let sessionNames: Set<String>
-    /// Standardized row directory to the Windows whose Session starts there or inside it, in tmux order.
-    private let windowsByRow: [String: [TmuxWindow]]
+    /// Row directory to the Windows whose Session starts there or inside it, in tmux order.
+    private let windowsByRow: [Folder: [TmuxWindow]]
 
-    init(windows: [TmuxWindow], openTopicIDs: Set<String>, projects: [Project], visits: VisitLog) {
+    /// `folders` resolves the Sessions' paths on the machine that runs them.
+    init(windows: [TmuxWindow], openTopicIDs: Set<String>, projects: [Project], folders: FolderResolver, visits: VisitLog) {
         self.openTopicIDs = openTopicIDs
         self.visits = visits
         sessionNames = Set(windows.map(\.sessionName))
-        let roots = projects.flatMap(ProjectChoice.choices).map { ($0.directory as NSString).standardizingPath }
-        var rowOfPath: [String: String?] = [:]
-        var windowsByRow: [String: [TmuxWindow]] = [:]
+        let roots = projects.flatMap(ProjectChoice.choices).map(\.directory)
+        var rowOfPath: [String: Folder?] = [:]
+        var windowsByRow: [Folder: [TmuxWindow]] = [:]
         for window in windows {
             let row = rowOfPath[window.sessionPath] ?? {
                 // The nearest row wins, so a Session in a Worktree inside a bare Project folder belongs to the Worktree row only.
-                let path = (window.sessionPath as NSString).standardizingPath
-                let row = roots.filter { path == $0 || path.hasPrefix($0 + "/") }.max { $0.count < $1.count }
+                let folder = folders.folder(window.sessionPath)
+                let row = roots.filter { $0.contains(folder) }.max { $0.real.count < $1.real.count }
                 rowOfPath[window.sessionPath] = row
                 return row
             }()
@@ -54,9 +55,9 @@ struct SessionResolver {
 
     /// The live Sessions whose start directory is `directory` or inside it, as groups of their Windows in
     /// tmux order. The Session visited last comes first, then the most recently active one.
-    func sessions(in directory: String, reach: Reach) -> [[TmuxWindow]] {
+    func sessions(in directory: Folder, reach: Reach) -> [[TmuxWindow]] {
         var sessions: [[TmuxWindow]] = []
-        for window in windowsByRow[(directory as NSString).standardizingPath] ?? [] {
+        for window in windowsByRow[directory] ?? [] {
             if reach == .noTopicOnly, let id = window.topicID, openTopicIDs.contains(id) { continue }
             if let index = sessions.firstIndex(where: { $0[0].sessionID == window.sessionID }) {
                 sessions[index].append(window)
@@ -81,7 +82,7 @@ struct SessionResolver {
     }
 
     /// ↩ on the row: the active Window of the Session visited last, or a new Session named after the row.
-    func target(directory: String, name: String, reach: Reach) -> Target {
+    func target(directory: Folder, name: String, reach: Reach) -> Target {
         if let session = sessions(in: directory, reach: reach).first {
             return .go(session.first(where: \.isActive) ?? session[0])
         }

@@ -25,15 +25,15 @@ struct SidebarFormatContexts {
         for (sessionID, members) in Dictionary(grouping: windows, by: \.sessionID) {
             guard let first = members.first else { continue }
             let record = first.isRemote ? nil : first.topicID.flatMap { recordsByID[$0] }
-            let location = TopicLocation(of: first, record: record, projects: first.isRemote ? [] : projects)
+            let location = first.isRemote ? nil : TopicLocation(of: first, record: record, projects: projects)
             let topicSession = model.topicSessions[sessionID]
             let sessionAgents = agents.filter { $0.sessionID == sessionID }
             let sessionValues = merged(counts(sessionAgents), [
                 .session_name: first.sessionName,
-                .project: topicSession?.projectName ?? location.project.name,
-                .branch: first.isRemote ? "" : branches[first.sessionPath] ?? "",
+                .project: topicSession?.projectName ?? location?.project.name ?? remoteProjectName(first.sessionPath),
+                .branch: first.isRemote ? "" : branches[.local(first.sessionPath)] ?? "",
                 .branch_label: first.isRemote ? "" : topicSession?.branch ?? "",
-                .home_flag: location.isHome ? "1" : "0",
+                .home_flag: location?.isHome == true ? "1" : "0",
                 .topic_title: first.isRemote ? "" : first.topicID.flatMap { model.titles[$0] } ?? "",
                 .window_count: String(members.count),
                 .pane_count: String(members.reduce(0) { $0 + $1.paneCount }),
@@ -56,7 +56,7 @@ struct SidebarFormatContexts {
                         .pane_index: String(pane.index), .pane_label: pane.label, .pane_title: pane.title,
                         .pane_current_command: pane.command, .pane_current_path: pane.path,
                         .pane_active_flag: pane.isActive ? "1" : "0",
-                        .branch: window.isRemote ? "" : branches[pane.path] ?? "",
+                        .branch: window.isRemote ? "" : branches[.local(pane.path)] ?? "",
                         .agent_kind: agent?.kind.displayName ?? "", .agent_status: agent?.status?.rawValue ?? "",
                         .agent_unread_flag: agent?.unread == true ? "1" : "0",
                         .agent_group: model.agentGroups[pane.id] ?? "",
@@ -88,4 +88,10 @@ struct SidebarFormatContexts {
             topics[topic.id] = Context(values: values, loops: [.sessions: children, .windows: allWindows, .panes: allPanes])
         }
     }
+}
+
+/// A Remote Session's Project, named after its folder as a Topic Session's Project is.
+private func remoteProjectName(_ sessionPath: String) -> String {
+    let name = Project.sessionName((sessionPath as NSString).lastPathComponent)
+    return name.isEmpty ? "Unknown Project" : name
 }

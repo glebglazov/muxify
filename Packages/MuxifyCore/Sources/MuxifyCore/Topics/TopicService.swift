@@ -59,7 +59,7 @@ public struct TopicService: Sendable {
             let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
             let record = topic.remembering(snapshot, projects: projects, order: sessionOrder) ?? topic
             return .success(TopicSettleSession.choices(topic: record, snapshot: snapshot, projects: projects,
-                                                       mergedWorktrees: TopicWorktrees.mergedPaths(in: record, root: paths.worktrees.path)))
+                                                       mergedWorktrees: TopicWorktrees.merged(in: record, root: paths.worktrees.path)))
         } catch {
             return .failure(failure(error, phase: .nothingChanged))
         }
@@ -164,7 +164,7 @@ public struct TopicService: Sendable {
                 home = try project(at: projectPath)
             } else if paneRequest(request.target, caller: request.caller) != nil {
                 let (pane, _) = try source()
-                home = TopicLocation(of: pane.window, record: Self.record(of: pane.window, in: records), projects: projects).project
+                home = TopicLocation(of: pane.window, record: TopicMembershipPlan.sourceRecord(for: pane.window, records: records), projects: projects).project
             } else {
                 let slug = TopicNaming.slug(title: title, project: nil, records: records, sessionNames: [])
                 let record = TopicRecord(newTopic: UUID().uuidString.lowercased(), title: title, slug: slug, now: Date())
@@ -191,7 +191,7 @@ public struct TopicService: Sendable {
                 try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", PaneCommandLines.script]))
             }
             return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, projects: projects, choices: choices, outcome: outcome,
-                                                 mergedWorktrees: TopicWorktrees.mergedPaths(in: topic, root: paths.worktrees.path),
+                                                 mergedWorktrees: TopicWorktrees.merged(in: topic, root: paths.worktrees.path),
                                                  order: sessionOrder).edit)
         case .forget(let choices, let worktrees):
             let topic = try forgetTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
@@ -249,21 +249,21 @@ public struct TopicService: Sendable {
                 }
                 let home = TopicMembershipPlan.project(of: window, records: records, projects: projects)
                 let existing = fresh.windows.first {
-                    $0.topicID == nil && TopicMembershipPlan.project(of: $0, records: records, projects: projects).path == home.path
+                    $0.topicID == nil && TopicMembershipPlan.project(of: $0, records: records, projects: projects).folder == home.folder
                 }
                 let target: String
                 var commands: [TopicPlan.Command] = []
                 if let existing {
                     target = existing.sessionID + ":"
                 } else {
-                    guard !home.path.isEmpty, !home.name.isEmpty, !home.name.contains("."),
+                    guard !home.folder.path.isEmpty, !home.name.isEmpty, !home.name.contains("."),
                           !home.name.contains(":"), !home.name.contains("\n") else { throw TopicEditFailure.invalidProject }
                     let names = Set(fresh.windows.map(\.sessionName))
                     var name = home.name
                     var number = 2
                     while names.contains(name) { name = "\(home.name)-\(number)"; number += 1 }
                     target = "=" + name + ":"
-                    commands.append(.newTopicSession(name: name, directory: home.path))
+                    commands.append(.newTopicSession(name: name, directory: home.folder.path))
                 }
                 if let client { commands.append(.tmux(["switch-client", "-c", client, "-t", target])) }
                 commands.append(.tmux(["move-window", "-d", "-s", window.sessionID + ":" + window.id, "-t", target]))
@@ -379,20 +379,10 @@ public struct TopicService: Sendable {
         return topic
     }
 
-    /// The record that a Window's Session belongs to: its Topic, else a Topic that remembers its Worktree.
-    private static func record(of window: TmuxWindow, in records: [TopicRecord]) -> TopicRecord? {
-        records.first { $0.id == window.topicID } ?? records.first { record in
-            record.sessions.contains { session in
-                guard let path = session["worktree_path"]?.string else { return false }
-                let tree = (path as NSString).standardizingPath
-                let directory = (window.sessionPath as NSString).standardizingPath
-                return directory == tree || directory.hasPrefix(tree + "/")
-            }
-        }
-    }
-
+    /// `path` is a request's, given on this Mac, so it may reach the Config's folder through a symlink.
     private func project(at path: String) throws -> Project {
-        guard let match = projects.first(where: { ($0.path as NSString).standardizingPath == (path as NSString).standardizingPath }) else {
+        let folder = Folder.local(path)
+        guard let match = projects.first(where: { $0.folder == folder }) else {
             throw TopicRequestError.projectUnavailable(path)
         }
         return match
@@ -400,7 +390,8 @@ public struct TopicService: Sendable {
 
     private func workingCopy(_ choice: TopicWorkingCopyChoice, of project: Project) throws -> TopicWorkingCopy {
         func worktree(at path: String) throws -> Worktree {
-            guard let match = project.layout.worktrees.first(where: { ($0.path as NSString).standardizingPath == (path as NSString).standardizingPath }) else {
+            let folder = Folder.local(path)
+            guard let match = project.layout.worktrees.first(where: { $0.folder == folder }) else {
                 throw TopicRequestError.projectUnavailable(path)
             }
             return match

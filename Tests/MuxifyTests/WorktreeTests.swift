@@ -32,7 +32,7 @@ final class WorktreeTests: XCTestCase {
         project.layout = .plainRepository([Worktree(path: "/work/game source", branch: "main")])
         let plan = try TopicProjectPlan(topic: TopicRecord(id: "topic", title: "Fix links", slug: "fix-links"), project: project,
                                         workingCopy: .newWorktree(at: "c0ffee", root: "/work trees"), windows: [], projects: [project]).edit
-        let worktree = TopicPlan.WorktreeSpec(projectPath: project.path, path: "/work trees/team/game/fix-links", branch: "fix-links")
+        let worktree = TopicPlan.WorktreeSpec(projectPath: project.folder.path, path: "/work trees/team/game/fix-links", branch: "fix-links")
         XCTAssertEqual(worktree.arguments, ["worktree", "add", "-b", "fix-links", "/work trees/team/game/fix-links"])
         XCTAssertEqual(plan.newWorktree, TopicPlan.NewWorktree(worktree: worktree, commit: "c0ffee"))
         XCTAssertEqual(plan.commands, [
@@ -44,7 +44,7 @@ final class WorktreeTests: XCTestCase {
         record.slug = "new-title"
         let decoded = try JSONDecoder().decode(TopicRecord.self, from: JSONEncoder().encode(record))
         XCTAssertEqual(decoded.sessions, [.object([
-            "project_path": .string(project.path),
+            "project_path": .string(project.folder.path),
             "worktree_path": .string(worktree.path),
             "branch": .string("fix-links"),
             "worktree_created": .bool(true),
@@ -59,7 +59,7 @@ final class WorktreeTests: XCTestCase {
         let plan = try TopicProjectPlan(topic: TopicRecord(id: "topic", title: "Fix links", slug: "fix-links"), project: project,
                                         workingCopy: .newWorktree(at: "c0ffee", root: "/state/muxify/worktrees"), windows: [], projects: [project]).edit
         let path = "/state/muxify/worktrees/game_server/fix-links"
-        XCTAssertEqual(plan.newWorktree, TopicPlan.NewWorktree(worktree: .init(projectPath: project.path, path: path, branch: "fix-links"), commit: "c0ffee"))
+        XCTAssertEqual(plan.newWorktree, TopicPlan.NewWorktree(worktree: .init(projectPath: project.folder.path, path: path, branch: "fix-links"), commit: "c0ffee"))
         XCTAssertEqual(plan.commands.first, .tmux(["new-session", "-d", "-s", "game_server/fix-links", "-c", path]))
     }
 

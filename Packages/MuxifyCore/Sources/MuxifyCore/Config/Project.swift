@@ -1,7 +1,7 @@
 import Foundation
 
 public struct Project: Equatable, Identifiable, Sendable {
-    public let path: String
+    public let folder: Folder
     /// Names the Project's tmux Sessions and Topic records, so it never changes with the alias.
     public let name: String
     /// What the user calls the Project in the Config's `projects_aliases`. It may hold spaces, so it is only shown.
@@ -9,29 +9,33 @@ public struct Project: Equatable, Identifiable, Sendable {
     /// What git says the directory is. The Config gives `.directory`; the Workspace fills it in.
     public var layout: ProjectLayout = .directory
 
-    public init(path: String, name: String, alias: String? = nil, layout: ProjectLayout = .directory) {
-        self.path = path
+    public init(folder: Folder, name: String, alias: String? = nil, layout: ProjectLayout = .directory) {
+        self.folder = folder
         self.name = name
         self.alias = alias
         self.layout = layout
     }
 
-    public var id: String { path }
+    /// A Project in a folder on this Mac.
+    public init(path: String, name: String, alias: String? = nil, layout: ProjectLayout = .directory) {
+        self.init(folder: .local(path), name: name, alias: alias, layout: layout)
+    }
+
+    public var id: String { folder.real }
 
     /// The name lists and Session labels show: the alias when the Config gives one.
     public var displayName: String { alias ?? name }
 
     /// The name of a Session in a checkout of this Project. A Worktree in another folder is
     /// `<name>/<folder>`. The Project folder itself, the main checkout of a plain repository, is just `<name>`.
-    public func name(ofWorktreeAt worktreePath: String) -> String { checkout(worktreePath, of: name, folder: Self.sessionName) }
+    public func name(ofWorktreeAt worktree: Folder) -> String { checkout(worktree, of: name, folder: Self.sessionName) }
 
     /// A checkout's name in lists and Session labels, by the rule of `name(ofWorktreeAt:)` on the display name.
-    public func displayName(ofWorktreeAt worktreePath: String) -> String { checkout(worktreePath, of: displayName) { $0 } }
+    public func displayName(ofWorktreeAt worktree: Folder) -> String { checkout(worktree, of: displayName) { $0 } }
 
-    private func checkout(_ worktreePath: String, of projectName: String, folder: (String) -> String) -> String {
-        let worktree = (worktreePath as NSString).standardizingPath
-        guard worktree != (path as NSString).standardizingPath else { return projectName }
-        return projectName + "/" + folder((worktree as NSString).lastPathComponent)
+    private func checkout(_ worktree: Folder, of projectName: String, folder rename: (String) -> String) -> String {
+        guard worktree != folder else { return projectName }
+        return projectName + "/" + rename((worktree.path as NSString).lastPathComponent)
     }
 
     /// A folder name as tmux takes it in a Session name: spaces go, and `.` and `:`, which tmux
@@ -42,16 +46,15 @@ public struct Project: Equatable, Identifiable, Sendable {
             .replacingOccurrences(of: ":", with: "_")
     }
 
-    /// The Project at `path`: named as the Config Project that holds it, else after its folder.
-    public static func named(at path: String, in projects: [Project]) -> Project {
-        let owner = containing(path, in: projects)
-        return Project(path: path, name: owner?.name ?? sessionName((path as NSString).lastPathComponent), alias: owner?.alias)
+    /// The Project at `folder`: named as the Config Project that holds it, else after its folder.
+    public static func named(at folder: Folder, in projects: [Project]) -> Project {
+        let owner = containing(folder, in: projects)
+        return Project(folder: folder, name: owner?.name ?? sessionName((folder.path as NSString).lastPathComponent), alias: owner?.alias)
     }
 
-    public static func containing(_ directory: String, in projects: [Project]) -> Project? {
-        let path = URL(fileURLWithPath: directory).standardizedFileURL.path
-        return projects.filter { path == $0.path || path.hasPrefix($0.path + "/") }
-            .max { $0.path.count < $1.path.count }
+    /// The Project whose folder holds `folder`, nearest first.
+    public static func containing(_ folder: Folder, in projects: [Project]) -> Project? {
+        projects.filter { $0.folder.contains(folder) }.max { $0.folder.real.count < $1.folder.real.count }
     }
 }
 

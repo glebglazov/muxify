@@ -34,15 +34,16 @@ public struct TopicSettleSession: Identifiable, Codable, Hashable, Sendable {
     }
 
     public static func choices(topic: TopicRecord, snapshot: TmuxSnapshot, projects: [Project],
-                        mergedWorktrees: Set<String> = []) -> [TopicSettleSession] {
+                        mergedWorktrees: Set<Folder> = []) -> [TopicSettleSession] {
         var seen: Set<String> = []
+        let byProject = topic.rememberedSessions(by: "project_path")
         return snapshot.windows.filter { $0.topicID == topic.id && seen.insert($0.sessionID).inserted }.map { window in
             let location = TopicLocation(of: window, record: topic, projects: projects)
             let working = snapshot.agents.contains { $0.sessionID == window.sessionID && $0.status == .working }
-            let remembered = topic.sessions.first { $0["project_path"]?.string == location.project.path }
-            let worktree = location.worktreePath.flatMap { path -> TopicPlan.WorktreeSpec? in
-                guard mergedWorktrees.contains(path), let branch = remembered?["branch"]?.string else { return nil }
-                return .init(projectPath: location.project.path, path: path, branch: branch)
+            let remembered = byProject[location.project.folder]
+            let worktree = location.worktree.flatMap { folder -> TopicPlan.WorktreeSpec? in
+                guard mergedWorktrees.contains(folder), let branch = remembered?["branch"]?.string else { return nil }
+                return .init(projectPath: location.project.folder.path, path: folder.path, branch: branch)
             }
             return Self(id: window.sessionID, name: window.sessionName, disposition: working ? .keep : .kill,
                         worktree: worktree, reviewedWindows: windows(in: window.sessionID, snapshot: snapshot))
@@ -60,7 +61,7 @@ struct TopicSettlePlan {
     public let edit: TopicEdit
 
     public init(topic: TopicRecord, snapshot: TmuxSnapshot, projects: [Project], choices: [TopicSettleSession],
-         outcome: String, mergedWorktrees: Set<String> = [], now: Date = Date(), order: SessionOrder = .oldestFirst) {
+         outcome: String, mergedWorktrees: Set<Folder> = [], now: Date = Date(), order: SessionOrder = .oldestFirst) {
         var record = topic.remembering(snapshot, projects: projects, order: order) ?? topic
         record.settledAt = ISO8601DateFormatter().string(from: now)
         record.outcome = outcome.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -77,16 +78,17 @@ struct TopicSettlePlan {
                 commands.append(.tmux(SessionLock.unsetOption(session.id)))
             }
         }
+        let windows = snapshot.windows.map { (sessionID: $0.sessionID, folders: $0.folders) }
         for session in defaults {
             guard let choice = choices.first(where: { $0.id == session.id }), choice.disposition == .kill,
                   choice.removeWorktree, let worktree = session.worktree else { continue }
-            let keptWindows = snapshot.windows.filter { window in
+            let keptWindows = windows.filter { window in
                 let member = defaults.first { $0.id == window.sessionID }
                 let disposition = member.flatMap { member in choices.first { $0.id == member.id }?.disposition ?? member.disposition }
                 return member == nil || disposition == .keep
             }
-            guard !keptWindows.contains(where: { $0.path == worktree.path || $0.path.hasPrefix(worktree.path + "/")
-                || $0.sessionPath == worktree.path || $0.sessionPath.hasPrefix(worktree.path + "/") }) else { continue }
+            let folder = Folder.local(worktree.path)
+            guard !keptWindows.contains(where: { $0.folders.contains(where: folder.contains) }) else { continue }
             commands.append(.removeMergedWorktree(worktree))
         }
         edit = TopicEdit(record: record, commands: commands, selection: .unchanged)
@@ -158,7 +160,8 @@ public struct TopicReopening: Hashable {
         let remembered = topic.sessions.isEmpty ? topic.homeProject.map { [.object(["project_path": JSONValue.string($0)])] } ?? [] : topic.sessions
         let locations = try remembered.map { session -> Project in
             guard let path = session["project_path"]?.string, !path.isEmpty else { throw TopicEditFailure.invalidProject }
-            let project = Project.containing(path, in: projects) ?? Project(path: path, name: (path as NSString).lastPathComponent)
+            let folder = Folder.local(path)
+            let project = Project.containing(folder, in: projects) ?? Project(folder: folder, name: (folder.path as NSString).lastPathComponent)
             guard !project.name.isEmpty, !project.name.contains(":"), !project.name.contains("."),
                   project.name.rangeOfCharacter(from: .controlCharacters) == nil else { throw TopicEditFailure.invalidProject }
             return project
@@ -168,14 +171,14 @@ public struct TopicReopening: Hashable {
             sessions = []
             return
         }
-        guard Set(locations.map(\.path)).count == locations.count else { throw TopicEditFailure.duplicateProject }
+        guard Set(locations.map(\.folder)).count == locations.count else { throw TopicEditFailure.duplicateProject }
         guard Set(locations.map(\.name)).count == locations.count else { throw TopicEditFailure.sessionNameInUse }
         let slug = TopicNaming.slug(title: topic.title ?? "", project: home, records: records,
                                     sessionNames: Set(windows.map(\.sessionName)), excludingTopicID: topic.id,
                                     projectNames: Set(locations.map(\.name)))
         self.slug = slug
         sessions = try zip(remembered, locations).map { session, project in
-            let directory = session["worktree_path"]?.string ?? project.path
+            let directory = session["worktree_path"]?.string ?? project.folder.path
             let createsWorktree = session["worktree_path"]?.string.map { !existingDirectories.contains($0) } ?? false
             let branch = session["branch"]?.string.flatMap { $0.isEmpty ? nil : $0 }
             if createsWorktree, branch == nil { throw TopicEditFailure.invalidProject }
@@ -184,7 +187,7 @@ public struct TopicReopening: Hashable {
                 ? [Window(name: "shell", directory: directory, browser: StoredBrowser(), layout: nil,
                           panes: [Pane(directory: directory, isActive: true, start: .shell)])]
                 : saved.map { Self.window($0, directory: directory) }
-            return Session(projectPath: project.path, projectName: project.name, name: project.name + "/" + slug, directory: directory, branch: branch,
+            return Session(projectPath: project.folder.path, projectName: project.name, name: project.name + "/" + slug, directory: directory, branch: branch,
                            createsWorktree: createsWorktree, base: session[TopicWorktrees.baseKey]?.string, windows: windows)
         }
     }

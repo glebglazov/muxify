@@ -11,19 +11,19 @@ public struct ProjectChoice: Identifiable, Equatable, Sendable {
         self.worktree = worktree
     }
 
-    public var id: String { directory }
-    public var directory: String { worktree?.path ?? project.path }
+    public var id: String { directory.real }
+    public var directory: Folder { worktree?.folder ?? project.folder }
     /// Names the Session this row opens.
-    public var name: String { worktree.map { project.name(ofWorktreeAt: $0.path) } ?? project.name }
-    public var displayName: String { worktree.map { project.displayName(ofWorktreeAt: $0.path) } ?? project.displayName }
+    public var name: String { worktree.map { project.name(ofWorktreeAt: $0.folder) } ?? project.name }
+    public var displayName: String { worktree.map { project.displayName(ofWorktreeAt: $0.folder) } ?? project.displayName }
     /// A checkout in its own folder, not the Project folder itself.
-    public var isWorktree: Bool { directory != project.path }
+    public var isWorktree: Bool { directory != project.folder }
 
     /// `newWorktree` asks for a new Worktree from this row's Worktree, at its HEAD or at the ref `base`; a plain
     /// directory has none to start from.
     public func workingCopy(newWorktree: Bool, base: String? = nil) -> TopicWorkingCopyChoice {
         guard let worktree else { return .project }
-        return newWorktree ? .newWorktree(from: worktree.path, base: base) : .worktree(path: worktree.path)
+        return newWorktree ? .newWorktree(from: worktree.folder.path, base: base) : .worktree(path: worktree.folder.path)
     }
 
     public static func choices(of project: Project) -> [ProjectChoice] {
@@ -32,14 +32,10 @@ public struct ProjectChoice: Identifiable, Equatable, Sendable {
         return worktrees.map { ProjectChoice(project: project, worktree: $0) }
     }
 
-    /// The row whose directory holds `directory`, longest match first, so a Worktree inside a bare
+    /// The row whose directory holds `folder`, nearest first, so a Worktree inside a bare
     /// Project folder wins over the folder.
-    public static func containing(_ directory: String, in projects: [Project]) -> ProjectChoice? {
-        let path = (directory as NSString).standardizingPath
-        return projects.flatMap(choices).filter {
-            let root = ($0.directory as NSString).standardizingPath
-            return path == root || path.hasPrefix(root + "/")
-        }.max { $0.directory.count < $1.directory.count }
+    public static func containing(_ folder: Folder, in projects: [Project]) -> ProjectChoice? {
+        projects.flatMap(choices).filter { $0.directory.contains(folder) }.max { $0.directory.real.count < $1.directory.real.count }
     }
 }
 
@@ -61,27 +57,27 @@ public struct ProjectRow: Identifiable, Equatable, Sendable {
 
 /// Which folders the open Topics' live Sessions use.
 public struct WorktreeOccupancy {
-    /// Standardized directory to the other open Topics whose Sessions use it.
-    public let alsoIn: [String: [TopicSummary]]
-    /// The Project paths the Topic `addingTo` already has a Session in; it cannot add them again.
-    public let occupied: Set<String>
+    /// A directory to the other open Topics whose Sessions use it.
+    public let alsoIn: [Folder: [TopicSummary]]
+    /// The Project folders the Topic `addingTo` already has a Session in; it cannot add them again.
+    public let occupied: Set<Folder>
 
     /// `titles` maps an open Topic's id to the label the host shows for it, such as the Sidebar title.
     /// A Topic without one gets its `topic list` label.
     public init(windows: [TmuxWindow], records: [TopicRecord], projects: [Project], titles: [String: String], addingTo topic: TopicRecord? = nil) {
         let open = Dictionary(records.filter { $0.settledAt == nil }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var alsoIn: [String: Set<TopicSummary>] = [:]
-        var occupied: Set<String> = []
+        var alsoIn: [Folder: Set<TopicSummary>] = [:]
+        var occupied: Set<Folder> = []
         for window in windows {
             guard let id = window.topicID, let record = open[id] else { continue }
             let location = TopicLocation(of: window, record: record, projects: projects)
             if id == topic?.id {
-                occupied.insert(location.project.path)
+                occupied.insert(location.project.folder)
             } else {
                 // A Session with no Worktree lives in the Project folder, which is the main checkout of a plain repository.
-                let path = location.worktreePath ?? location.project.path
+                let folder = location.worktree ?? location.project.folder
                 let summary = titles[id].map { TopicSummary(id: id, label: $0) } ?? TopicSummary(record: record)
-                alsoIn[(path as NSString).standardizingPath, default: []].insert(summary)
+                alsoIn[folder, default: []].insert(summary)
             }
         }
         self.alsoIn = alsoIn.mapValues { $0.sorted { ($0.label, $0.id) < ($1.label, $1.id) } }
@@ -89,7 +85,7 @@ public struct WorktreeOccupancy {
     }
 
     public func alsoIn(_ choice: ProjectChoice) -> [TopicSummary] {
-        alsoIn[(choice.directory as NSString).standardizingPath] ?? []
+        alsoIn[choice.directory] ?? []
     }
 }
 
@@ -98,7 +94,7 @@ public enum ProjectRows {
     public static func build(projects: [Project], windows: [TmuxWindow], records: [TopicRecord], titles: [String: String],
                              addingTo topic: TopicRecord? = nil) -> [ProjectRow] {
         let occupancy = WorktreeOccupancy(windows: windows, records: records, projects: projects, titles: titles, addingTo: topic)
-        return projects.filter { !occupancy.occupied.contains($0.path) }.flatMap(ProjectChoice.choices).map { choice in
+        return projects.filter { !occupancy.occupied.contains($0.folder) }.flatMap(ProjectChoice.choices).map { choice in
             ProjectRow(choice: choice, alsoIn: occupancy.alsoIn(choice))
         }
     }

@@ -2,11 +2,19 @@ import Foundation
 
 /// One checkout of a Project's repository, as `git worktree list` reports it.
 public struct Worktree: Hashable, Sendable {
-    public let path: String
+    public let folder: Folder
     /// Nil when HEAD is detached.
     public let branch: String?
 
-    public var folder: String { (path as NSString).lastPathComponent }
+    public init(folder: Folder, branch: String?) {
+        self.folder = folder
+        self.branch = branch
+    }
+
+    /// A Worktree in a folder on this Mac.
+    public init(path: String, branch: String?) {
+        self.init(folder: .local(path), branch: branch)
+    }
 }
 
 /// What git says a Project directory is. Read with `detect`, never from folder names.
@@ -28,15 +36,8 @@ public enum ProjectLayout: Equatable, Sendable {
         ProjectDiscovery.discover([ProjectRoot(path: path)], aliases: [:]).first?.layout ?? .directory
     }
 
-    /// The layout the discovery script reports. git lists real paths; a Worktree under the Project's
-    /// real folder is given under `path`, so it matches what the Config wrote, symlinks included.
-    init(kind: String, worktreeList: String, path: String, realPath: String) {
-        let root = Self.resolved(realPath)
-        let worktrees = Self.parse(worktreeList: worktreeList).map { worktree in
-            let real = Self.resolved(worktree.path)
-            guard real == root || real.hasPrefix(root + "/") else { return worktree }
-            return Worktree(path: Self.standardized(path) + real.dropFirst(root.count), branch: worktree.branch)
-        }
+    /// The layout the discovery script reports for a folder of `kind`.
+    init(kind: String, worktrees: [Worktree]) {
         switch kind {
         case "bare": self = .bareRepository(worktrees)
         case "plain": self = .plainRepository(worktrees)
@@ -45,20 +46,14 @@ public enum ProjectLayout: Equatable, Sendable {
     }
 
     /// The checkouts in `git worktree list --porcelain`, without the bare entry and
-    /// without prunable entries whose folder is gone.
-    public static func parse(worktreeList: String) -> [Worktree] {
+    /// without prunable entries whose folder is gone. git gives real paths, so `resolver` gives each its spelling.
+    public static func parse(worktreeList: String, resolver: FolderResolver) -> [Worktree] {
         worktreeList.components(separatedBy: "\n\n").compactMap { block -> Worktree? in
             let lines = block.components(separatedBy: "\n")
             guard let path = lines.first(where: { $0.hasPrefix("worktree ") })?.dropFirst(9), !path.isEmpty,
                   !lines.contains("bare"), !lines.contains(where: { $0.hasPrefix("prunable") }) else { return nil }
             let branch = lines.first { $0.hasPrefix("branch refs/heads/") }.map { String($0.dropFirst(18)) }
-            return Worktree(path: standardized(String(path)), branch: branch)
+            return Worktree(folder: resolver.folder(String(path)), branch: branch)
         }
     }
-
-    /// git reports real paths (`/private/tmp`), the Config reports what the user wrote.
-    private static func standardized(_ path: String) -> String { (path as NSString).standardizingPath }
-
-    /// git resolves symlinks, so a Config path through a symlinked folder matches git's only once resolved too.
-    private static func resolved(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
 }

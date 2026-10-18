@@ -373,8 +373,8 @@ struct TopicsModel {
                 let windows = members.filter { $0.sessionID == sessionID }
                 let identity = TopicSessionID(topic: id, session: sessionID)
                 let project = TopicLocation(of: windows[0], record: record, projects: config.projects)
-                let label = Self.sessionLabel(project.project, worktreePath: project.worktreePath,
-                                              branch: project.worktreePath.flatMap { branches[$0] })
+                let label = Self.sessionLabel(project.project, worktree: project.worktree,
+                                              branch: project.worktree.flatMap { branches[$0] })
                 return Session(id: identity, projectName: label.projectName, isHome: project.isHome, branch: label.branch,
                                contents: .live(children(windows)))
             }
@@ -508,17 +508,18 @@ struct TopicsModel {
             if case .at(let date) = deadline { return date.formatted(date: .abbreviated, time: .omitted) }
             return nil
         }
+        let home = record.homeProject.map(Folder.local)
         let sessions = record.sessions.enumerated().compactMap { index, session -> Session? in
             guard let path = session["project_path"]?.string, !path.isEmpty else { return nil }
+            let folder = Folder.local(path)
             let identity = TopicSessionID(topic: id, session: path)
             let windows = (session["windows"]?.array ?? []).enumerated().map { position, window in
                 RememberedWindow(id: "\(record.id)-\(index)-\(position)", name: window["name"]?.string ?? "shell",
                                  directory: window["directory"]?.string ?? path)
             }
-            let label = sessionLabel(Project.named(at: path, in: projects),
-                                     worktreePath: session["worktree_path"]?.string, branch: session["branch"]?.string)
-            return Session(id: identity, projectName: label.projectName,
-                           isHome: (path as NSString).standardizingPath == (record.homeProject as NSString?)?.standardizingPath,
+            let label = sessionLabel(Project.named(at: folder, in: projects),
+                                     worktree: session["worktree_path"]?.string.map(Folder.local), branch: session["branch"]?.string)
+            return Session(id: identity, projectName: label.projectName, isHome: folder == home,
                            branch: label.branch, contents: .remembered(windows))
         }
         return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
@@ -527,10 +528,10 @@ struct TopicsModel {
 
     /// A Session in a Worktree is named as the Project names that Worktree. Its branch badge shows only
     /// when the branch says something the folder does not.
-    private static func sessionLabel(_ project: Project, worktreePath: String?, branch: String?) -> (projectName: String, branch: String?) {
-        guard let worktreePath else { return (project.displayName, nil) }
-        let folder = (worktreePath as NSString).lastPathComponent
-        return (project.displayName(ofWorktreeAt: worktreePath), branch == folder ? nil : branch)
+    private static func sessionLabel(_ project: Project, worktree: Folder?, branch: String?) -> (projectName: String, branch: String?) {
+        guard let worktree else { return (project.displayName, nil) }
+        let folder = (worktree.path as NSString).lastPathComponent
+        return (project.displayName(ofWorktreeAt: worktree), branch == folder ? nil : branch)
     }
 
     /// A Window that left its Session's Worktree for the main working copy of the Project.
@@ -538,10 +539,8 @@ struct TopicsModel {
     /// Worktree sits inside the Project folder, a Window in its own Worktree is not flagged.
     static func usesMainWorkingCopy(_ window: TmuxWindow, record: TopicRecord?, projects: [Project]) -> Bool {
         let location = TopicLocation(of: window, record: record, projects: projects)
-        guard let worktree = location.worktreePath else { return false }
-        let path = (window.path as NSString).standardizingPath
-        let main = (location.project.path as NSString).standardizingPath
-        let tree = (worktree as NSString).standardizingPath
-        return (path == main || path.hasPrefix(main + "/")) && !(path == tree || path.hasPrefix(tree + "/"))
+        guard let worktree = location.worktree else { return false }
+        let folder = Folder.local(window.path)
+        return location.project.folder.contains(folder) && !worktree.contains(folder)
     }
 }

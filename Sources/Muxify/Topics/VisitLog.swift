@@ -5,7 +5,7 @@ import MuxifyCore
 enum VisitKey: Hashable {
     case topic(TopicGroupID)
     case session(name: String)
-    /// A standardized ProjectChoice directory.
+    /// A ProjectChoice directory's real path.
     case directory(String)
 
     var stored: String {
@@ -34,6 +34,8 @@ enum VisitKey: Hashable {
 struct VisitLog: Equatable {
     static let defaultsKey = "visits"
     static let legacyProjectKey = "projectLastOpened"
+    /// Set once the stored directory keys are real paths. Before, they were spelled as the Config wrote them.
+    static let realPathsKey = "visitPathsAreReal"
     /// Only the newest entries are saved, so the key cannot grow without bound.
     static let capacity = 2000
 
@@ -43,20 +45,26 @@ struct VisitLog: Equatable {
 
     init() {}
 
-    /// Reads the stored visits. The first launch after the upgrade imports the old per-Project
-    /// `projectLastOpened` times as directory visits, saves, and removes that key.
+    /// Reads the stored visits. The first launch after an upgrade resolves the directory keys to real paths on this
+    /// Mac, where two spellings of one folder keep the later visit, imports the old per-Project `projectLastOpened`
+    /// times as directory visits, saves, and removes that key.
     init(defaults: UserDefaults) {
+        let resolves = !defaults.bool(forKey: Self.realPathsKey)
         for (key, value) in defaults.dictionary(forKey: Self.defaultsKey) ?? [:] {
             guard let key = VisitKey(stored: key), let seconds = value as? Double else { continue }
-            times[key] = Date(timeIntervalSince1970: seconds)
+            let date = Date(timeIntervalSince1970: seconds)
+            if resolves, case .directory(let path) = key { keepLater(.directory(Folder.local(path).real), date) } else { times[key] = date }
         }
-        guard let legacy = defaults.dictionary(forKey: Self.legacyProjectKey) as? [String: Date] else { return }
-        for (path, date) in legacy {
-            let key = VisitKey.directory((path as NSString).standardizingPath)
-            if times[key].map({ $0 < date }) ?? true { times[key] = date }
-        }
+        let legacy = defaults.dictionary(forKey: Self.legacyProjectKey) as? [String: Date]
+        for (path, date) in legacy ?? [:] { keepLater(.directory(Folder.local(path).real), date) }
+        guard resolves || legacy != nil else { return }
         defaults.removeObject(forKey: Self.legacyProjectKey)
+        defaults.set(true, forKey: Self.realPathsKey)
         save(to: defaults)
+    }
+
+    private mutating func keepLater(_ key: VisitKey, _ date: Date) {
+        if times[key].map({ $0 < date }) ?? true { times[key] = date }
     }
 
     func save(to defaults: UserDefaults) {
@@ -69,10 +77,11 @@ struct VisitLog: Equatable {
 
     /// One visit: the Window's group, its Session, and the Project or Worktree that holds the Session's
     /// start directory. Returns false when the same place was recorded last, so the caller saves only on a change.
-    mutating func record(_ window: TmuxWindow, group: TopicGroupID, projects: [Project], at now: Date) -> Bool {
+    /// `folders` resolves the Session's path on the machine that runs it.
+    mutating func record(_ window: TmuxWindow, group: TopicGroupID, projects: [Project], folders: FolderResolver, at now: Date) -> Bool {
         var keys: Set<VisitKey> = [.topic(group), .session(name: window.sessionName)]
-        if let choice = ProjectChoice.containing(window.sessionPath, in: projects) {
-            keys.insert(.directory((choice.directory as NSString).standardizingPath))
+        if let choice = ProjectChoice.containing(folders.folder(window.sessionPath), in: projects) {
+            keys.insert(.directory(choice.directory.real))
         }
         guard keys != lastRecorded else { return false }
         lastRecorded = keys

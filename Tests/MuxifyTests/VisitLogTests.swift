@@ -22,16 +22,16 @@ final class VisitLogTests: XCTestCase {
         var log = VisitLog()
         let first = Date(timeIntervalSince1970: 100)
         XCTAssertTrue(log.record(window("@1", session: "game/fix", directory: "/work/game/main/src", topic: "fix"),
-                                 group: .topic("fix"), projects: projects, at: first))
+                                 group: .topic("fix"), projects: projects, folders: .local, at: first))
         XCTAssertEqual(log.last(.topic(.topic("fix"))), first)
         XCTAssertEqual(log.last(.session(name: "game/fix")), first)
         XCTAssertEqual(log.last(.directory("/work/game/main")), first, "the Worktree row, not the Project folder")
         XCTAssertNil(log.last(.directory("/work/game")))
         XCTAssertFalse(log.record(window("@2", session: "game/fix", directory: "/work/game/main/src", topic: "fix"),
-                                  group: .topic("fix"), projects: projects, at: Date(timeIntervalSince1970: 200)),
+                                  group: .topic("fix"), projects: projects, folders: .local, at: Date(timeIntervalSince1970: 200)),
                        "another Window of the same Session in the same Topic is the same look")
         XCTAssertEqual(log.last(.session(name: "game/fix")), first)
-        XCTAssertTrue(log.record(window("@3", session: "scratch", directory: "/elsewhere"), group: .noTopic, projects: projects,
+        XCTAssertTrue(log.record(window("@3", session: "scratch", directory: "/elsewhere"), group: .noTopic, projects: projects, folders: .local,
                                  at: Date(timeIntervalSince1970: 300)))
         XCTAssertEqual(log.last(.topic(.noTopic)), Date(timeIntervalSince1970: 300))
         XCTAssertEqual(log.times.count, 5, "a Session outside every Project records no directory")
@@ -40,7 +40,7 @@ final class VisitLogTests: XCTestCase {
     func testVisitsRoundTripThroughUserDefaultsAndUnknownKeysAreSkipped() throws {
         let defaults = try defaults()
         var log = VisitLog()
-        _ = log.record(window("@1", session: "app", directory: "/work/app"), group: .noTopic, projects: projects, at: Date(timeIntervalSince1970: 7))
+        _ = log.record(window("@1", session: "app", directory: "/work/app"), group: .noTopic, projects: projects, folders: .local, at: Date(timeIntervalSince1970: 7))
         log.save(to: defaults)
         var stored = try XCTUnwrap(defaults.dictionary(forKey: VisitLog.defaultsKey))
         XCTAssertEqual(stored.keys.sorted(), ["path:/work/app", "session:app", "topic:-"])
@@ -64,11 +64,29 @@ final class VisitLogTests: XCTestCase {
         XCTAssertEqual(VisitLog(defaults: defaults), imported, "the import is saved, so a restart keeps it")
     }
 
+    func testStoredDirectoryKeysBecomeRealPathsOnceAndTwoSpellingsKeepTheLaterVisit() throws {
+        let defaults = try defaults()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("VisitLogTests-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("work/app"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("dev").path, withDestinationPath: "work")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let real = String(cString: realpath(root.appendingPathComponent("work/app").path, nil))
+        defaults.set(["path:" + root.appendingPathComponent("dev/app").path: 70.0, "path:" + real: 40.0, "session:app": 5.0],
+                     forKey: VisitLog.defaultsKey)
+        let resolved = VisitLog(defaults: defaults)
+        XCTAssertEqual(resolved.times, [.directory(real): Date(timeIntervalSince1970: 70), .session(name: "app"): Date(timeIntervalSince1970: 5)])
+        XCTAssertEqual(try XCTUnwrap(defaults.dictionary(forKey: VisitLog.defaultsKey)).keys.sorted(), ["path:" + real, "session:app"],
+                       "the real paths are saved")
+        defaults.set(["path:" + root.appendingPathComponent("dev/app").path: 90.0], forKey: VisitLog.defaultsKey)
+        XCTAssertEqual(VisitLog(defaults: defaults).times, [.directory(root.appendingPathComponent("dev/app").path): Date(timeIntervalSince1970: 90)],
+                       "a key saved after the change is not resolved again")
+    }
+
     func testOnlyTheNewestTwoThousandVisitsAreSaved() throws {
         let defaults = try defaults()
         var log = VisitLog()
         for index in 0..<2100 {
-            _ = log.record(window("@\(index)", session: "s\(index)", directory: "/x"), group: .noTopic, projects: [],
+            _ = log.record(window("@\(index)", session: "s\(index)", directory: "/x"), group: .noTopic, projects: [], folders: .local,
                            at: Date(timeIntervalSince1970: TimeInterval(index)))
         }
         log.save(to: defaults)

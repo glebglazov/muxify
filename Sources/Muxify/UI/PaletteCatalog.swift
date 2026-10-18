@@ -44,6 +44,8 @@ struct PaletteCatalog {
     var windows: [TmuxWindow]
     var agents: [Agent]
     var projects: [Project] = []
+    /// Resolves the Sessions' paths on the Environment's machine.
+    var folders: FolderResolver = .local
     var selectedWindowID: String?
     var homeDirectory = NSHomeDirectory()
     var topics: TopicsModel? = nil
@@ -168,7 +170,7 @@ struct PaletteCatalog {
     /// outside every Project. In Topics mode an open Topic's Sessions are left out: its Topic row is the way to them.
     private var sessionCandidates: [PickCandidate<PaletteItem>] {
         let reach: SessionResolver.Reach = inTopicsMode ? .noTopicOnly : .anySession
-        let resolver = SessionResolver(windows: windows, openTopicIDs: openTopicIDs, projects: projects, visits: visits)
+        let resolver = SessionResolver(windows: windows, openTopicIDs: openTopicIDs, projects: projects, folders: folders, visits: visits)
         var joined: Set<String> = []
         let projectRows = projects.flatMap(ProjectChoice.choices).map { choice in
             let sessions = resolver.sessions(in: choice.directory, reach: reach)
@@ -184,12 +186,12 @@ struct PaletteCatalog {
                                   reach: SessionResolver.Reach) -> PickCandidate<PaletteItem> {
         let names = sessions.map { $0[0].sessionName }
         let ids = sessions.map { $0[0].sessionID }
-        let visit = ([visits.last(.directory((choice.directory as NSString).standardizingPath))]
+        let visit = ([visits.last(.directory(choice.directory.real))]
                      + names.map { visits.last(.session(name: $0)) }).compactMap { $0 }.max()
         let isCurrent = sessions.contains { $0.contains { $0.id == selectedWindowID } }
         return PickCandidate(
-            id: "project:\(choice.directory)", symbol: sessions.isEmpty ? "□" : "■", title: choice.displayName,
-            fields: [.typeWord(choice.isWorktree ? "worktree" : "project"), .detail(Paths.tildify(choice.directory, home: homeDirectory))]
+            id: "project:\(choice.directory.path)", symbol: sessions.isEmpty ? "□" : "■", title: choice.displayName,
+            fields: [.typeWord(choice.isWorktree ? "worktree" : "project"), .detail(Paths.tildify(choice.directory.path, home: homeDirectory))]
                 + choice.nameFields + names.filter { $0 != choice.name }.map { .hidden($0) },
             trailing: sessions.isEmpty ? "↩ open" : isCurrent ? "Current" : visit.map { VisitAge.short(since: $0, now: now) } ?? "",
             mark: ids.compactMap { topics?.sessionMarks[$0] }.max().map(RowMark.agent),
@@ -197,8 +199,8 @@ struct PaletteCatalog {
             activity: sessions.flatMap { $0.map(\.sessionActivity) }.max() ?? 0,
             pick: .available(PaletteItem(kind: choice.isWorktree ? .worktree : .project,
                                          ref: .project(OpenDirectory(directory: choice.directory, name: choice.name, reach: reach)),
-                                         path: choice.directory, target: names.first)),
-            paste: Self.shellWord(choice.directory))
+                                         path: choice.directory.path, target: names.first)),
+            paste: Self.shellWord(choice.directory.path))
     }
 
     private func looseSessionCandidates(_ windows: [TmuxWindow]) -> [PickCandidate<PaletteItem>] {

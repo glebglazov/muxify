@@ -32,8 +32,8 @@ final class NewTopicTests: XCTestCase {
                        storedBrowser: StoredBrowser(), openRequests: [], topicID: nil, sessionPath: directory)
         }
         var visits = VisitLog()
-        _ = visits.record(window("/bravo"), group: .noTopic, projects: projects, at: Date(timeIntervalSince1970: 10))
-        _ = visits.record(window("/charlie"), group: .noTopic, projects: projects, at: Date(timeIntervalSince1970: 20))
+        _ = visits.record(window("/bravo"), group: .noTopic, projects: projects, folders: .local, at: Date(timeIntervalSince1970: 10))
+        _ = visits.record(window("/charlie"), group: .noTopic, projects: projects, folders: .local, at: Date(timeIntervalSince1970: 20))
         func order(_ query: String, visits: VisitLog = visits) -> [String] {
             ProjectRows.list(ProjectRows.build(projects: projects, windows: [window("/delta")], records: [], titles: [:]),
                              query: query, visits: visits).rows.map(\.title.text)
@@ -47,8 +47,8 @@ final class NewTopicTests: XCTestCase {
                                            query: "work", visits: VisitLog())
         XCTAssertEqual(byDirectory.rows.compactMap { $0.pick.payload?.project }, [project], "the directory matches too")
         XCTAssertEqual(byDirectory.rows.first?.detail, Highlighted(text: "/work/game", marks: [1, 2, 3, 4]))
-        XCTAssertEqual(Project.containing("/alpha/subdir", in: projects), projects[0])
-        XCTAssertNil(Project.containing("/alphabet", in: projects))
+        XCTAssertEqual(Project.containing(.local("/alpha/subdir"), in: projects), projects[0])
+        XCTAssertNil(Project.containing(.local("/alphabet"), in: projects))
     }
 
     func testNewTopicPlanWritesRecordAndExactCommands() {
