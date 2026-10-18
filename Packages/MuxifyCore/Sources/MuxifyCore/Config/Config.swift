@@ -35,6 +35,12 @@ public struct Config: Equatable {
     public var topics = Topics()
     public var notifications = Notifications()
     public var hints = Hints()
+    public var browser = Browser()
+
+    /// The Browser renders on this Mac, so only the Local Config sets it.
+    public struct Browser: Equatable {
+        public var vimKeys = true
+    }
 
     public struct Hints: Equatable {
         public var holdDelay: TimeInterval? = 0.35
@@ -224,7 +230,7 @@ public struct Config: Equatable {
         #
         # remote_environments:
         #   # A Remote Environment's App Window uses that machine's own Config
-        #   # when it has one, without its ghostty and remote_environments.
+        #   # when it has one, without its ghostty, browser and remote_environments.
         #   - name: Macbook Home
         #     host: macbook-home.example.ts.net
         #     username: your-user
@@ -276,6 +282,11 @@ public struct Config: Equatable {
         #   windows: { always: false, hold: true }
         #   tabs: { always: true, hold: true }
         #   terminal: { hold: true }
+        #
+        # browser:
+        #   # h, j, k, l, d, u, gg and G scroll the page when the page does
+        #   # not use the key itself and no text field has Focus.
+        #   vim_keys: true
         #
         # notifications:
         #   manual_read: true
@@ -423,6 +434,7 @@ private struct ConfigReader {
         "topics": { $0.readTopics($1) },
         "notifications": { $0.readNotifications($1) },
         "hints": { $0.readHints($1) },
+        "browser": { $0.readBrowser($1) },
         "sidebar": { $0.readSidebar($1) },
         "ghostty": { $0.readGhostty($1) },
         "ui": { $0.readUI($1) },
@@ -433,7 +445,7 @@ private struct ConfigReader {
     ]
 
     /// About the app on this Mac, not the machine the Config is on.
-    static let appSections: Set<String> = ["ghostty", "remote_environments"]
+    static let appSections: Set<String> = ["ghostty", "browser", "remote_environments"]
 
     mutating func readSections(_ root: Node) {
         for (name, key, value) in entries(of: root, "the Config") {
@@ -639,6 +651,20 @@ private struct ConfigReader {
             case "failed_enabled": config.notifications.failedEnabled = enabled
             default: config.notifications.blockedEnabled = enabled
             }
+        }
+    }
+
+    mutating func readBrowser(_ node: Node) {
+        for (name, key, value) in entries(of: node, "browser") {
+            guard name == "vim_keys" else {
+                problem(at: key, "unknown key \"browser.\(name)\"")
+                continue
+            }
+            guard value.tag == Tag(.bool), let enabled = value.bool else {
+                problem(at: value, "browser.\(name): expected a boolean")
+                continue
+            }
+            config.browser.vimKeys = enabled
         }
     }
 

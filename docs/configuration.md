@@ -358,8 +358,8 @@ A step that kills a process needs ⌘↩ to confirm. The keys inside a palette a
 A Remote Environment's App Window uses the Config on that machine
 (`~/.config/muxify/config.yaml`, or under its `$XDG_CONFIG_HOME`) when there is
 one, as if Muxify ran there: its Projects, palettes, keybindings and `ui`.
-Its `ghostty` and `remote_environments` sections are ignored, because they
-describe this Mac's app. Without a remote Config, the local Config applies, and
+Its `ghostty`, `browser` and `remote_environments` sections are ignored, because
+they describe this Mac's app. Without a remote Config, the local Config applies, and
 its Projects are looked for on the remote. Topics stay on this Mac. The menu shows the focused App
 Window's keybindings.
 
@@ -380,6 +380,16 @@ Each Window remembers its Browser Tabs, its toggles and its Maximize state.
 Browser-opening requests (`muxify browser open …`, terminal Cmd-click links)
 reveal its Browser. The [Simulator](simulator.md) runs in a browser, not a native
 panel.
+
+[Vim Keys](keybindings.md#vim-keys) scroll a Browser page with h, j, k, l, d,
+u, gg and G. They are on by default. To turn them off:
+
+```yaml
+browser:
+  vim_keys: false
+```
+
+The change applies to the pages that are open and to the pages that load later.
 
 Configurable [Keybindings](keybindings.md) work throughout the app, including in
 Browser pages. The guide lists all actions, defaults, built-in shortcuts and a

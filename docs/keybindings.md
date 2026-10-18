@@ -323,12 +323,48 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | ⌘R | Reload the page, or stop it while loading |
 | ⌘⇧C | Copy the active Browser Tab's current URL and show a “Copied URL” confirmation |
 | ⌘⌥I | Open or focus Developer Tools for the active Browser Tab |
+| ⌘F | Open Find in Page above the page, and select the text in its field |
+| ⌘G | Go to the next match of Find in Page. With no query, open Find in Page |
+| ⌘⇧G | Go to the previous match of Find in Page |
 | Enter (address bar) | Navigate to the entered URL or search |
 | Escape (address bar) | Restore the current URL and focus the page |
+| Enter / ⇧Enter (Find in Page) | Go to the next / previous match |
+| Escape (Find in Page) | Close Find in Page, remove the highlight and focus the page |
 
 The ⌃Tab shortcuts also require the Browser to be open. ⌘W never closes the
 Muxify app window; when the terminal has Focus, it does nothing unless you
 assign it to a configurable action.
+
+Find in Page highlights every match in the page and shows the number of the
+current match, for example “3 of 7”. Each Tab keeps its own query while the Tab
+is open. When you close Find in Page, ⌘G and ⌘⇧G still go to the next and the
+previous match of the last query. Find in Page also searches the text in
+iframes. A new query starts in the frame that you last clicked, scrolled or
+typed in. Before that, it starts in the frame that shows the most of the page. In the Terminal, Ghostty keeps ⌘F and ⌘G.
+
+### Vim Keys
+
+When the Browser has Focus, these keys scroll the page:
+
+| Key | Acts as | Scroll |
+| --- | --- | --- |
+| j / k | ↓ / ↑ | Down / up one step |
+| h / l | ← / → | Left / right one step |
+| d / u | Page Down / Page Up | Down / up almost one screen |
+| gg | Home | To the top |
+| G | End | To the bottom |
+
+A Vim Key presses the key in the "Acts as" column. The page scrolls the same
+part, by the same step and with the same animation as for that key. Hold j to
+scroll until you release it.
+
+- The page wins. If the page uses the key itself, Vim Keys do nothing.
+- Text fields type. In a text field or other editable text, the key types its
+  letter.
+- Modifiers pass through. A key with ⌘, ⌃ or ⌥ is not a Vim Key.
+
+To turn Vim Keys off, set `browser.vim_keys` to `false` in the
+[Config](configuration.md#browser-and-keybindings).
 
 Developer Tools are also available from **Browser → Show Developer Tools**,
 the Browser's **⋯** menu, or **Inspect Element** in a page's right-click menu.

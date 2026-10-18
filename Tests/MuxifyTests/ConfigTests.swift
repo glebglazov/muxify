@@ -34,6 +34,20 @@ final class ConfigTests: XCTestCase {
         XCTAssertNil(try load("keybindings:\n  mark_read: []").keybinds.firstTrigger(for: .markRead))
     }
 
+    func testVimKeysAreOnByDefaultAndOnlyTheLocalConfigTurnsThemOff() throws {
+        XCTAssertTrue(try load("").browser.vimKeys)
+        XCTAssertTrue(Config.template.contains("#   vim_keys: true"))
+        let off = try load("browser:\n  vim_keys: false")
+        XCTAssertFalse(off.browser.vimKeys)
+        XCTAssertTrue(off.problems.isEmpty)
+        let invalid = try load("browser:\n  vim_keys: maybe\n  find: true")
+        XCTAssertTrue(invalid.browser.vimKeys)
+        XCTAssertEqual(invalid.problems.map(\.message), ["browser.vim_keys: expected a boolean", "unknown key \"browser.find\""])
+        let remote = try Config.load(path: root, isRemote: true) { _ in "browser:\n  vim_keys: false" }.get()
+        XCTAssertTrue(remote.browser.vimKeys)
+        XCTAssertTrue(remote.problems.isEmpty)
+    }
+
     func testUnreadAndAllReadBindingsCanBeRemappedOrDisabled() throws {
         let defaults = try load("")
         XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+u")), .markUnread)

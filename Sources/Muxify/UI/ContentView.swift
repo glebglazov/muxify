@@ -54,6 +54,8 @@ struct ContentView: View {
                                 .background(Color(nsColor: .windowBackgroundColor))
                                 .accessibilityElement(children: .contain)
                                 .accessibilityIdentifier("browser-panel")
+                                // The verify checks open Find in Page here, because they must not type ⌘F.
+                                .accessibilityAction(named: "Find in Page") { browser.activeTab?.showFind() }
                         }
                     }
                 }

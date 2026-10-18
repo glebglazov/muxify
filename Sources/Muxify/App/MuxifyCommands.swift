@@ -15,6 +15,8 @@ import MuxifyCore
         return store.isRemote && !store.isConnected
     }
 
+    private var activeTabHasPage: Bool { store?.currentBrowser?.activeTab?.hasPage == true }
+
     /// Topics live on this Mac, so only a Local App Window offers them.
     private var topicsAvailable: Bool {
         guard let store else { return false }
@@ -103,6 +105,16 @@ import MuxifyCore
             Button("Open Location…") { store?.browserCommand(opensBrowser: true) { _ in store?.focusAddressBar() } }
                 .keyboardShortcut("l", modifiers: .command)
             Divider()
+            Button("Find…") { store?.browserCommand { $0.activeTab?.showFind() } }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(!activeTabHasPage)
+            Button("Find Next") { store?.browserCommand { $0.activeTab?.findNext() } }
+                .keyboardShortcut("g", modifiers: .command)
+                .disabled(!activeTabHasPage)
+            Button("Find Previous") { store?.browserCommand { $0.activeTab?.findPrevious() } }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(!activeTabHasPage)
+            Divider()
             Button("Close Tab") { store?.browserCommand { $0.closeActiveTab() } }
                 .keyboardShortcut("w", modifiers: .command)
             Button("Show Next Tab") { store?.browserCommand { $0.selectTab(offset: 1) } }
@@ -118,7 +130,7 @@ import MuxifyCore
                 .keyboardShortcut("r", modifiers: .command)
             Button("Copy URL") { store?.browserCommand { $0.activeTab?.copyURL() } }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
-                .disabled(store?.currentBrowser?.activeTab?.hasPage != true)
+                .disabled(!activeTabHasPage)
             Button("Show Developer Tools") { store?.browserCommand { $0.activeTab?.showDeveloperTools() } }
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(store?.panelLayout.shows(.browser) != true || store?.currentBrowser?.activeTab?.hasPage != true)

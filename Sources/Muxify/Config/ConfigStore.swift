@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import MuxifyCore
 
 /// The live Config. It loads the Ghostty config the Config names into
-/// libghostty, and when the Config or any Ghostty config file changes it
+/// libghostty, applies the Browser section to every Tab, and when the Config or any Ghostty config file changes it
 /// reads the Config again and reloads the Ghostty config.
 @Observable
 final class ConfigStore {
@@ -70,6 +70,7 @@ final class ConfigStore {
     private func load() {
         loaded.update(with: Config.load(path: path, read: Self.readFile))
         for problem in loaded.problems { NSLog("muxify: config: \(problem)") }
+        BrowserPageScripts.setVimKeys(config.browser.vimKeys)
     }
 
     /// Modification times of every file the Config or the Ghostty config can
