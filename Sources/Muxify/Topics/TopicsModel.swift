@@ -257,11 +257,14 @@ struct TopicsModel {
     /// The open Topics that are not Snoozed and the Locked Sessions, in one order; `groups` lists the others.
     /// No Topic has no row. While Zen is on, the Locked Sessions have no row either.
     let rows: [Row]
-    func nextTopic(after id: String) -> TopicGroupID {
+    /// The Next Topic after `id` leaves the list together with `others`: the nearest row below that stays, else above.
+    func nextTopic(after id: String, skipping others: Set<String> = []) -> TopicGroupID {
         guard let index = rows.firstIndex(where: { $0.id == .topic(id) }) else { return .noTopic }
-        if index + 1 < rows.count { return rows[index + 1].id }
-        if index > 0 { return rows[index - 1].id }
-        return .noTopic
+        func stays(_ row: Row) -> Bool {
+            if case .topic(let other) = row.id { return other != id && !others.contains(other) }
+            return true
+        }
+        return rows[(index + 1)...].first(where: stays)?.id ?? rows[..<index].last(where: stays)?.id ?? .noTopic
     }
 
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
@@ -273,6 +276,8 @@ struct TopicsModel {
     let openedNoTopicSession: Session?
     /// Snoozed, then Settled, after the Topics rows in Topics mode. Empty in Sessions mode.
     let groups: [Group]
+    /// The Snoozed Topics in list order, in both Sidebar modes.
+    let snoozedRows: [Row]
     /// The title each row shows, by Topic id: open, Snoozed and the Settled Topics on the shown pages.
     let titles: [String: String]
     let snoozedTopicIDs: Set<String>
@@ -428,6 +433,7 @@ struct TopicsModel {
         let snoozedRows = rows.filter { if case .topic(let id) = $0.id { return snoozedIDs.contains(id) }; return false }
         let openRows = rows.filter { if case .topic(let id) = $0.id { return !snoozedIDs.contains(id) }; return true }
         self.rows = openRows
+        self.snoozedRows = snoozedRows
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
         if let id = emptyTopicID, let row = rows.first(where: { $0.id == .topic(id) }) {

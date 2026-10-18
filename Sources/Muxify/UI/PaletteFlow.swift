@@ -12,6 +12,13 @@ struct MoveDraft {
     var resolution: Resolution = .ready
 }
 
+/// A Snooze of one or more Topics. In the choose step `topicIDs` are the marked Topics, in Topics list order.
+struct SnoozeDraft {
+    enum Step { case choose, until }
+    var topicIDs: [String]
+    var step: Step
+}
+
 enum PaletteText {
     case newTopic
     case renameTopic(TopicRecord)
@@ -55,13 +62,40 @@ final class PaletteConfirmation {
 enum PaletteFlow {
     case move(MoveDraft)
     case addProject(TopicRecord)
-    case snooze(TopicRecord)
+    case snooze(SnoozeDraft)
     case zen(String)
     case text(PaletteText)
     case confirm(PaletteConfirmation)
 
+    /// The marked rows while the step chooses rows; nil in every other step.
+    var markedIDs: [String]? {
+        if case .snooze(let draft) = self, draft.step == .choose { return draft.topicIDs }
+        return nil
+    }
+
+    func marking(_ ids: [String]) -> PaletteFlow {
+        guard case .snooze(var draft) = self else { return self }
+        draft.topicIDs = ids
+        return .snooze(draft)
+    }
+
+    func continuing(with ids: [String]) -> PaletteFlow {
+        guard case .snooze(var draft) = self else { return self }
+        draft.topicIDs = ids
+        draft.step = .until
+        return .snooze(draft)
+    }
+
+    /// The step that ⌫ in the empty field goes back to inside the flow; nil goes back to what opened the flow.
+    var earlierStep: PaletteFlow? {
+        guard case .snooze(var draft) = self, draft.step == .until else { return nil }
+        draft.step = .choose
+        return .snooze(draft)
+    }
+
     @MainActor var placeholder: String {
         switch self {
+        case .snooze(let draft) where draft.step == .choose: "Filter Topics"
         case .move: "Topic or new title"
         case .addProject: "Search Projects"
         case .snooze, .zen: "Choose a preset or type 2h, 1300, fri 10:00"
@@ -81,6 +115,8 @@ enum PaletteChoice: Equatable {
     case move(MoveDestination)
     case project(ProjectChoice)
     case deadline(SnoozeDeadline)
+    /// A row of a "choose rows" step: Space, ⇥ or a click marks it.
+    case mark(String)
     case session(String)
     case worktree(String)
     case accept
@@ -92,7 +128,10 @@ extension CommandPalette {
         switch flow {
         case .move(let draft): return "\(draft.scope.rawValue) \(draft.window.displayTitle) › Move to"
         case .addProject(let topic): return "\(topicTitle(topic)) › Add a Project"
-        case .snooze(let topic): return "\(topicTitle(topic)) › Snooze › until"
+        case .snooze(let draft) where draft.step == .choose: return "Snooze Topics › choose"
+        case .snooze(let draft):
+            let ids = draft.topicIDs
+            return "\(ids.count == 1 ? topicTitle(id: ids[0]) : "\(ids.count) Topics") › Snooze › until"
         case .zen: return "Zen › until"
         case .text(.newTopic): return "New Topic"
         case .text(.renameTopic(let topic)): return "\(topicTitle(topic)) › Rename"
@@ -114,20 +153,18 @@ extension CommandPalette {
         case .move(let draft) where draft.resolution == .loading: return "Reading the active Pane…"
         case .text(.newTopic): return store.newTopicFailure ?? "Makes an empty Topic. Its first Project comes next."
         case .text(.renameTopic): return "Leave it blank for an Untitled Topic."
-        case .snooze(let topic): return nextTopicNote(topic.id)
+        case .snooze(let draft) where draft.step == .choose:
+            return (["\(draft.topicIDs.count) marked"] + [nextTopicNote(draft.topicIDs)].compactMap { $0 }).joined(separator: " · ")
+        case .snooze(let draft): return snoozeNote(draft)
         case .zen(let kept):
-            let deadline: SnoozeDeadline
-            if case .choice(.deadline(let value)) = selected(in: results)?.pick.payload?.ref { deadline = value }
-            else { deadline = .never }
-            let names = ZenRecord.start(keeping: kept, until: deadline, records: store.topicWatcher.records).saves
-                .map { store.topics.titles[$0.id] ?? $0.title ?? "Untitled Topic" }
-            return "Snoozes: " + names.joined(separator: ", ")
+            let saves = ZenRecord.start(keeping: kept, until: selectedDeadline ?? .never, records: store.topicWatcher.records).saves
+            return "Snoozes: " + saves.map { topicTitle(id: $0.id) }.joined(separator: ", ")
         case .confirm(let draft):
             if case .loading = draft.choices { return "Checking Sessions and Worktrees…" }
             if case .failed(let message) = draft.choices { return message }
             if draft.impactChanged { return "The Sessions, Windows or Panes changed. Review them and confirm again." }
             switch draft.target {
-            case .settle(let topic): return nextTopicNote(topic.id)
+            case .settle(let topic): return nextTopicNote([topic.id])
             case .forget: return "This removes the Topic for good. It cannot be Reopened."
             case .killWindow: return "This stops every process in the Window."
             case .killSession: return "This stops every process in the Session."
@@ -144,6 +181,7 @@ extension CommandPalette {
     var canAccept: Bool {
         guard store?.changingTopic != true else { return false }
         if case .move(let draft) = flow, draft.resolution == .loading { return false }
+        if let marked = flow?.markedIDs { return !marked.isEmpty || selected(in: results)?.pick.payload != nil }
         if case .confirm(let draft) = flow {
             if case .ready = draft.choices { return true }
             return false
@@ -173,11 +211,34 @@ extension CommandPalette {
         store?.topics.titles[topic.id] ?? topic.title ?? topic.slug ?? "Untitled Topic"
     }
 
-    private func nextTopicNote(_ id: String) -> String? {
-        guard let store, store.activeTopicID == id else { return nil }
-        let next = store.nextTopic(after: id)
+    func topicTitle(id: String) -> String {
+        store?.topics.titles[id] ?? store?.topicWatcher.records.first { $0.id == id }.map(topicTitle) ?? "Untitled Topic"
+    }
+
+    private var selectedDeadline: SnoozeDeadline? {
+        if case .choice(.deadline(let deadline)) = selected(in: results)?.pick.payload?.ref { return deadline }
+        return nil
+    }
+
+    private func nextTopicNote(_ ids: [String]) -> String? {
+        guard let store, let active = store.activeTopicID, ids.contains(active) else { return nil }
+        let next = store.nextTopic(after: active, skipping: Set(ids))
         let title = store.topics.rows.first { $0.id == next }?.title ?? "No Topic"
         return "Then opens: " + title
+    }
+
+    /// Names each Snooze that the highlighted time makes shorter, because that time replaces it.
+    private func snoozeNote(_ draft: SnoozeDraft) -> String? {
+        guard let store else { return nil }
+        var parts: [String] = []
+        if draft.topicIDs.count > 1 { parts.append("Snoozes: " + draft.topicIDs.map(topicTitle(id:)).joined(separator: ", ")) }
+        if let deadline = selectedDeadline {
+            let shortened = SnoozeSet(draft.topicIDs, until: deadline, records: store.topicWatcher.records).shortened
+            if !shortened.isEmpty { parts.append("Gets shorter: " + shortened.map(topicTitle(id:)).joined(separator: ", ")) }
+        }
+        parts += [nextTopicNote(draft.topicIDs)].compactMap { $0 }
+        if draft.topicIDs.count == 1 { parts.append("⌫ to mark more Topics") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     func flowResults(_ flow: PaletteFlow) -> PickList<PaletteItem> {
@@ -186,6 +247,8 @@ extension CommandPalette {
         case .move(let draft):
             guard let catalog else { return .empty }
             return catalog.moveList(draft.window, query: query, scope: draft.scope)
+        case .snooze(let draft) where draft.step == .choose:
+            return FuzzyRanker.list(snoozeChoices, query: FuzzyQuery(query))
         case .addProject(let topic):
             let list = store.projectList(query: query, addingTo: topic)
             return PickList(sections: list.sections.map { section in
@@ -357,6 +420,7 @@ extension CommandPalette {
 
     func acceptSelected(commandReturn: Bool = false) {
         guard canAccept else { return }
+        if flow?.markedIDs != nil { continueWithMarks(); return }
         if requiresCommandReturn && !commandReturn { return }
         if acceptsText { accept(.accept) }
         else if case .choice(let choice) = selected(in: results)?.pick.payload?.ref { accept(choice) }
@@ -366,7 +430,7 @@ extension CommandPalette {
     func toggleSelected() {
         guard case .choice(let choice) = selected(in: results)?.pick.payload?.ref else { return }
         switch choice {
-        case .session, .worktree: accept(choice)
+        case .session, .worktree, .mark: accept(choice)
         default: break
         }
     }
@@ -380,7 +444,8 @@ extension CommandPalette {
             store.move(draft, to: destination)
         case (.addProject(let topic), .project(let project)):
             store.addProject(project, toTopic: topic.id, newWorktree: newWorktree)
-        case (.snooze(let topic), .deadline(let deadline)): store.snoozeTopic(topic.id, until: deadline)
+        case (.snooze(let draft), .deadline(let deadline)): store.snoozeTopics(draft.topicIDs, until: deadline)
+        case (_, .mark(let id)): toggleMarks([id])
         case (.zen(let kept), .deadline(let deadline)): store.startZen(keeping: kept, until: deadline)
         case (.text(let text), .accept):
             let value = query
@@ -428,6 +493,7 @@ extension CommandPalette {
         if trigger == KeyTrigger(modifiers: [], key: .special(.enter)) { acceptSelected(); return true }
         if trigger == KeyTrigger(modifiers: .command, key: .special(.enter)) { acceptSelected(commandReturn: true); return true }
         if case .confirm = flow, query.isEmpty, trigger == KeyTrigger(modifiers: [], key: .character(" ")) { toggleSelected(); return true }
+        if flow?.markedIDs != nil, let key = ChooseRowsKey(trigger, queryIsEmpty: query.isEmpty) { chooseRows(key); return true }
         if let action = store?.config.paletteKeybinds.action(for: trigger) {
             switch action {
             case .choosePane: changeMoveScope(.pane)

@@ -85,6 +85,9 @@ class PaletteCurrentCommands(unittest.TestCase):
                             ('Settle Topic', 'Settle'), ('Zen', 'Zen')]:
             self.run_command(title)
             self.s.wait_rows(lambda rs: step in self.breadcrumb(rs), title + ' did not open its step')
+            if title == 'Snooze Topic':
+                self.s.act('action', 'palette-search', 'Back')
+                self.s.wait_rows(lambda rs: 'Snooze Topics › choose' in self.breadcrumb(rs), 'Back did not go to the choose step')
             self.back(title)
         after = json.loads(path.read_text())
         original = json.loads(before)

@@ -249,6 +249,7 @@ final class CommandPalette {
         guard query.isEmpty else { return }
         if showsActions { showsActions = false; return }
         invocation = UUID()
+        if let earlier = flow?.earlierStep { replaceFlow(earlier); return }
         guard let previous = history.popLast() else { close(); return }
         presentation = previous.presentation
         query = previous.query

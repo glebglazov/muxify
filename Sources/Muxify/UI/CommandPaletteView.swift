@@ -136,6 +136,7 @@ private struct SpotlightPalette: View {
                     .accessibilityAction(named: "Accept") { palette.acceptSelected() }
                     .accessibilityAction(named: "Confirm") { palette.acceptSelected(commandReturn: true) }
                     .accessibilityAction(named: "Toggle Choice") { palette.toggleSelected() }
+                    .accessibilityAction(named: "Mark Shown") { palette.chooseRows(.markShown) }
             }
         }
         .padding(.horizontal, 20)
@@ -167,6 +168,10 @@ private struct SpotlightPalette: View {
                     .accessibilityIdentifier("palette-new-worktree")
                     .accessibilityValue(palette.newWorktree ? "on" : "off")
             }
+            if palette.flow?.markedIDs != nil {
+                Button("Mark all shown ⌘A") { palette.chooseRows(.markShown) }
+                    .accessibilityIdentifier("palette-mark-shown")
+            }
             if palette.canSuggestTitle {
                 Button(controlTitle("Suggest title", .suggestTopicTitle)) { palette.suggestTitle() }
                     .accessibilityIdentifier("palette-suggest-title")
@@ -179,9 +184,10 @@ private struct SpotlightPalette: View {
     private var flowFooter: some View {
         HStack(spacing: 12) {
             if case .confirm = palette.flow { Text("Empty field: Space changes a row").foregroundStyle(.secondary) }
+            if palette.flow?.markedIDs != nil { Text("Empty field: Space or ⇥ marks a row").foregroundStyle(.secondary) }
             Spacer()
             Button("Cancel · esc") { palette.close() }.accessibilityIdentifier("palette-cancel")
-            Button(palette.requiresCommandReturn ? "Confirm · ⌘↩" : "Accept · ↩") {
+            Button(palette.requiresCommandReturn ? "Confirm · ⌘↩" : palette.flow?.markedIDs != nil ? "Next · ↩" : "Accept · ↩") {
                 palette.acceptSelected(commandReturn: palette.requiresCommandReturn)
             }
             .accessibilityIdentifier("palette-accept")
@@ -281,7 +287,13 @@ private struct SpotlightPalette: View {
 
     private func row(_ row: PickRow<PaletteItem>, isSelected: Bool, theme: PaletteTheme) -> some View {
         let item = row.pick.payload
+        let marked = palette.isMarked(row)
         return HStack(spacing: 12) {
+            if let marked {
+                Image(systemName: marked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(marked ? Color.accentColor : Color.secondary)
+            }
             if let item { PaletteIcon(source: .item(item), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.title.attributed).font(.system(size: 15)).lineLimit(1)
@@ -310,7 +322,8 @@ private struct SpotlightPalette: View {
         .accessibilityIdentifier("palette-row-" + row.id)
         .accessibilityLabel([row.mark?.rawValue ?? "", row.title.text, row.detail.text, row.trailing].filter { !$0.isEmpty }
                                 .joined(separator: ", "))
-        .accessibilityValue(row.pick.reason ?? (isSelected ? "selected" : ""))
+        .accessibilityValue(row.pick.reason ?? [marked == true ? "marked" : nil, isSelected ? "selected" : nil]
+                                .compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default) { palette.perform(.jumpTo, on: row) }
         .accessibilityActions {

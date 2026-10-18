@@ -74,11 +74,33 @@ final class NotificationsAndSnoozeTests: XCTestCase {
         }
     }
 
+    func testSnoozeOfASetWritesTheChosenTimeOnEveryOpenTopicAndNamesEachShorterSnooze() {
+        let until = SnoozeDeadline.at(now.addingTimeInterval(3600))
+        func topic(_ id: String, snoozed: SnoozeDeadline? = nil, settled: Bool = false) -> TopicRecord {
+            var record = TopicRecord(id: id)
+            record.snoozedUntil = snoozed?.stored
+            if settled { record.settledAt = "2026-10-01T00:00:00Z" }
+            return record
+        }
+        let records = [topic("free"), topic("never", snoozed: .never), topic("later", snoozed: .at(now.addingTimeInterval(7200))),
+                       topic("earlier", snoozed: .at(now.addingTimeInterval(600))), topic("due", snoozed: .at(now.addingTimeInterval(-60))),
+                       topic("settled", settled: true), topic("unmarked")]
+
+        let snooze = SnoozeSet(["later", "free", "never", "earlier", "due", "settled", "missing"], until: until, records: records)
+
+        XCTAssertEqual(snooze.saves.map(\.id), ["later", "free", "never", "earlier", "due"], "every open marked Topic, in set order")
+        XCTAssertTrue(snooze.saves.allSatisfy { $0.snoozedUntil == until.stored }, "a later Snooze is replaced too")
+        XCTAssertEqual(snooze.shortened, ["later", "never"])
+        XCTAssertEqual(SnoozeSet(["never", "later"], until: .never, records: records).shortened, [], "Until I unsnooze is never shorter")
+    }
+
     func testConfigDefaultsReplacementValidationAndKeybind() throws {
         let defaults = try load("")
         XCTAssertEqual(defaults.topics.snoozePresets, SnoozePreset.defaults)
         XCTAssertEqual(defaults.notifications, Config.Notifications())
         XCTAssertEqual(defaults.keybinds.firstTrigger(for: .snoozeTopic), try KeyTrigger("alt+cmd+s"))
+        XCTAssertNil(defaults.keybinds.firstTrigger(for: .snoozeTopics), "shift+alt+cmd+s is Zen, so Snooze Topics has no default")
+        XCTAssertEqual(try load("keybindings:\n  snooze_topics: ctrl+alt+s").keybinds.action(for: try KeyTrigger("ctrl+alt+s")), .snoozeTopics)
         let config = try load("""
         notifications:
           done_enabled: false

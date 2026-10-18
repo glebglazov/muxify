@@ -199,8 +199,8 @@ final class WorkspaceStore {
         if let window = EntryWindow.ofSession(windows.filter { $0.sessionID == sessionID }) { select(window) }
     }
 
-    func nextTopic(after id: String) -> TopicGroupID {
-        topics.nextTopic(after: id)
+    func nextTopic(after id: String, skipping others: Set<String> = []) -> TopicGroupID {
+        topics.nextTopic(after: id, skipping: others)
     }
 
     func move(_ draft: MoveDraft, to destination: MoveDestination) {
@@ -434,19 +434,22 @@ final class WorkspaceStore {
         }
     }
 
-    func presentSnoozeTopic(_ id: String? = nil, keepingHistory: Bool = false) {
+    /// Every Snooze goes through this flow: Snooze Topic starts at the "until" step with a set of one Topic, and
+    /// Snooze Topics starts at the choose step with the Active Topic marked.
+    func presentSnooze(_ ids: [String], from step: SnoozeDraft.Step, keepingHistory: Bool = false) {
         topicWatcher.reload()
-        let selected = id ?? activeTopicID
-        if let topic = topicWatcher.records.first(where: { $0.id == selected && $0.settledAt == nil }) { palette.begin(.snooze(topic), keepingHistory: keepingHistory) }
+        let open = ids.filter { id in topicWatcher.records.contains { $0.id == id && $0.settledAt == nil } }
+        guard step == .choose || !open.isEmpty else { return }
+        palette.begin(.snooze(SnoozeDraft(topicIDs: open, step: step)), keepingHistory: keepingHistory)
     }
 
     @discardableResult
-    func setSnooze(_ id: String, until deadline: SnoozeDeadline?) -> Bool {
+    func clearSnooze(_ id: String) -> Bool {
         guard !changingTopic else { return false }
         do {
             return try topicWatcher.write { transaction in
                 guard transaction.records.contains(where: { $0.id == id && $0.settledAt == nil }) else { return false }
-                try transaction.update(id) { $0.snoozedUntil = deadline?.stored }
+                try transaction.update(id) { $0.snoozedUntil = nil }
                 return true
             }
         } catch {
@@ -455,18 +458,26 @@ final class WorkspaceStore {
         }
     }
 
-    func snoozeTopic(_ id: String, until deadline: SnoozeDeadline) {
-        let next = activeTopicID == id ? nextTopic(after: id) : nil
-        if setSnooze(id, until: deadline) {
+    /// One write for the whole set. When the Active Topic is in the set, the Next Topic outside the set opens.
+    func snoozeTopics(_ ids: [String], until deadline: SnoozeDeadline) {
+        guard !changingTopic else { return }
+        let next = activeTopicID.flatMap { ids.contains($0) ? nextTopic(after: $0, skipping: Set(ids)) : nil }
+        do {
+            let snoozed = try topicWatcher.write { transaction -> Bool in
+                let saves = SnoozeSet(ids, until: deadline, records: transaction.records).saves
+                for record in saves { try transaction.update(record.id) { $0.snoozedUntil = record.snoozedUntil } }
+                return !saves.isEmpty
+            }
+            guard snoozed else { return }
             palette.close()
             if let next { showTopic(next) }
-        }
+        } catch { showTopicFailure(error) }
     }
 
     /// The Sidebar's Unsnooze: back to the Topics list, and to its Window when it has one. A Dormant
     /// Topic stays Dormant, because Unsnooze changes nothing in tmux.
     func unsnoozeTopic(_ id: String) {
-        guard setSnooze(id, until: nil) else { return }
+        guard clearSnooze(id) else { return }
         if let window = entryWindow(of: .topic(id)) { select(window) }
     }
 
@@ -531,7 +542,7 @@ final class WorkspaceStore {
         let wakes = topics.dueWakes
         var messages: [String] = []
         var zenWoken = 0
-        for wake in wakes where setSnooze(wake.id, until: nil) {
+        for wake in wakes where clearSnooze(wake.id) {
             if zenTopicIDs.contains(wake.id) { zenWoken += 1 } else { messages.append(wake.message) }
         }
         if endingZen != nil {
@@ -2059,7 +2070,8 @@ final class WorkspaceStore {
         case .moveWindow: presentMoveWindow()
         case .moveSession: if !isRemote { presentMoveSession() }
         case .addProjectToTopic: if !isRemote { presentAddProject() }
-        case .snoozeTopic: if !isRemote { presentSnoozeTopic() }
+        case .snoozeTopic: if !isRemote, let id = activeTopicID { presentSnooze([id], from: .until) }
+        case .snoozeTopics: if !isRemote { presentSnooze([activeTopicID].compactMap { $0 }, from: .choose) }
         case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
         case .toggleLock: toggleLockOfCurrentSession()

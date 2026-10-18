@@ -14,6 +14,7 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `move_session` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
 | `add_project_to_topic` | ⌘⇧A | Open Add a Project for the Active Topic in the palette |
 | `snooze_topic` | ⌥⌘S | Snooze the Active Topic, then open the Next Topic |
+| `snooze_topics` | Unbound | Open Snooze Topics, with the Active Topic marked |
 | `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic or a Locked Session, or in Sessions mode, it only ends Zen |
 | `settle_topic` | Unbound | Settle the Active Topic, then open the Next Topic |
 | `mark_read` | ⌘⇧R | Clear Unread for the Active Topic, or the current Session when there is no Active Topic |
@@ -61,6 +62,17 @@ Tab, Add a Project, Snooze Topic, Settle Topic, Lock Session or Unlock Session, 
 or End Zen. These use the
 current item and appear when that item is available. Back returns from an input
 step to the Commands search.
+
+Commands also lists Snooze Topics…, which Snoozes several Topics until one time.
+Its first step lists the Topics in the Topics list under Visible, and the
+Snoozed Topics under Already Snoozed. The Active Topic starts marked. Space in an
+empty field or ⇥ marks the highlighted Topic, and ⌘A marks every Topic that the
+filter shows, or unmarks them when all of them are marked. ↩ goes on with the
+marked Topics, or with the highlighted Topic when none is marked. The time that
+you choose replaces the time of each marked Topic, also a later time, and the
+step note names each Snooze that becomes shorter. Snooze Topic is the same flow
+with only its Topic marked, and it starts at the time step: ⌫ in the empty field
+goes back to the first step to mark more Topics.
 
 Commands also lists Show Next Session, Show Previous Session, Show Next Topic
 and Show Previous Topic. They do what `select_next_session`,
@@ -115,6 +127,7 @@ keybindings:
   move_session: cmd+shift+m
   add_project_to_topic: cmd+shift+a
   snooze_topic: alt+cmd+s
+  snooze_topics: []
   toggle_zen: shift+alt+cmd+s
   settle_topic: []
   toggle_lock: []

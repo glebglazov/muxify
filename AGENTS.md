@@ -10,7 +10,7 @@ To prove a change in the running app, use the e2e harness in `scripts/verify/`. 
 
 ## Actions and Commands
 
-Design every new Action or Command as steps in the palette's view: run at once, choose a row, type one value, or confirm. Read `docs/adr/0014-every-action-runs-in-the-palettes-view.md` before you add or change one. A sheet or an alert that takes input needs its own ADR first.
+Design every new Action or Command as steps in the palette's view: run at once, choose a row, choose rows, type one value, or confirm. Read `docs/adr/0014-every-action-runs-in-the-palettes-view.md` before you add or change one. For an Action on several rows, use the "choose rows" step in `Sources/Muxify/UI/PaletteChooseRows.swift` and read `docs/adr/0020-a-palette-step-can-choose-several-rows.md`. A sheet or an alert that takes input needs its own ADR first.
 
 ## tmux in tests and verification
 

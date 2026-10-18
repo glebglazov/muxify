@@ -87,4 +87,16 @@ final class TopicNavigationTests: XCTestCase {
         XCTAssertEqual(model([a, hidden, settled], [], TopicSelection()).nextTopic(after: "a"), .noTopic)
     }
 
+    func testNextTopicSkipsTheOtherTopicsThatLeaveTheList() {
+        let records = ["a", "b", "c", "d", "e"].enumerated().map { index, id -> TopicRecord in
+            var record = TopicRecord(id: id)
+            record.order = Double(index)
+            return record
+        }
+        let result = model(records, [], TopicSelection())
+        XCTAssertEqual(result.nextTopic(after: "b", skipping: ["c", "d"]), .topic("e"), "the nearest row below that stays")
+        XCTAssertEqual(result.nextTopic(after: "d", skipping: ["e", "c"]), .topic("b"), "else the nearest row above that stays")
+        XCTAssertEqual(result.nextTopic(after: "a", skipping: ["b", "c", "d", "e"]), .noTopic)
+    }
+
 }

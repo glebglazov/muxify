@@ -477,7 +477,7 @@ private struct GroupedTopicRow: View {
                 if let topicID { Button("Forget Topic…") { store.presentForgetTopic(topicID) }.disabled(store.changingTopic) }
                 if case .snoozed = topic.kind, let topicID {
                     Button("Settle…") { store.presentSettleTopic(topicID) }.disabled(store.changingTopic)
-                    Button("Snooze again…") { store.presentSnoozeTopic(topicID) }.disabled(store.changingTopic)
+                    Button("Snooze again…") { store.presentSnooze([topicID], from: .until) }.disabled(store.changingTopic)
                 }
             }
             if let topicID {
@@ -503,7 +503,7 @@ private struct GroupedTopicRow: View {
             if let topicID { Button("Forget Topic…") { store.presentForgetTopic(topicID) }.disabled(store.changingTopic) }
             if case .snoozed = topic.kind, let topicID {
                 Button("Settle…") { store.presentSettleTopic(topicID) }.disabled(store.changingTopic)
-                Button("Snooze again…") { store.presentSnoozeTopic(topicID) }.disabled(store.changingTopic)
+                Button("Snooze again…") { store.presentSnooze([topicID], from: .until) }.disabled(store.changingTopic)
             }
         }
     }
@@ -633,7 +633,7 @@ private struct TopicCard: View {
                         .accessibilityIdentifier("start-fresh-topic-" + id)
                         .disabled(store.changingTopic)
                 }
-                Button("Snooze…") { store.presentSnoozeTopic(id) }
+                Button("Snooze…") { store.presentSnooze([id], from: .until) }
                     .accessibilityIdentifier("snooze-topic").disabled(store.changingTopic)
                 Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
                     .accessibilityIdentifier("zen-topic").disabled(store.changingTopic)

@@ -12,6 +12,7 @@ enum PaletteCommand: String, CaseIterable {
     case movePaneWithTab = "Move Pane with Active Tab"
     case addProject = "Add a Project"
     case snoozeTopic = "Snooze Topic"
+    case snoozeTopics = "Snooze Topics…"
     case settleTopic = "Settle Topic"
     case lockSession = "Lock Session"
     case unlockSession = "Unlock Session"
@@ -63,6 +64,7 @@ enum PaletteCommand: String, CaseIterable {
         case .moveSession: .moveSession
         case .addProject: .addProjectToTopic
         case .snoozeTopic: .snoozeTopic
+        case .snoozeTopics: .snoozeTopics
         case .settleTopic: .settleTopic
         case .zen, .endZen: .toggleZen
         case .lockSession, .unlockSession: .toggleLock
@@ -108,6 +110,7 @@ extension CommandPalette {
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
             case .addProject, .snoozeTopic, .settleTopic: return canChangeTopics && hasOpenTopic
+            case .snoozeTopics: return canChangeTopics && store.topicWatcher.records.contains { $0.settledAt == nil }
             case .lockSession, .unlockSession:
                 guard canChangeTopics, let id = store.selectedWindow?.sessionID, let locked = store.lockState(ofSession: id) else { return false }
                 return locked == (command == .unlockSession)
@@ -164,7 +167,7 @@ extension CommandPalette {
             return
         }
         switch command {
-        case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addProject, .snoozeTopic, .settleTopic, .zen: break
+        case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addProject, .snoozeTopic, .snoozeTopics, .settleTopic, .zen: break
         default: close(restoringFocus: false)
         }
         switch command {
@@ -177,7 +180,8 @@ extension CommandPalette {
         case .moveWindow: store.presentMoveWindow(keepingHistory: true)
         case .moveSession: store.presentMoveSession(keepingHistory: true)
         case .addProject: store.presentAddProject(keepingHistory: true)
-        case .snoozeTopic: store.presentSnoozeTopic(keepingHistory: true)
+        case .snoozeTopic: if let id = store.activeTopicID { store.presentSnooze([id], from: .until, keepingHistory: true) }
+        case .snoozeTopics: store.presentSnooze([store.activeTopicID].compactMap { $0 }, from: .choose, keepingHistory: true)
         case .settleTopic: store.presentSettleTopic(keepingHistory: true)
         case .zen: store.toggleZenOfActiveTopic(keepingHistory: true)
         case .endZen: store.endZen()

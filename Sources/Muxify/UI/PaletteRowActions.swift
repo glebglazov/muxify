@@ -24,7 +24,7 @@ extension CommandPalette {
         if case .topic(let id, _) = item.ref,
            let topic = store.topicWatcher.records.first(where: { $0.id == id }) {
             switch action {
-            case .snoozeTopic: begin(.snooze(topic), keepingHistory: true)
+            case .snoozeTopic: store.presentSnooze([id], from: .until, keepingHistory: true)
             case .startZen:
                 if store.topicWatcher.zen == nil { begin(.zen(id), keepingHistory: true) }
                 else { close(); store.endZen() }

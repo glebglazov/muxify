@@ -20,6 +20,7 @@ public enum ConfigAction: String, KeybindAction {
     case moveSession = "move_session"
     case addProjectToTopic = "add_project_to_topic"
     case snoozeTopic = "snooze_topic"
+    case snoozeTopics = "snooze_topics"
     case toggleZen = "toggle_zen"
     case settleTopic = "settle_topic"
     case toggleLock = "toggle_lock"
@@ -81,6 +82,7 @@ public enum ConfigAction: String, KeybindAction {
         .markUnread: ["cmd+shift+u"],
         .markAllRead: [],
         .snoozeTopic: ["alt+cmd+s"],
+        .snoozeTopics: [],
         .toggleZen: ["shift+alt+cmd+s"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
         .toggleTerminal: ["cmd+j"],
