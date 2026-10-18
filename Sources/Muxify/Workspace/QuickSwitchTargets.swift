@@ -43,6 +43,8 @@ extension ConfigAction {
         switch self {
         case .selectNextWindow: (.window, .next)
         case .selectPrevWindow: (.window, .previous)
+        case .selectNextTopicWindow: (.topicWindow, .next)
+        case .selectPrevTopicWindow: (.topicWindow, .previous)
         case .selectNextSession: (.session, .next)
         case .selectPrevSession: (.session, .previous)
         case .selectNextTopic: (.topic, .next)
@@ -53,7 +55,7 @@ extension ConfigAction {
 }
 
 enum StepLevel {
-    case window, session, topic
+    case window, topicWindow, session, topic
 }
 
 enum StepDirection {
@@ -79,6 +81,9 @@ enum QuickSwitchTarget: Hashable {
 struct QuickSwitchTargets {
     let cards: [QuickSwitchTarget]
     let windows: [QuickSwitchTarget]
+    /// The Windows a Topic Window step goes through: the Active Topic's in Sidebar order in Topics mode, the
+    /// Session's in Sessions mode.
+    let topicWindows: [QuickSwitchTarget]
     let tabs: [QuickSwitchTarget]
     /// The Sessions a Session step goes through: every Session in Sessions mode, the Active Topic's in Topics mode.
     let sessions: [QuickSwitchTarget]
@@ -101,6 +106,7 @@ struct QuickSwitchTargets {
     func step(_ level: StepLevel, _ direction: StepDirection, from current: QuickSwitchTarget?) -> QuickSwitchTarget? {
         let targets = switch level {
         case .window: windows
+        case .topicWindow: topicWindows
         case .session: sessions
         case .topic: topics
         }
@@ -119,14 +125,17 @@ extension QuickSwitchTargets {
         // A Locked Session's card is numbered by its place among the Topics.
         let topics = model.rows.compactMap(\.id.quickSwitchTarget)
         let allSessions = sessions.map { QuickSwitchTarget.session($0.id) }
-        let scopedSessions = model.mode == .topics ? Self.sessions(of: model) : allSessions
-        self.init(cards: model.mode == .topics ? topics : allSessions, windows: windows.map { .window($0.id) },
-                  tabs: tabIDs.map { .tab($0) }, sessions: scopedSessions, topics: topics)
+        let sessionWindows = windows.map { QuickSwitchTarget.window($0.id) }
+        let shown = model.mode == .topics ? Self.sessions(of: model) : nil
+        self.init(cards: model.mode == .topics ? topics : allSessions, windows: sessionWindows,
+                  topicWindows: shown.map { $0.flatMap(\.windows).map { .window($0.id) } } ?? sessionWindows,
+                  tabs: tabIDs.map { .tab($0) }, sessions: shown.map { $0.map { .session($0.id.session) } } ?? allSessions,
+                  topics: topics)
     }
 
     /// The Sessions the Active Topic's card shows. No Topic has no card, so it gives its Sessions that have no
     /// Locked Session card of their own.
-    private static func sessions(of model: TopicsModel) -> [QuickSwitchTarget] {
+    private static func sessions(of model: TopicsModel) -> [TopicsModel.Session] {
         let shown: [TopicsModel.Session]
         switch model.activeTopic {
         case nil: shown = []
@@ -137,7 +146,7 @@ extension QuickSwitchTargets {
             // A Snoozed Topic the user went to has its card in the Snoozed group, not in the rows.
             shown = (model.rows + model.groups.flatMap(\.topics)).first { $0.id == active }?.sessions ?? []
         }
-        return shown.filter { !$0.windows.isEmpty }.map { .session($0.id.session) }
+        return shown.filter { !$0.windows.isEmpty }
     }
 }
 
@@ -182,7 +191,7 @@ extension WorkspaceStore {
     /// Where a step goes from the selected Window, its Session or the Active Topic's row.
     func stepTarget(_ level: StepLevel, _ direction: StepDirection) -> QuickSwitchTarget? {
         let current: QuickSwitchTarget? = switch level {
-        case .window: selectedWindow.map { .window($0.id) }
+        case .window, .topicWindow: selectedWindow.map { .window($0.id) }
         case .session: selectedWindow.map { .session($0.sessionID) }
         case .topic: topics.activeTopic?.quickSwitchTarget
         }
@@ -199,7 +208,7 @@ extension WorkspaceStore {
         case .locked(let id): goToTopic(.locked(id))
         case .session(let id): goToSession(id)
         case .window(let id):
-            if let window = quickSwitchWindows.first(where: { $0.id == id }) { select(window) }
+            if let window = windows.first(where: { $0.id == id }) { select(window) }
         case .tab(let id):
             if let browser = currentBrowser, let tab = browser.tabs.first(where: { $0.id == id }) {
                 browser.jumpTo(tab)

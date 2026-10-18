@@ -335,6 +335,9 @@ public struct Config: Equatable {
         #   # ninth Windows in the current Session, not their tmux indices.
         #   # select_next_window and select_prev_window wrap within the Session
         #   # and have no keybindings until you assign them.
+        #   # select_next_topic_window and select_prev_topic_window step
+        #   # through every Window of the Active Topic in Topics mode, and
+        #   # wrap within the Session in Sessions mode. They are unbound.
         #   # select_next_session and select_prev_session step through the
         #   # Sessions the Sidebar shows: in Topics mode, those of the Active
         #   # Topic. select_next_topic and select_prev_topic go to the Topic

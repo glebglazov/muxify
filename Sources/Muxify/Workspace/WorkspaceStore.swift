@@ -2093,8 +2093,8 @@ final class WorkspaceStore {
              .selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5,
              .selectTab6, .selectTab7, .selectTab8, .selectTab9:
             if let selection = action.quickSwitchSelection { quickSwitch(selection) }
-        case .selectNextWindow, .selectPrevWindow, .selectNextSession, .selectPrevSession,
-             .selectNextTopic, .selectPrevTopic:
+        case .selectNextWindow, .selectPrevWindow, .selectNextTopicWindow, .selectPrevTopicWindow,
+             .selectNextSession, .selectPrevSession, .selectNextTopic, .selectPrevTopic:
             if let step = action.step { self.step(step.level, step.direction) }
         }
     }

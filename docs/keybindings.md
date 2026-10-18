@@ -42,6 +42,8 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `select_window_9` | ⌘9 | Select the ninth Window, not the last one |
 | `select_next_window` | Unbound | Select the next Window, wrapping to the first |
 | `select_prev_window` | Unbound | Select the previous Window, wrapping to the last |
+| `select_next_topic_window` | Unbound | Select the next Window of the Active Topic, wrapping to the first. In Topics mode, every Window of the Active Topic's Sessions takes part, in the order the Sidebar shows them; for No Topic, the Windows of the No Topic Sessions. In Sessions mode, only the current Session's Windows take part |
+| `select_prev_topic_window` | Unbound | Select the previous Window of the Active Topic, wrapping to the last |
 | `select_next_session` | Unbound | Go to the next Session the Sidebar shows, wrapping to the first. In Topics mode, only the Active Topic's Sessions take part; for No Topic, the No Topic Sessions |
 | `select_prev_session` | Unbound | Go to the previous Session the Sidebar shows, wrapping to the last. In Topics mode, only the Active Topic's Sessions take part |
 | `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Locked Sessions take part in their place; No Topic and Snoozed Topics do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
@@ -169,6 +171,8 @@ keybindings:
   # These actions are unbound by default.
   select_next_window: ctrl+cmd+right
   select_prev_window: ctrl+cmd+left
+  select_next_topic_window: cmd+right_bracket
+  select_prev_topic_window: cmd+left_bracket
   select_next_session: ctrl+cmd+down
   select_prev_session: ctrl+cmd+up
   select_next_topic: ctrl+alt+cmd+down

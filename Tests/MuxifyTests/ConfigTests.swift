@@ -633,8 +633,8 @@ final class ConfigTests: XCTestCase {
 
     func testNextAndPreviousStepActionsAreUnboundByDefault() throws {
         let config = try load([:])
-        for action in [ConfigAction.selectNextWindow, .selectPrevWindow, .selectNextSession, .selectPrevSession,
-                       .selectNextTopic, .selectPrevTopic] {
+        for action in [ConfigAction.selectNextWindow, .selectPrevWindow, .selectNextTopicWindow, .selectPrevTopicWindow,
+                       .selectNextSession, .selectPrevSession, .selectNextTopic, .selectPrevTopic] {
             XCTAssertEqual(config.keybinds.triggers[action], [])
             XCTAssertNil(config.keybinds.firstTrigger(for: action))
         }

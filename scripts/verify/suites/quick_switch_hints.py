@@ -232,6 +232,28 @@ class QuickSwitchHints(unittest.TestCase):
         self.input('Press ⌃⌥P')
         self.s.wait_shown(self.first)
 
+    def test_topic_window_step_goes_through_every_window_of_the_active_topic(self):
+        session, window = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id} #{window_id}',
+                                      '-s', 'topic-windows', '-c', str(self.s.root), '/bin/zsh -f').split()
+        self.addCleanup(self.s.tmux, 'kill-session', '-t', session)
+        self.s.tmux('set-option', '-t', session, '@muxify_topic', 'first')
+        rows = self.s.wait_rows(lambda rows: self.s.has('topic-window-' + window, rows)
+                               and self.s.has('topic-window-' + self.second, rows), 'the Topic does not show all its Windows')
+        topic_windows = {self.first, self.second, window}
+        order = [key.removeprefix('topic-window-') for key in self.s.ids(rows)
+                 if key.removeprefix('topic-window-') in topic_windows and key.startswith('topic-window-')]
+        self.assertEqual(sorted(order), sorted(topic_windows), f'Sidebar Window rows: {order}')
+        start = order.index(self.first)
+        self.configure(keybindings='  select_next_topic_window: ctrl+alt+w\n  select_prev_topic_window: ctrl+alt+q\n')
+        self.press_when_bound('⌃⌥W')
+        self.s.wait_shown(order[(start + 1) % 3])
+        self.input('Press ⌃⌥W')
+        self.s.wait_shown(order[(start + 2) % 3])
+        self.input('Press ⌃⌥W')
+        self.s.wait_shown(self.first)
+        self.input('Press ⌃⌥Q')
+        self.s.wait_shown(order[(start - 1) % 3])
+
 
 if __name__ == '__main__':
     unittest.main()

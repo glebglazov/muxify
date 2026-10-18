@@ -70,7 +70,7 @@ final class HintTests: XCTestCase {
     }
 
     private let targets = QuickSwitchTargets(cards: [.topic("first"), .session("second")],
-                                             windows: [.window("@1"), .window("@2")], tabs: [.tab(UUID())],
+                                             windows: [.window("@1"), .window("@2")], topicWindows: [], tabs: [.tab(UUID())],
                                              sessions: [], topics: [])
 
     func testResolvedConfigClaimsAndRemapsSelectPositionNotPrintedDigit() throws {
@@ -110,7 +110,7 @@ final class HintTests: XCTestCase {
             }
         }
         for position in [-1, 0, 3, 9, 10] { XCTAssertNil(targets.target(for: .card(position))) }
-        let reordered = QuickSwitchTargets(cards: targets.cards.reversed(), windows: [], tabs: [], sessions: [], topics: [])
+        let reordered = QuickSwitchTargets(cards: targets.cards.reversed(), windows: [], topicWindows: [], tabs: [], sessions: [], topics: [])
         XCTAssertEqual(reordered.target(for: .card(1)), .session("second"))
     }
 
@@ -145,7 +145,7 @@ final class HintTests: XCTestCase {
           select_window_1: ctrl+w
         """)
         let cards = (1...10).map { QuickSwitchTarget.topic(String($0)) }
-        let targets = QuickSwitchTargets(cards: cards, windows: [.window("@1")], tabs: (1...10).map { _ in .tab(UUID()) },
+        let targets = QuickSwitchTargets(cards: cards, windows: [.window("@1")], topicWindows: [], tabs: (1...10).map { _ in .tab(UUID()) },
                                          sessions: [], topics: [])
         let hints = HintPresentation(modifiers: nil, keybinds: config.keybinds, targets: targets,
                                      sidebar: true, browser: true, terminal: true, config: config.hints)
@@ -265,7 +265,7 @@ final class HintTests: XCTestCase {
     }
 
     func testStepWrapsAndStartsAtAnEndWithoutACurrentTarget() {
-        let targets = QuickSwitchTargets(cards: [], windows: [.window("@1"), .window("@2")], tabs: [],
+        let targets = QuickSwitchTargets(cards: [], windows: [.window("@1"), .window("@2")], topicWindows: [], tabs: [],
                                          sessions: [.session("$1"), .session("$2"), .session("$3")],
                                          topics: [.topic("a"), .locked("$9")])
         XCTAssertEqual(targets.step(.session, .next, from: .session("$1")), .session("$2"))
@@ -279,7 +279,7 @@ final class HintTests: XCTestCase {
         XCTAssertEqual(targets.step(.topic, .previous, from: nil), .locked("$9"))
         XCTAssertEqual(targets.step(.session, .next, from: .session("$7")), .session("$1"))
         XCTAssertEqual(targets.step(.session, .previous, from: .session("$7")), .session("$3"))
-        let lone = QuickSwitchTargets(cards: [], windows: [], tabs: [], sessions: [.session("$1")], topics: [])
+        let lone = QuickSwitchTargets(cards: [], windows: [], topicWindows: [], tabs: [], sessions: [.session("$1")], topics: [])
         XCTAssertEqual(lone.step(.session, .next, from: .session("$1")), .session("$1"))
         XCTAssertNil(lone.step(.window, .next, from: .window("@1")), "no Windows, no step")
         XCTAssertNil(lone.step(.topic, .previous, from: nil))
@@ -328,6 +328,44 @@ final class HintTests: XCTestCase {
         let sessionMode = targets(selecting: "@1", mode: .sessions)
         XCTAssertEqual(sessionMode.sessions, sessions.map { .session($0.id) }, "every Session in Sessions mode")
         XCTAssertEqual(sessionMode.topics, rows, "the Topics list order in Sessions mode too")
+    }
+
+    func testTopicWindowStepGoesThroughEveryWindowOfTheActiveTopic() {
+        var work = TopicRecord(id: "work")
+        work.order = 0
+        func window(_ id: String, session: String, index: Int, topic: String? = nil) -> TmuxWindow {
+            var window = TmuxWindow(id: "@" + id, sessionID: "$" + session, sessionName: "session-" + session, index: index,
+                                    name: "shell", paneTitle: "shell", path: "/tmp", command: "zsh", isActive: index == 0,
+                                    paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: .init(), openRequests: [])
+            window.topicID = topic
+            return window
+        }
+        let windows = [window("1", session: "1", index: 0, topic: "work"), window("2", session: "1", index: 1, topic: "work"),
+                       window("3", session: "2", index: 0, topic: "work"), window("4", session: "2", index: 1, topic: "work"),
+                       window("5", session: "3", index: 0)]
+        let sessions = ["$1", "$2", "$3"].map { id in
+            SessionGroup(id: id, name: "session-" + id.dropFirst(), windows: windows.filter { $0.sessionID == id })
+        }
+        func targets(selecting windowID: String, mode: SidebarMode = .topics) -> QuickSwitchTargets {
+            var selection = TopicSelection()
+            selection.windowID = windowID
+            let model = TopicsModel(records: [work], windows: windows, config: Config(), selection: selection, mode: mode)
+            let session = windows.first { $0.id == windowID }?.sessionID
+            return QuickSwitchTargets(model: model, sessions: sessions, windows: windows.filter { $0.sessionID == session },
+                                      tabIDs: [])
+        }
+        let inWork = targets(selecting: "@2")
+        XCTAssertEqual(inWork.topicWindows, ["@1", "@2", "@3", "@4"].map(QuickSwitchTarget.window),
+                       "every Window of the Active Topic, Session by Session")
+        XCTAssertEqual(inWork.step(.topicWindow, .next, from: .window("@2")), .window("@3"), "goes on into the next Session")
+        XCTAssertEqual(inWork.step(.topicWindow, .next, from: .window("@4")), .window("@1"))
+        XCTAssertEqual(inWork.step(.topicWindow, .previous, from: .window("@1")), .window("@4"))
+        XCTAssertEqual(inWork.step(.window, .next, from: .window("@2")), .window("@1"), "a Window step stays in the Session")
+        XCTAssertNil(inWork.target(for: .window(3)), "numbered Windows stay in the Session")
+
+        XCTAssertEqual(targets(selecting: "@5").topicWindows, [.window("@5")], "the No Topic Sessions' Windows")
+        XCTAssertEqual(targets(selecting: "@2", mode: .sessions).topicWindows, [.window("@1"), .window("@2")],
+                       "only the Session's Windows in Sessions mode")
     }
 
     func testAppKitModifiersAndNumberedTriggerUseExactSet() throws {
