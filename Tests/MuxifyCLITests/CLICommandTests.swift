@@ -169,6 +169,16 @@ final class CLICommandTests: XCTestCase {
             (["settle", "--window", "@12"], inside, topic(.settle(removeWorktrees: false), target: window)),
             (["settle", "--json", "--pane", "%3"], inside, topic(.settle(removeWorktrees: false), target: pane, output: .json)),
             (["settle", "--remove-worktrees"], inside, topic(.settle(removeWorktrees: true))),
+            (["snooze", "2h"], inside, topic(.snooze(.relative(2, .hour), topics: []))),
+            (["snooze", "mon", "9:30", "--topic", "Fix reward", "--json"], outside,
+             topic(.snooze(.weekday(2, hour: 9, minute: 30), topics: [.named("Fix reward")]), caller: nil, output: .json)),
+            (["snooze", "--topic", "a", "2h", "--topic", "b", "--topic", "a"], inside,
+             topic(.snooze(.relative(2, .hour), topics: [.named("a"), .named("b"), .named("a")]))),
+            (["snooze", "forever", "--pane", "%3"], inside, topic(.snooze(.never, topics: []), target: pane)),
+            (["unsnooze"], inside, topic(.unsnooze(topics: []))),
+            (["unsnooze", "--window", "@12"], inside, topic(.unsnooze(topics: []), target: window)),
+            (["unsnooze", "--topic", "a", "--topic", "b", "--json"], outside,
+             topic(.unsnooze(topics: [.named("a"), .named("b")]), caller: nil, output: .json)),
             (["list"], outside, topic(.list, caller: nil)),
             (["list", "--json"], inside, topic(.list, output: .json)),
             (["show"], inside, topic(.show)),
@@ -322,7 +332,9 @@ final class CLICommandTests: XCTestCase {
                           ["topic", "exec", "--timeout", "0", "--", "pwd"], ["topic", "exec", "--timeout", "soon", "--", "pwd"],
                           ["topic", "exec", "--timeout", "-1", "--", "pwd"], ["topic", "show", "--", "pwd"],
                           ["topic", "show", "--timeout", "5"], ["topic", "status", "--stat"], ["topic", "status", "x"],
-                          ["topic", "diff", "x"], ["topic", "diff", "--", "pwd"], ["topic", "show", "--stat"]] {
+                          ["topic", "diff", "x"], ["topic", "diff", "--", "pwd"], ["topic", "show", "--stat"],
+                          ["topic", "snooze"], ["topic", "snooze", "2h", "--project", "tools"], ["topic", "snooze", "2h", "--stat"],
+                          ["topic", "unsnooze", "2h"], ["topic", "unsnooze", "--remove-worktrees"], ["topic", "snooze", "2h", "--topic"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2)
                 XCTAssertEqual(error.localizedDescription, CLICommand.usage, "\(arguments)")
@@ -336,6 +348,11 @@ final class CLICommandTests: XCTestCase {
         let cases: [([String], [String: String], String)] = [
             (["new", "--pane", "%1", "--pane", "%2"], inside, "give only one of --topic, --window and --pane"),
             (["settle", "--topic", "Fix", "--window", "@1"], inside, "give only one of --topic, --window and --pane"),
+            (["settle", "--topic", "a", "--topic", "b"], inside, "give only one of --topic, --window and --pane"),
+            (["snooze", "2h", "--topic", "a", "--pane", "%1"], inside, "give --topic one or more times, or only one of --window and --pane"),
+            (["unsnooze", "--window", "@1", "--topic", "a"], inside, "give --topic one or more times, or only one of --window and --pane"),
+            (["unsnooze", "--pane", "%1", "--pane", "%2"], inside, "give --topic one or more times, or only one of --window and --pane"),
+            (["unsnooze", "--topic", "a", "--topic", ""], inside, "--topic takes the id or label of an open Topic"),
             (["settle", "--window", "%3"], inside, "--window takes a tmux Window id, e.g. @12"),
             (["settle", "--pane", "@3"], inside, "--pane takes a tmux Pane id, e.g. %3"),
             (["new", "--pane", "7"], inside, "--pane takes a tmux Pane id, e.g. %3"),
@@ -348,6 +365,11 @@ final class CLICommandTests: XCTestCase {
             (["add-project", "tools"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["settle"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["show"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
+            (["snooze", "2h"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
+            (["unsnooze"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
+            (["snooze", "soon"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
+            (["snooze", "25:00"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
+            (["snooze", "never"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
         ]
         for (arguments, environment, message) in cases {
             XCTAssertThrowsError(try CLICommand(arguments: ["topic"] + arguments, environment: environment), "\(arguments)") { error in

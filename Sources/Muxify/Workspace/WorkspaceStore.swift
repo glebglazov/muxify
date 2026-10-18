@@ -668,7 +668,7 @@ final class WorkspaceStore {
         changingTopic = false
         let ownsPalette = palette.invocation == invocation
         switch response {
-        case .topics, .topic:
+        case .topics, .topic, .snoozeChanged:
             break
         case .failed(let failure):
             pendingSelection = nil

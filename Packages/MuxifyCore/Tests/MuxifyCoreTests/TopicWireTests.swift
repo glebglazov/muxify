@@ -23,6 +23,17 @@ final class TopicWireTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(TopicSettleSession.self, from: old).reviewedWindows)
     }
 
+    func testSnoozeSendsItsTimeAsTheRecordStoresItAndItsTopicsAsAList() throws {
+        try assertRoundTrip(TopicRequest(.snooze(until: .never), target: .window(try XCTUnwrap(WindowID(rawValue: "@4")))),
+                            #"{"command":{"snooze":{"topics":[],"until":"never"}},"target":{"window":"@4"},"version":1}"#)
+        try assertRoundTrip(TopicCommand.snooze(until: .at(Date(timeIntervalSince1970: 1_800_000_000)), topics: [.id("ship"), .named("Fix")]),
+                            #"{"snooze":{"topics":[{"id":"ship"},{"named":"Fix"}],"until":"2027-01-15T08:00:00Z"}}"#)
+        try assertRoundTrip(TopicCommand.unsnooze(topics: [.id("ship")]), #"{"unsnooze":{"topics":[{"id":"ship"}]}}"#)
+        try assertRoundTrip(TopicResponse.snoozeChanged(TopicSnoozeChange(topicIDs: ["a", "b"], shortened: ["b"])),
+                            #"{"snooze_changed":{"shortened":["b"],"topic_ids":["a","b"]}}"#)
+        XCTAssertThrowsError(try JSONDecoder().decode(TopicCommand.self, from: Data(#"{"snooze":{"topics":[],"until":"soon"}}"#.utf8)))
+    }
+
     func testExtractKeepsOldRequestsAndAddsAnOptionalTitle() throws {
         try assertRoundTrip(TopicCommand.extract(project: nil), #"{"extract":{}}"#)
         try assertRoundTrip(TopicCommand.extract(project: "/work/game"), #"{"extract":{"project":"/work/game"}}"#)

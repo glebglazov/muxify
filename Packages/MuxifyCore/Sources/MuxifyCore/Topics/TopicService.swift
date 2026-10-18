@@ -38,6 +38,9 @@ public struct TopicService: Sendable {
         }
         if case .list = request.command { return list() }
         if case .show = request.command { return show(request, client: client) }
+        // A Snooze writes one key of each record, so it takes only the record lock, as the app's Snooze does.
+        if case .snooze(let deadline, let topics) = request.command { return snooze(request, topics, until: deadline, client: client) }
+        if case .unsnooze(let topics) = request.command { return snooze(request, topics, until: nil, client: client) }
         do {
             return try FileLock.withLock(paths.editLock, .exclusive, rank: .edit, timeout: editLockTimeout) {
                 switch request.command {
@@ -91,6 +94,40 @@ public struct TopicService: Sendable {
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let branches = TopicBranches(records: [topic]) { try? String(contentsOfFile: $0, encoding: .utf8) }
             return .topic(TopicDetail(record: topic, snapshot: snapshot, projects: projects, branches: branches))
+        } catch {
+            return .failed(failure(error, phase: .nothingChanged))
+        }
+    }
+
+    /// A nil `deadline` is an Unsnooze. Every Topic resolves before the one write, so a bad ref changes nothing.
+    private func snooze(_ request: TopicRequest, _ topics: [TopicRef], until deadline: SnoozeDeadline?, client: String?) -> TopicResponse {
+        do {
+            if !topics.isEmpty, request.target != nil { throw TopicRequestError.targetAndTopics }
+            let records = try store.read().records
+            let resolved = topics.isEmpty
+                ? [try openTopic(request.target, caller: request.caller, records: records, snapshot: server.snapshot(), client: client)]
+                : try topics.map { try $0.resolve(in: records) }
+            var ids: [String] = []
+            for topic in resolved where !ids.contains(topic.id) { ids.append(topic.id) }
+            let shortened = try store.write { transaction -> [String] in
+                guard let deadline else {
+                    for id in ids {
+                        guard transaction.records.contains(where: { $0.id == id && $0.settledAt == nil }) else {
+                            throw TopicRequestError.topicUnavailable(id)
+                        }
+                    }
+                    for id in ids { try transaction.update(id) { $0.snoozedUntil = nil } }
+                    return []
+                }
+                let set = SnoozeSet(ids, until: deadline, records: transaction.records)
+                // A Topic that was Settled after the read has no save.
+                if let settled = ids.first(where: { id in !set.saves.contains { $0.id == id } }) {
+                    throw TopicRequestError.topicUnavailable(settled)
+                }
+                for save in set.saves { try transaction.update(save.id) { $0.snoozedUntil = save.snoozedUntil } }
+                return set.shortened
+            }
+            return .snoozeChanged(TopicSnoozeChange(topicIDs: ids, shortened: shortened))
         } catch {
             return .failed(failure(error, phase: .nothingChanged))
         }
@@ -155,7 +192,7 @@ public struct TopicService: Sendable {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show, .lock, .unlock:
+        case .list, .show, .lock, .unlock, .snooze, .unsnooze:
             throw TopicRequestError.noTarget
         case .create(let title, let projectPath):
             let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -437,7 +474,7 @@ public struct TopicService: Sendable {
         switch error {
         case let error as TopicRequestError:
             switch error {
-            case .invalidURL: return .unsupported
+            case .invalidURL, .targetAndTopics: return .unsupported
             case .noTarget: return .noTarget
             case .projectUnavailable: return .projectUnavailable
             case .sourceHasNoTopic: return .sourceHasNoTopic
@@ -506,6 +543,7 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case worktreeHasChanges(String)
     case sessionUnavailable(String)
     case sessionInTopic(session: String, topic: String)
+    case targetAndTopics
 
     public var description: String {
         switch self {
@@ -524,6 +562,7 @@ public enum TopicRequestError: Error, CustomStringConvertible {
         case .sessionUnavailable(let name): return "No tmux Session has the name \(name)."
         case .sessionInTopic(let session, let topic):
             return "The Session \(session) is in the Topic \(topic). Only a No Topic Session can be Locked."
+        case .targetAndTopics: return "The request names a target and a list of Topics. Name only one of them."
         }
     }
 }

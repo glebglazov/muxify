@@ -26,6 +26,8 @@ enum CLICommand: Equatable {
            muxify topic add-project <dir> [--worktree [--base <ref>]] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic forget [--remove-worktrees] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic settle [--remove-worktrees] [--topic <id|label> | --window <id> | --pane <id>] [--json]
+           muxify topic snooze <time> [--topic <id|label>... | --window <id> | --pane <id>] [--json]
+           muxify topic unsnooze [--topic <id|label>... | --window <id> | --pane <id>] [--json]
            muxify topic list [--json]
            muxify topic show [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic status [--project <dir>] [--topic <id|label> | --window <id> | --pane <id>] [--json]
@@ -60,6 +62,14 @@ enum CLICommand: Equatable {
                      --remove-worktrees  also remove each Worktree that the Topic made
                                          and that is merged, as the Settle sheet offers.
                                          If one has uncommitted work, nothing changes.
+    topic snooze   Snoozes this Pane's Topic until <time>, also when it was Snoozed until
+                   later. <time> is as the time step of Snooze Topic reads it: 30m, 2h or 3d from now,
+                   17:30 or 5pm, today, tomorrow or a weekday such as mon, each with an
+                   optional time (default 9:00), or forever, until you Unsnooze it.
+                   Give --topic more than once to Snooze each of those Topics. If one
+                   is not an open Topic, nothing changes.
+    topic unsnooze Unsnoozes this Pane's Topic, or each --topic. A Topic that is not
+                   Snoozed does not change. It changes nothing in tmux.
     topic list     Prints each open Topic's id and label without starting Muxify.
     topic show     Prints this Pane's Topic: its id and label, then a line for each live
                    Session: its name, Project, folder and branch. With --json, also its
@@ -97,7 +107,7 @@ enum CLICommand: Equatable {
                      --topic <id|label>  an open Topic, e.g. --topic "Fix login"
                      --window <id>       a tmux Window, e.g. --window @12
                      --pane <id>         a tmux Pane, e.g. --pane %3
-    new, add-project, settle and window move print the id of the Topic that they change.
+    new, add-project, settle, snooze, unsnooze and window move print the id of each Topic that they change.
                      --json              print the full result as one line of JSON
 
     Optional tmux binding: bind T run-shell 'muxify topic new --pane #{pane_id} >/dev/null'

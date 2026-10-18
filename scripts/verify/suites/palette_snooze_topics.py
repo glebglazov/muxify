@@ -11,9 +11,12 @@ Run from the repo root after `make build`:
 
 import datetime
 import json
+import subprocess
 import unittest
 
-from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.sandbox import DEBUG_APP, Sandbox, wait
+
+CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
 
 SHELL = '/bin/zsh -f'
 LATER = '2099-01-01T00:00:00Z'
@@ -196,6 +199,39 @@ class PaletteSnoozeTopics(unittest.TestCase):
         s.act('action', 'palette-search', 'Close')
         s.wait_rows(lambda rs: not s.has('palette-search', rs), 'Close did not close the palette')
         self.assertIsNone(self.record('st-one').get('snoozed_until'), 'Close after the steps Snoozed the Topic')
+    def test_topic_snooze_from_the_cli_moves_the_topic_to_snoozed_and_keeps_its_session(self):
+        s = self.s
+        window = self.topic('cli-snz', 41, session=True)
+        rs = s.wait_rows(lambda rs: s.has('topic-cli-snz', rs), 'the open Topic did not show')
+        self.assertFalse(s.has('unsnooze-topic-cli-snz', rs), 'the Topic was Snoozed before the command')
+        pane = s.tmux('display-message', '-p', '-t', window, '#{pane_id}')
+        result = subprocess.run([str(CLI), 'topic', 'snooze', 'tomorrow', '--pane', pane], env=s.env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, 'cli-snz\n', ''))
+        rs = s.wait_rows(lambda rs: s.has('snoozed-topics', rs), 'the Snoozed group did not show')
+        if s.row('snoozed-topics', rs).get('accessibilityValue') != 'expanded':
+            s.act('press', 'snoozed-topics')
+        s.wait_rows(lambda rs: s.has('unsnooze-topic-cli-snz', rs), 'the Topic did not move to Snoozed')
+        self.assertEqual(s.tmux('show-options', '-qv', '-t', '=cli-snz:', '@muxify_topic'), 'cli-snz', 'the Session left the Topic')
+
+    def test_topic_snooze_and_unsnooze_from_the_cli_move_several_topics_and_back(self):
+        s = self.s
+        self.topic('cli-a', 42)
+        self.topic('cli-b', 43)
+        s.wait_rows(lambda rs: s.has('topic-cli-a', rs) and s.has('topic-cli-b', rs), 'the open Topics did not show')
+        def cli(*args):
+            result = subprocess.run([str(CLI), 'topic', *args], env=s.env, capture_output=True, text=True, timeout=30)
+            return (result.returncode, result.stdout, result.stderr)
+        self.assertEqual(cli('snooze', 'tomorrow', '--topic', 'cli-a', '--topic', 'cli-b'), (0, 'cli-a\ncli-b\n', ''))
+        rs = s.wait_rows(lambda rs: s.has('snoozed-topics', rs), 'the Snoozed group did not show')
+        if s.row('snoozed-topics', rs).get('accessibilityValue') != 'expanded':
+            s.act('press', 'snoozed-topics')
+        s.wait_rows(lambda rs: s.has('unsnooze-topic-cli-a', rs) and s.has('unsnooze-topic-cli-b', rs),
+                    'the Topics did not move to Snoozed')
+        self.assertEqual(cli('unsnooze', '--topic', 'cli-a', '--topic', 'cli-b'), (0, 'cli-a\ncli-b\n', ''))
+        s.wait_rows(lambda rs: s.has('topic-cli-a', rs) and s.has('topic-cli-b', rs) and not s.has('unsnooze-topic-cli-a', rs)
+                    and not s.has('unsnooze-topic-cli-b', rs), 'the Topics did not move back to the open Topics')
+        self.assertIsNone(self.record('cli-a').get('snoozed_until'), 'Unsnooze left the Snooze in the record')
 
 if __name__ == '__main__':
     unittest.main()

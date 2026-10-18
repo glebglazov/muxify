@@ -200,9 +200,14 @@ public enum TopicCommand: Codable, Hashable, Sendable {
     case lock
     /// Ends the Lock of the target Session. A Session that is not Locked does not change.
     case unlock
+    /// Snoozes each open Topic in `topics` until this time, also one that was Snoozed until later. Empty `topics`
+    /// is the target's open Topic. One write: when one Topic is not open, nothing changes. It changes nothing in tmux.
+    case snooze(until: SnoozeDeadline, topics: [TopicRef] = [])
+    /// Ends the Snooze of each open Topic in `topics`, as `snooze` names them. A Topic that is not Snoozed does not change.
+    case unsnooze(topics: [TopicRef] = [])
 
     private enum CodingKeys: String, CodingKey {
-        case list, show, create, extract, settle, forget, move, rename, reopen, lock, unlock
+        case list, show, create, extract, settle, forget, move, rename, reopen, lock, unlock, snooze, unsnooze
         case startFresh = "start_fresh"
         case moveSession = "move_session"
         case sortSessions = "sort_sessions"
@@ -291,6 +296,24 @@ public struct TopicChange: Codable, Hashable, Sendable {
     }
 }
 
+/// What a Snooze or an Unsnooze changed.
+public struct TopicSnoozeChange: Codable, Hashable, Sendable {
+    /// Each Topic that the request named, once, in the order it named them.
+    public var topicIDs: [String]
+    /// The Topics of `topicIDs` that were Snoozed until later. An Unsnooze shortens none.
+    public var shortened: [String]
+
+    public init(topicIDs: [String], shortened: [String] = []) {
+        self.topicIDs = topicIDs
+        self.shortened = shortened
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case shortened
+        case topicIDs = "topic_ids"
+    }
+}
+
 /// A failure is data, not a thrown error, so every transport can send it.
 public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConvertible {
     /// An open set: a newer writer may send a kind that an older reader does not know.
@@ -358,15 +381,20 @@ public enum TopicResponse: Codable, Hashable, Sendable {
     case topics([TopicSummary])
     case topic(TopicDetail)
     case changed(TopicChange)
+    case snoozeChanged(TopicSnoozeChange)
     case failed(TopicFailure)
 
-    private enum CodingKeys: String, CodingKey { case topics, topic, changed, failed }
+    private enum CodingKeys: String, CodingKey {
+        case topics, topic, changed, failed
+        case snoozeChanged = "snooze_changed"
+    }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         if let topics = try values.decodeIfPresent([TopicSummary].self, forKey: .topics) { self = .topics(topics) }
         else if let topic = try values.decodeIfPresent(TopicDetail.self, forKey: .topic) { self = .topic(topic) }
         else if let change = try values.decodeIfPresent(TopicChange.self, forKey: .changed) { self = .changed(change) }
+        else if let change = try values.decodeIfPresent(TopicSnoozeChange.self, forKey: .snoozeChanged) { self = .snoozeChanged(change) }
         else { self = .failed(try values.decode(TopicFailure.self, forKey: .failed)) }
     }
 
@@ -376,6 +404,7 @@ public enum TopicResponse: Codable, Hashable, Sendable {
         case .topics(let topics): try values.encode(topics, forKey: .topics)
         case .topic(let topic): try values.encode(topic, forKey: .topic)
         case .changed(let change): try values.encode(change, forKey: .changed)
+        case .snoozeChanged(let change): try values.encode(change, forKey: .snoozeChanged)
         case .failed(let failure): try values.encode(failure, forKey: .failed)
         }
     }

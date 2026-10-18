@@ -375,6 +375,96 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(try sandbox.sessions(), ["main"])
     }
 
+    func testTopicSnoozeSnoozesTheCallerPanesTopicAndLeavesItsSession() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let start = Date()
+        let result = try await run(cli, arguments: ["topic", "snooze", "2h"],
+                                   environment: sandbox.cliEnvironment(pane: try sandbox.pane(of: "game/ship")))
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertEqual(result.stdout, id + "\n", "a write prints the id of the Topic it changed")
+        XCTAssertEqual(result.stderr, "")
+        let stored = try XCTUnwrap(sandbox.records().only?["snoozed_until"] as? String)
+        guard case .at(let date)? = SnoozeDeadline(stored: stored) else { return XCTFail("snoozed_until is \(stored)") }
+        XCTAssertEqual(date.timeIntervalSince(start), 2 * 60 * 60, accuracy: 30)
+        XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"], "a Snooze changes nothing in tmux")
+        XCTAssertEqual(try sandbox.topicOption(of: "game/ship"), id)
+    }
+
+    func testTopicSnoozeWithATopicIdReplacesALaterSnoozeFromOutsideTmux() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let forever = try await run(cli, arguments: ["topic", "snooze", "forever", "--topic", id], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(forever.status, 0, forever.output)
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["snoozed_until"] as? String, "never")
+        let start = Date()
+        let tomorrow = try await run(cli, arguments: ["topic", "snooze", "tomorrow", "10:15", "--topic", "Ship", "--json"],
+                                     environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(tomorrow.status, 0, tomorrow.output)
+        let change = try XCTUnwrap(try jsonLine(tomorrow.stdout)["snooze_changed"] as? [String: Any], tomorrow.stdout)
+        XCTAssertEqual(change["topic_ids"] as? [String], [id])
+        XCTAssertEqual(change["shortened"] as? [String], [id], "a time replaces a Snooze forever")
+        let stored = try XCTUnwrap(sandbox.records().only?["snoozed_until"] as? String)
+        guard case .at(let date)? = SnoozeDeadline(stored: stored) else { return XCTFail("snoozed_until is \(stored)") }
+        let expected = try XCTUnwrap(Calendar.current.date(bySettingHour: 10, minute: 15, second: 0,
+                                                           of: try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: start))))
+        XCTAssertEqual(date, expected, "the shorter time replaces a Snooze forever")
+    }
+
+    func testTopicSnoozeOfAPastTimeOrASettledTopicFailsAndChangesNothing() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let open = try sandbox.records()
+        let past = try await run(cli, arguments: ["topic", "snooze", "today", "0:00", "--topic", id], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(past.status, 2, past.output)
+        XCTAssertEqual(past.stderr, "muxify: that time has already passed\n")
+        XCTAssertEqual(try sandbox.records() as NSArray, open as NSArray)
+        let settle = try await run(cli, arguments: ["topic", "settle", "--topic", id], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(settle.status, 0, settle.output)
+        let settled = try sandbox.records()
+        let result = try await run(cli, arguments: ["topic", "snooze", "2h", "--topic", id], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(result.status, 1, result.output)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(result.stderr, "muxify: No open Topic matches \(id). No changes were made.\n")
+        XCTAssertEqual(try sandbox.records() as NSArray, settled as NSArray)
+    }
+
+    func testTopicSnoozeWithSeveralTopicsSnoozesEachOrNoneAndUnsnoozeEndsIt() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let ship = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let fix = try await newTopic("Fix", in: sandbox.game, sandbox: sandbox)
+        func snoozes() throws -> [String: String] {
+            Dictionary(uniqueKeysWithValues: try sandbox.records().map { ($0["id"] as! String, $0["snoozed_until"] as? String ?? "") })
+        }
+        let environment = sandbox.cliEnvironment(pane: try sandbox.pane(of: "main"))
+        let missing = try await run(cli, arguments: ["topic", "snooze", "forever", "--topic", ship, "--topic", "Nope"], environment: environment)
+        XCTAssertEqual(missing.status, 1, missing.output)
+        XCTAssertEqual(missing.stderr, "muxify: No open Topic matches Nope. No changes were made.\n")
+        XCTAssertEqual(try snoozes(), [ship: "", fix: ""], "one Topic that is not open changes nothing")
+
+        let both = try await run(cli, arguments: ["topic", "snooze", "forever", "--topic", "Fix", "--topic", ship, "--topic", fix], environment: environment)
+        XCTAssertEqual(both.status, 0, both.output)
+        XCTAssertEqual(both.stdout, "\(fix)\n\(ship)\n", "one line for each Topic, once, in the order of the options")
+        XCTAssertEqual(try snoozes(), [ship: "never", fix: "never"])
+        XCTAssertEqual(try sandbox.sessions(), ["game/fix", "game/ship", "main"], "a Snooze changes nothing in tmux")
+
+        let one = try await run(cli, arguments: ["topic", "unsnooze"], environment: sandbox.cliEnvironment(pane: try sandbox.pane(of: "game/ship")))
+        XCTAssertEqual(one.status, 0, one.output)
+        XCTAssertEqual(one.stdout, ship + "\n")
+        XCTAssertEqual(try snoozes(), [ship: "", fix: "never"])
+
+        let again = try await run(cli, arguments: ["topic", "unsnooze", "--topic", ship, "--topic", fix, "--json"], environment: environment)
+        XCTAssertEqual(again.status, 0, again.output)
+        XCTAssertEqual(try jsonLine(again.stdout)["snooze_changed"] as? [String: [String]], ["topic_ids": [ship, fix], "shortened": []],
+                       "a Topic that is not Snoozed stays as it is")
+        XCTAssertEqual(try snoozes(), [ship: "", fix: ""])
+        XCTAssertEqual(try sandbox.sessions(), ["game/fix", "game/ship", "main"], "an Unsnooze changes nothing in tmux")
+    }
+
     func testWindowMoveMovesTheCallerPanesWindowIntoTheNamedTopic() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }

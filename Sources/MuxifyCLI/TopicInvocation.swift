@@ -22,13 +22,17 @@ struct TopicInvocation: Equatable {
         case status(project: String?)
         /// One changeset across the live Sessions since each one's base. `stat` prints a summary, not the patch.
         case diff(project: String?, stat: Bool)
+        /// The time as the time step of Snooze Topic reads typed text. It becomes a time when the command runs.
+        /// `topics` are the `--topic` options; empty is the target or the caller Pane's Topic.
+        case snooze(SnoozeSchedule, topics: [TopicRef])
+        case unsnooze(topics: [TopicRef])
 
         /// The target options this command takes. A titled Topic in a Project starts its own Session, so it takes none.
         var targets: [TargetOption] {
             switch self {
             case .new(_?, _?): return []
             case .new: return [.window, .pane]
-            case .addProject, .settle, .forget, .show, .exec, .status, .diff: return [.topic, .window, .pane]
+            case .addProject, .settle, .forget, .show, .exec, .status, .diff, .snooze, .unsnooze: return [.topic, .window, .pane]
             case .list: return []
             }
         }
@@ -40,6 +44,14 @@ struct TopicInvocation: Equatable {
             switch self {
             case .show, .exec, .status, .diff: return true
             default: return false
+            }
+        }
+
+        /// A Snooze needs no Project, and a command that shows a Topic finds only the Projects of its Sessions.
+        var findsAllProjects: Bool {
+            switch self {
+            case .snooze, .unsnooze: return false
+            default: return !showsTopic
             }
         }
 
@@ -56,6 +68,8 @@ struct TopicInvocation: Equatable {
             case .exec: return "topic exec"
             case .status: return "topic status"
             case .diff: return "topic diff"
+            case .snooze: return "topic snooze"
+            case .unsnooze: return "topic unsnooze"
             }
         }
     }
@@ -97,21 +111,31 @@ struct TopicInvocation: Equatable {
     /// target, else on the caller Pane's Window or Topic.
     struct TargetOptions {
         let accepted: [TargetOption]
+        /// Snooze and Unsnooze act on each Topic of a repeated `--topic` in one write.
+        let repeatsTopic: Bool
         private(set) var chosen: (option: TargetOption, target: TopicTarget)?
+        /// Each `--topic`, in order.
+        private(set) var topics: [TopicRef] = []
 
-        init(accepting accepted: [TargetOption]) {
+        init(accepting accepted: [TargetOption], repeatsTopic: Bool = false) {
             self.accepted = accepted
+            self.repeatsTopic = repeatsTopic
         }
 
         /// Takes `argument` and its value from `args` when it is an accepted target option. False for any other word.
         mutating func take(_ argument: String, from args: inout ArraySlice<String>) throws -> Bool {
             guard let option = TargetOption(rawValue: argument), accepted.contains(option) else { return false }
-            guard chosen == nil else {
+            if let first = chosen?.option, !(repeatsTopic && first == .topic && option == .topic) {
                 let names = accepted.map(\.rawValue)
+                if repeatsTopic {
+                    throw CLIError("give --topic one or more times, or only one of " + names.dropFirst().joined(separator: " and "), exitCode: 2)
+                }
                 throw CLIError("give only one of " + names.dropLast().joined(separator: ", ") + " and " + names.last!, exitCode: 2)
             }
             guard let value = args.popFirst() else { throw CLIError(CLICommand.usage, exitCode: 2) }
-            chosen = (option, try option.target(value))
+            let target = try option.target(value)
+            if case .topic(let ref) = target { topics.append(ref) }
+            if chosen == nil { chosen = (option, target) }
             return true
         }
 
@@ -156,7 +180,7 @@ extension TopicInvocation {
         var timeout: TimeInterval?
         var execArguments: [String]?
         var stat = false
-        var targets = TargetOptions(accepting: TargetOption.allCases)
+        var targets = TargetOptions(accepting: TargetOption.allCases, repeatsTopic: name == "snooze" || name == "unsnooze")
         var output = Output.text
         while let argument = args.popFirst() {
             if try targets.take(argument, from: &args) {
@@ -208,6 +232,18 @@ extension TopicInvocation {
             command = .exec(project: project, timeout: timeout ?? 60, command: execArguments)
         case ("status", 0, _): command = .status(project: project)
         case ("diff", 0, _): command = .diff(project: project, stat: stat)
+        case ("snooze", 1..., nil):
+            // Unquoted words join, so `topic snooze mon 9am` reads as the time step reads "mon 9am". The time step
+            // says "never", but on a command line `snooze never` reads as no Snooze, so the CLI says "forever".
+            let text = words.joined(separator: " ")
+            if text.lowercased() == "forever" {
+                command = .snooze(.never, topics: targets.topics)
+            } else if let schedule = SnoozeSchedule(text, typed: true), schedule != .never {
+                command = .snooze(schedule, topics: targets.topics)
+            } else {
+                throw CLIError("topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever", exitCode: 2)
+            }
+        case ("unsnooze", 0, nil): command = .unsnooze(topics: targets.topics)
         default: throw usageError
         }
         let takes = command.targets
@@ -215,7 +251,11 @@ extension TopicInvocation {
             throw CLIError("\(command.phrase) does not take \(chosen.option.rawValue)" + Self.choice(of: takes), exitCode: 2)
         }
         caller = try targets.caller(environment: environment, needed: command.needsTarget, offered: takes)
-        target = targets.chosen?.target
+        // Snooze and Unsnooze send their `--topic` options in the command, as a list.
+        switch command {
+        case .snooze(_, let topics), .unsnooze(let topics): target = topics.isEmpty ? targets.chosen?.target : nil
+        default: target = targets.chosen?.target
+        }
         self.output = output
         paths = MuxifyPaths(environment: environment, home: environment["HOME"] ?? NSHomeDirectory())
     }
@@ -232,10 +272,10 @@ extension TopicInvocation {
         if command == .list {
             response = TopicService(paths: paths).handle(TopicRequest(.list))
         } else {
-            // Showing a Topic needs only the Projects of its Sessions. Finding every Project runs git in each
-            // repository under projects.paths, so the Topic is found first and only its folders are looked at.
+            // Finding every Project runs git in each repository under projects.paths, so a command that shows a
+            // Topic finds the Topic first and then looks only at its folders.
             let showsTopic = command.showsTopic
-            var config = try await ConfigProjects.load(paths.configFile, within: showsTopic ? [] : nil)
+            var config = try await ConfigProjects.load(paths.configFile, within: command.findsAllProjects ? nil : [])
             func handle() throws -> TopicResponse {
                 let service = TopicService(paths: paths, server: .local, projects: config.projects, sessionOrder: config.topics.sessionOrder, insertPosition: config.topics.insertPosition)
                 // No client: no terminal switches to the result, because a command changes what the user sees only
@@ -289,6 +329,7 @@ extension TopicInvocation {
                            session.worktree?.branch ?? ""].map(\.oneLineField).joined(separator: "\t"))
                 }
             case .changed(let change): if let id = change.topicID { print(id) }
+            case .snoozeChanged(let change): for id in change.topicIDs { print(id) }
             case .failed: break
             }
         }
@@ -321,6 +362,11 @@ extension TopicInvocation {
                   var choices = try? service.settleChoices(for: settled).get() else { return .settle(choices: [], outcome: "") }
             for index in choices.indices where choices[index].worktree != nil { choices[index].removeWorktree = true }
             return .settle(choices: choices, outcome: "")
+        case .snooze(let schedule, let topics):
+            // Only a time later today can be past, e.g. today 8:00 at 9:00.
+            guard let deadline = schedule.deadline(from: Date()) else { throw CLIError("that time has already passed", exitCode: 2) }
+            return .snooze(until: deadline, topics: topics)
+        case .unsnooze(let topics): return .unsnooze(topics: topics)
         case .list: return .list
         case .show, .exec, .status, .diff: return .show
         }

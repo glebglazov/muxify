@@ -73,8 +73,22 @@ public enum SnoozeSchedule: Equatable {
     }
 }
 
-public enum SnoozeDeadline: Equatable {
+/// On the wire and in a record, its `stored` string.
+public enum SnoozeDeadline: Codable, Hashable, Sendable {
     case at(Date), never
+
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        guard let deadline = SnoozeDeadline(stored: try value.decode(String.self)) else {
+            throw DecodingError.dataCorruptedError(in: value, debugDescription: "expected never or an ISO 8601 time")
+        }
+        self = deadline
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        try value.encode(stored)
+    }
 
     public init?(stored: String) {
         if stored == "never" { self = .never; return }

@@ -281,6 +281,23 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]), "")
     }
 
+    func testSnoozeOfSeveralTopicsWritesEachOnceAndReportsTheShortenedOnes() throws {
+        let first = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "First", project: nil)))).topicID)
+        let second = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Second", project: nil)))).topicID)
+        _ = try service().handle(TopicRequest(.snooze(until: .never, topics: [.id(second)])))
+        let tomorrow = SnoozeDeadline.at(Date().addingTimeInterval(86_400))
+        let response = service().handle(TopicRequest(.snooze(until: tomorrow, topics: [.named("Second"), .id(first), .id(second)])))
+        XCTAssertEqual(response, .snoozeChanged(TopicSnoozeChange(topicIDs: [second, first], shortened: [second])))
+        func snoozes() throws -> [String: String?] { Dictionary(uniqueKeysWithValues: try records().map { ($0.id, $0.snoozedUntil) }) }
+        XCTAssertEqual(try snoozes(), [first: tomorrow.stored, second: tomorrow.stored])
+
+        let both = try failure(service().handle(TopicRequest(.unsnooze(topics: [.id(first)]), target: .topic(.id(second)))))
+        XCTAssertEqual(both.kind, .unsupported)
+        XCTAssertEqual(try snoozes(), [first: tomorrow.stored, second: tomorrow.stored], "a request with a target and Topics changes nothing")
+        XCTAssertEqual(service().handle(TopicRequest(.unsnooze(topics: [.id(first)]))), .snoozeChanged(TopicSnoozeChange(topicIDs: [first])))
+        XCTAssertEqual(try snoozes(), [first: nil, second: tomorrow.stored])
+    }
+
     func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
         try server.run(["new-session", "-d", "-s", "notes", "-c", project.folder.path])
         try server.run(["new-session", "-d", "-s", "chores", "-c", tools.folder.path])
