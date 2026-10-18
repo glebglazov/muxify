@@ -35,6 +35,14 @@ struct TopicInvocation: Equatable {
 
         var needsTarget: Bool { !targets.isEmpty }
 
+        /// exec, status and diff work in the Sessions that `topic show` gives.
+        var showsTopic: Bool {
+            switch self {
+            case .show, .exec, .status, .diff: return true
+            default: return false
+            }
+        }
+
         /// The command as the user typed it, for an error message.
         var phrase: String {
             switch self {
@@ -220,17 +228,27 @@ extension TopicInvocation {
     }
 
     func run() async throws {
-        let response: TopicResponse
+        var response: TopicResponse
         if command == .list {
             response = TopicService(paths: paths).handle(TopicRequest(.list))
         } else {
-            let config = try await ConfigProjects.load(paths.configFile)
-            let projects = config.projects
-            let service = TopicService(paths: paths, server: .local, projects: projects, sessionOrder: config.topics.sessionOrder, insertPosition: config.topics.insertPosition)
-            // No client: no terminal switches to the result, because a command changes what the user sees only
-            // when they ask for it.
-            response = service.handle(TopicRequest(try request(projects: projects, service: service), target: target,
+            // Showing a Topic needs only the Projects of its Sessions. Finding every Project runs git in each
+            // repository under projects.paths, so the Topic is found first and only its folders are looked at.
+            let showsTopic = command.showsTopic
+            var config = try await ConfigProjects.load(paths.configFile, within: showsTopic ? [] : nil)
+            func handle() throws -> TopicResponse {
+                let service = TopicService(paths: paths, server: .local, projects: config.projects, sessionOrder: config.topics.sessionOrder, insertPosition: config.topics.insertPosition)
+                // No client: no terminal switches to the result, because a command changes what the user sees only
+                // when they ask for it.
+                return service.handle(TopicRequest(try request(projects: config.projects, service: service), target: target,
                                                    caller: caller.map(TopicCaller.pane)))
+            }
+            response = try handle()
+            if showsTopic, case .topic(let topic) = response {
+                config.projects = ProjectDiscovery.discover(config.projectRoots, aliases: config.projectAliases,
+                                                            within: topic.sessions.map(\.project.path))
+                response = try handle()
+            }
         }
         if case .topic(let topic) = response {
             switch command {
@@ -304,7 +322,6 @@ extension TopicInvocation {
             for index in choices.indices where choices[index].worktree != nil { choices[index].removeWorktree = true }
             return .settle(choices: choices, outcome: "")
         case .list: return .list
-        // exec, status and diff work in the Sessions that `topic show` gives.
         case .show, .exec, .status, .diff: return .show
         }
     }

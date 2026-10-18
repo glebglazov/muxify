@@ -115,6 +115,26 @@ final class ProjectDiscoveryTests: XCTestCase {
         XCTAssertEqual(projects[3].displayName, "Dotfiles", "an alias with ~ means the home folder of the machine that looks")
     }
 
+    func testDiscoveryWithinFoldersFindsOnlyTheProjectsThatHoldThemAsTheFullRunDoes() throws {
+        let directory = try TestDirectory()
+        let home = String(cString: realpath(directory.url.path, nil))
+        for folder in ["projects/app/src", "projects/lib/nested/deep", "projects/other", "dotfiles"] {
+            try FileManager.default.createDirectory(atPath: "\(home)/\(folder)", withIntermediateDirectories: true)
+        }
+        _ = try CommandRunner().run(CommandInvocation(executable: "/usr/bin/env", arguments: ["git", "-C", "\(home)/projects/app", "init", "-q"]),
+                                    environment: ["HOME": home, "PATH": "/usr/bin:/bin:/opt/homebrew/bin", "GIT_CONFIG_NOSYSTEM": "1"])
+        let roots = [ProjectRoot(path: "\(home)/projects", depth: 2), ProjectRoot(path: "\(home)/dotfiles")]
+        let all = ProjectDiscovery.discover(roots, aliases: [:])
+        let folders = ["\(home)/projects/app/src", "\(home)/projects/lib/nested/deep"]
+        let within = ProjectDiscovery.discover(roots, aliases: [:], within: folders)
+        XCTAssertEqual(within.map(\.name), ["app", "lib", "nested"])
+        XCTAssertEqual(within, all.filter { project in within.contains { $0.path == project.path } })
+        for folder in folders {
+            XCTAssertEqual(Project.containing(folder, in: within), Project.containing(folder, in: all), folder)
+        }
+        XCTAssertEqual(ProjectDiscovery.discover(roots, aliases: [:], within: []), [])
+    }
+
     func testALinkedWorktreeThatSortsFirstIsARowOfItsRepository() throws {
         let directory = try TestDirectory()
         let home = String(cString: realpath(directory.url.path, nil))

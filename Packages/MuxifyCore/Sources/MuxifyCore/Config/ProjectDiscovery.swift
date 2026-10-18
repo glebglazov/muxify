@@ -3,14 +3,17 @@ import Foundation
 /// Finds the Projects of `projects.paths` on one machine, with one script that runs here or over a Remote
 /// Environment's SSH master. Each repository it finds comes with its Worktrees, read from git's layout.
 public enum ProjectDiscovery {
-    /// Takes each root's path and depth as a pair of arguments. Prints `H` and the home folder, `R` and the
-    /// root's index when a root starts, then for each folder `D`, the folder, its kind (`directory`, `plain` or
-    /// `bare`) and its real path, followed by its `git worktree list --porcelain` lines after `W`.
-    /// Missing roots and hidden folders are skipped.
+    /// Takes the wanted folders, one per line, then each root's path and depth as a pair of arguments. Prints `H`
+    /// and the home folder, `R` and the root's index when a root starts, then for each folder `D`, the folder, its
+    /// kind (`directory`, `plain` or `bare`) and its real path, followed by its `git worktree list --porcelain`
+    /// lines after `W`. Missing roots and hidden folders are skipped. With wanted folders, a folder that is not one
+    /// of them or a parent of one is skipped before git runs in it.
     public static let script = """
     s='\(Tmux.separator)'
     nl='
     '
+    wanted=$1
+    shift
     printf 'H%s%s\\n' "$s" "$HOME"
     index=0
     while [ "$#" -ge 2 ]; do
@@ -34,6 +37,12 @@ public enum ProjectDiscovery {
             else
                 find "$root" -mindepth 1 -maxdepth "$depth" -name '.*' -prune -o -type d -print 2>/dev/null
             fi | while IFS= read -r dir; do
+                if [ -n "$wanted" ]; then
+                    case $nl$wanted$nl in
+                        *"$nl$dir$nl"* | *"$nl$dir/"*) ;;
+                        *) continue ;;
+                    esac
+                fi
                 kind=directory
                 if [ -e "$dir/.git" ] || { [ -f "$dir/HEAD" ] && [ -d "$dir/objects" ]; }; then
                     if [ "$(git -C "$dir" config --bool core.bare 2>/dev/null)" = true ]; then
@@ -54,8 +63,9 @@ public enum ProjectDiscovery {
     done
     """
 
-    public static func arguments(for roots: [ProjectRoot]) -> [String] {
-        roots.flatMap { [$0.path, String($0.depth)] }
+    /// `within` nil wants every folder.
+    public static func arguments(for roots: [ProjectRoot], within folders: [String]? = nil) -> [String] {
+        [folders?.joined(separator: "\n") ?? ""] + roots.flatMap { [$0.path, String($0.depth)] }
     }
 
     /// The Projects in the script's output, in root order and then by path. The first root to find a folder
@@ -101,10 +111,11 @@ public enum ProjectDiscovery {
         return projects
     }
 
-    /// Runs the script on this Mac.
-    public static func discover(_ roots: [ProjectRoot], aliases: [String: String]) -> [Project] {
-        guard !roots.isEmpty,
-              let output = try? Shell.run("/bin/sh", ["-c", script, "muxify"] + arguments(for: roots)) else { return [] }
+    /// Runs the script on this Mac. With `within`, only the Projects that hold one of those folders, as the full
+    /// run names them, are found.
+    public static func discover(_ roots: [ProjectRoot], aliases: [String: String], within folders: [String]? = nil) -> [Project] {
+        guard !roots.isEmpty, folders?.isEmpty != true,
+              let output = try? Shell.run("/bin/sh", ["-c", script, "muxify"] + arguments(for: roots, within: folders)) else { return [] }
         return projects(in: output, roots: roots, aliases: aliases)
     }
 
