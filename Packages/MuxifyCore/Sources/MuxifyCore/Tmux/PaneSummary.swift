@@ -9,11 +9,14 @@ public struct PaneSummary: Codable, Hashable, Sendable {
         /// Nil until the Agent has run a turn.
         public var status: AgentStatus?
         public var unread: Bool
+        /// The id that the Agent's CLI gives its conversation. Nil until the Agent reports it.
+        public var conversation: String?
 
-        public init(kind: AgentKind, status: AgentStatus?, unread: Bool) {
+        public init(kind: AgentKind, status: AgentStatus?, unread: Bool, conversation: String? = nil) {
             self.kind = kind
             self.status = status
             self.unread = unread
+            self.conversation = conversation
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -21,9 +24,10 @@ public struct PaneSummary: Codable, Hashable, Sendable {
             try values.encode(kind, forKey: .kind)
             try values.encode(status, forKey: .status)
             try values.encode(unread, forKey: .unread)
+            try values.encode(conversation, forKey: .conversation)
         }
 
-        private enum CodingKeys: String, CodingKey { case kind, status, unread }
+        private enum CodingKeys: String, CodingKey { case kind, status, unread, conversation }
     }
 
     public var id: String
@@ -46,7 +50,8 @@ public struct PaneSummary: Codable, Hashable, Sendable {
         path = pane.path
         label = pane.label
         agent = AgentKind(rawValue: pane.agent).flatMap { kind in
-            Agent.runs(in: pane) ? AgentState(kind: kind, status: AgentStatus(rawValue: pane.agentStatus), unread: pane.unread) : nil
+            Agent.runs(in: pane) ? AgentState(kind: kind, status: AgentStatus(rawValue: pane.agentStatus), unread: pane.unread,
+                                                conversation: pane.agentConversation.isEmpty ? nil : pane.agentConversation) : nil
         }
     }
 

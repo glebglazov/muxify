@@ -12,6 +12,7 @@ enum CLICommand: Equatable {
     case topic(TopicInvocation)
     case project(ProjectInvocation)
     case agent(AgentInvocation)
+    case agentConversation(AgentConversationInvocation)
     case window(WindowInvocation)
 
     static let usage = """
@@ -29,13 +30,17 @@ enum CLICommand: Equatable {
            muxify topic snooze <time> [--topic <id|label>... | --window <id> | --pane <id>] [--json]
            muxify topic unsnooze [--topic <id|label>... | --window <id> | --pane <id>] [--json]
            muxify topic list [--json]
-           muxify topic show [--topic <id|label> | --window <id> | --pane <id>] [--json]
+           muxify topic show [--conversations] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic status [--project <dir>] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic diff [--stat] [--project <dir>] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic exec [--project <dir>] [--timeout <seconds>] [--topic <id|label> | --window <id> | --pane <id>] [--json] -- <command> [<argument>...]
            muxify window move --topic <id|label> [--window <id> | --pane <id>] [--json]
            muxify project list [--json]
            muxify agent list [--topic <id|label>] [--status <status>] [--unread] [--json]
+           muxify agent conversation (<pane> | --conversation <id> --kind <kind> | --transcript <path> [--kind <kind>])
+                                     [--head <n> | --tail <n> | --range <a>..<b>] [--after <index>] [--since <time>]
+                                     [--role <role>,... | --tools | --tool <name>,...] [--grep <regex> [--context <n>]]
+                                     [--max-chars <n> | --full] [--info] [--json]
 
     browser available  Prints local, remote or no for this Pane's newest Client.
                        Exits 0 for local or remote, and 1 for no.
@@ -73,7 +78,9 @@ enum CLICommand: Equatable {
     topic list     Prints each open Topic's id and label without starting Muxify.
     topic show     Prints this Pane's Topic: its id and label, then a line for each live
                    Session: its name, Project, folder and branch. With --json, also its
-                   Windows and Panes, and the Agent, Status and Unread of each Pane.
+                   Windows and Panes, and the Agent, Status, Unread and conversation of each Pane.
+                     --conversations      also a line for the conversation of each Agent that
+                                          the Topic has or remembers: its kind and id
     topic status   Prints the git status of each live Session of this Pane's Topic, as
                    git status --short --branch does, with each untracked file, under a
                    "==> <session> <==" line.
@@ -102,6 +109,32 @@ enum CLICommand: Equatable {
                      --status <status>   only the Agents with this Status: working,
                                          blocked, done or failed
                      --unread            only the Unread Agents
+                   With --json, also the conversation id of each Agent.
+    agent conversation
+                   Prints the Entries of an Agent's conversation from the Transcript that
+                   its CLI writes: each message, tool call and tool result, with an index
+                   that does not change. It reads the Agent in <pane>, the conversation
+                   that --conversation and --kind (claude, codex, pi or opencode) name,
+                   or the Transcript file at --transcript. Without a selection, it prints
+                   the last 20 user and assistant Entries, and on stderr what it left out.
+                     --head <n>, --tail <n>  the first or last n Entries
+                     --range <a>..<b>     the Entries from index a to b; negative counts from
+                                          the end (-20..-1) and a side can be open (40..)
+                     --after <index>      only the Entries after this index, to read new ones
+                     --since <time>       only the Entries from this time: 2h, 30m, 17:30 or
+                                          ISO 8601, as topic snooze reads a time, but back
+                     --role <role>,...    user, assistant, tool_call, tool_result or all
+                                          (default user,assistant)
+                     --tools              all roles: also the tool calls and tool results
+                     --tool <name>,...    only the tool Entries of these tools, e.g. Bash
+                     --grep <regex>       only the Entries whose text or tool matches; it
+                                          ignores case unless <regex> has a capital letter
+                     --context <n>        with --grep, also n Entries before and after
+                     --max-chars <n>      cut the text of each Entry at n characters (default 2000)
+                     --full               do not cut the text
+                     --info               print the size, times and roles, not the Entries
+                     --json               print a line of JSON for the conversation, then
+                                          one for each Entry
 
     A Topic command acts on this Pane, or on the target that you name:
                      --topic <id|label>  an open Topic, e.g. --topic "Fix login"
@@ -148,7 +181,11 @@ enum CLICommand: Equatable {
             self = .window(try WindowInvocation(arguments: args, environment: environment))
         case "agent":
             if args.contains(where: { $0 == "-h" || $0 == "--help" }) { self = .help; return }
-            self = .agent(try AgentInvocation(arguments: args, environment: environment))
+            if args.first == "conversation" {
+                self = .agentConversation(try AgentConversationInvocation(arguments: args.dropFirst(), environment: environment))
+            } else {
+                self = .agent(try AgentInvocation(arguments: args, environment: environment))
+            }
         case "session":
             switch args.popFirst() {
             case "-h", "--help": self = .help
@@ -232,6 +269,7 @@ enum CLICommand: Equatable {
         case .topic(let invocation): try await invocation.run()
         case .project(let invocation): try await invocation.run()
         case .agent(let invocation): try await invocation.run()
+        case .agentConversation(let invocation): try invocation.run(using: runner)
         case .window(let invocation): try await invocation.run()
         case .sessionLock(let invocation): try invocation.run()
         }

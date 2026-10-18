@@ -1,0 +1,245 @@
+{
+ "info": {
+  "id": "ses_1729036f4ffewYkHrXwKWLzweB",
+  "slug": "scrubbed 1",
+  "projectID": "scrubbed 2",
+  "directory": "scrubbed 3",
+  "title": "scrubbed 4",
+  "version": "1.14.19",
+  "summary": {
+   "additions": 0,
+   "deletions": 0,
+   "files": 0
+  },
+  "cost": 0.0039749,
+  "tokens": {
+   "input": 4,
+   "output": 108,
+   "reasoning": 0,
+   "cache": {
+    "read": 28184,
+    "write": 490
+   }
+  },
+  "permission": [
+   {
+    "permission": "scrubbed 5",
+    "pattern": "scrubbed 6",
+    "action": "scrubbed 7"
+   },
+   {
+    "permission": "scrubbed 8",
+    "pattern": "scrubbed 9",
+    "action": "scrubbed 10"
+   },
+   {
+    "permission": "scrubbed 11",
+    "pattern": "scrubbed 12",
+    "action": "scrubbed 13"
+   }
+  ],
+  "time": {
+   "created": 1780489373963,
+   "updated": 1780489376181
+  }
+ },
+ "messages": [
+  {
+   "info": {
+    "role": "user",
+    "time": {
+     "created": 1780489374187
+    },
+    "agent": "scrubbed 14",
+    "model": {
+     "providerID": "scrubbed 15",
+     "modelID": "scrubbed 16"
+    },
+    "summary": {
+     "diffs": []
+    },
+    "id": "msg_e8d6fc9eb001l3erHwUaF2VDDL",
+    "sessionID": "scrubbed 17"
+   },
+   "parts": [
+    {
+     "type": "text",
+     "text": "scrubbed 18",
+     "id": "prt_e8d6fc9ec001cgTAG6SZfAwhXQ",
+     "sessionID": "scrubbed 19",
+     "messageID": "scrubbed 20"
+    }
+   ]
+  },
+  {
+   "info": {
+    "parentID": "scrubbed 21",
+    "role": "assistant",
+    "mode": "scrubbed 22",
+    "agent": "scrubbed 23",
+    "path": {
+     "cwd": "scrubbed 24",
+     "root": "scrubbed 25"
+    },
+    "cost": 0.002221,
+    "tokens": {
+     "total": 14342,
+     "input": 1,
+     "output": 82,
+     "reasoning": 0,
+     "cache": {
+      "write": 334,
+      "read": 13925
+     }
+    },
+    "modelID": "scrubbed 26",
+    "providerID": "scrubbed 27",
+    "time": {
+     "created": 1780489374238,
+     "completed": 1780489376176
+    },
+    "finish": "scrubbed 28",
+    "id": "msg_e8d6fca1e001dG9sLdYOKxVWfQ",
+    "sessionID": "scrubbed 29"
+   },
+   "parts": [
+    {
+     "type": "step-start",
+     "id": "prt_e8d6fcf0c001JaHIAUpN2If7RY",
+     "sessionID": "scrubbed 30",
+     "messageID": "scrubbed 31"
+    },
+    {
+     "type": "text",
+     "text": "scrubbed 32",
+     "time": {
+      "start": 1780489375501,
+      "end": 1780489375762
+     },
+     "id": "prt_e8d6fcf0d001D6VEs3kjFOhboS",
+     "sessionID": "scrubbed 33",
+     "messageID": "scrubbed 34"
+    },
+    {
+     "type": "tool",
+     "tool": "read",
+     "callID": "scrubbed 35",
+     "state": {
+      "status": "completed",
+      "input": {
+       "filePath": "scrubbed 36"
+      },
+      "output": "scrubbed 37",
+      "metadata": {
+       "preview": "scrubbed 38",
+       "truncated": false,
+       "loaded": []
+      },
+      "title": "scrubbed 39",
+      "time": {
+       "start": 1780489376062,
+       "end": 1780489376071
+      }
+     },
+     "metadata": {
+      "anthropic": {
+       "caller": {
+        "type": "direct"
+       }
+      }
+     },
+     "id": "prt_e8d6fd014001brlE8pkPjm97tB",
+     "sessionID": "scrubbed 40",
+     "messageID": "scrubbed 41"
+    },
+    {
+     "reason": "scrubbed 42",
+     "type": "step-finish",
+     "tokens": {
+      "total": 14342,
+      "input": 1,
+      "output": 82,
+      "reasoning": 0,
+      "cache": {
+       "write": 334,
+       "read": 13925
+      }
+     },
+     "cost": 0.002221,
+     "id": "prt_e8d6fd1ae001lJPHheEX6FXKHC",
+     "sessionID": "scrubbed 43",
+     "messageID": "scrubbed 44"
+    }
+   ]
+  },
+  {
+   "info": {
+    "parentID": "scrubbed 45",
+    "role": "assistant",
+    "mode": "scrubbed 46",
+    "agent": "scrubbed 47",
+    "path": {
+     "cwd": "scrubbed 48",
+     "root": "scrubbed 49"
+    },
+    "cost": 0.0017539,
+    "tokens": {
+     "total": 14444,
+     "input": 3,
+     "output": 26,
+     "reasoning": 0,
+     "cache": {
+      "write": 156,
+      "read": 14259
+     }
+    },
+    "modelID": "scrubbed 50",
+    "providerID": "scrubbed 51",
+    "time": {
+     "created": 1780489376178,
+     "completed": 1780489377538
+    },
+    "finish": "scrubbed 52",
+    "id": "msg_e8d6fd1b2001lBrMdZKI2QDUcz",
+    "sessionID": "scrubbed 53"
+   },
+   "parts": [
+    {
+     "type": "step-start",
+     "id": "prt_e8d6fd5ba001wHnAmX6hExYGjt",
+     "sessionID": "scrubbed 54",
+     "messageID": "scrubbed 55"
+    },
+    {
+     "type": "text",
+     "text": "scrubbed 56",
+     "time": {
+      "start": 1780489377211,
+      "end": 1780489377426
+     },
+     "id": "prt_e8d6fd5bb0019jtOPD94y5m0ch",
+     "sessionID": "scrubbed 57",
+     "messageID": "scrubbed 58"
+    },
+    {
+     "reason": "scrubbed 59",
+     "type": "step-finish",
+     "tokens": {
+      "total": 14444,
+      "input": 3,
+      "output": 26,
+      "reasoning": 0,
+      "cache": {
+       "write": 156,
+       "read": 14259
+      }
+     },
+     "cost": 0.0017539,
+     "id": "prt_e8d6fd6ff0017pWf4BAMHF9VDL",
+     "sessionID": "scrubbed 60",
+     "messageID": "scrubbed 61"
+    }
+   ]
+  }
+ ]
+}

@@ -181,9 +181,10 @@ final class CLICommandTests: XCTestCase {
              topic(.unsnooze(topics: [.named("a"), .named("b")]), caller: nil, output: .json)),
             (["list"], outside, topic(.list, caller: nil)),
             (["list", "--json"], inside, topic(.list, output: .json)),
-            (["show"], inside, topic(.show)),
-            (["show", "--topic", "Fix reward", "--json"], outside, topic(.show, target: .topic(.named("Fix reward")), caller: nil, output: .json)),
-            (["show", "--pane", "%3"], inside, topic(.show, target: pane)),
+            (["show"], inside, topic(.show(conversations: false))),
+            (["show", "--topic", "Fix reward", "--json"], outside, topic(.show(conversations: false), target: .topic(.named("Fix reward")), caller: nil, output: .json)),
+            (["show", "--pane", "%3"], inside, topic(.show(conversations: false), target: pane)),
+            (["show", "--conversations", "--json"], inside, topic(.show(conversations: true), output: .json)),
             (["exec", "--", "git", "status", "--short"], inside, topic(.exec(project: nil, timeout: 60, command: ["git", "status", "--short"]))),
             (["exec", "--topic", "Fix reward", "--project", "tools", "--timeout", "2.5", "--json", "--", "make", "--", "-j"], outside,
              topic(.exec(project: "tools", timeout: 2.5, command: ["make", "--", "-j"]), target: .topic(.named("Fix reward")),
@@ -314,6 +315,68 @@ final class CLICommandTests: XCTestCase {
                 XCTAssertEqual(error.localizedDescription, message, "\(arguments)")
             }
         }
+    }
+
+    func testAgentConversationTakesOneSourceTheSelectionAndTheOutput() throws {
+        let environment = ["HOME": "/home/me", "CODEX_HOME": "/codex"]
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let roots = TranscriptRoots(environment: environment, home: URL(fileURLWithPath: "/home/me"))
+        let pane = try XCTUnwrap(PaneID(rawValue: "%12"))
+        func read(_ source: AgentConversationInvocation.Source, _ selection: EntrySelection = EntrySelection(window: .tail(20)),
+                  info: Bool = false, output: TopicInvocation.Output = .text) -> AgentConversationInvocation {
+            AgentConversationInvocation(source: source, selection: selection, info: info, output: output, roots: roots)
+        }
+        let all = Set(Entry.Role.allCases)
+        let cases: [([String], AgentConversationInvocation)] = [
+            (["%12"], read(.pane(pane))),
+            (["--conversation", "abc-1", "--kind", "codex", "--json"], read(.conversation(AgentConversation(kind: .codex, id: "abc-1")), output: .json)),
+            (["--transcript", "t.jsonl"], read(.transcript(path: "t.jsonl", kind: nil))),
+            (["--transcript", "t.jsonl", "--kind", "pi", "--info"], read(.transcript(path: "t.jsonl", kind: .pi), info: true)),
+            (["%12", "--tools", "--range", "-20..-1", "--full"], read(.pane(pane), EntrySelection(roles: all, window: .range(-20, -1), maxChars: nil))),
+            (["%12", "--range", "40.."], read(.pane(pane), EntrySelection(window: .range(40, nil)))),
+            (["%12", "--after", "61", "--max-chars", "500"], read(.pane(pane), EntrySelection(after: 61, maxChars: 500))),
+            (["%12", "--grep", "auth", "--context", "2", "--head", "3"],
+             read(.pane(pane), EntrySelection(grep: try .init(pattern: "auth", context: 2), window: .head(3)))),
+            (["%12", "--tool", "Bash,Edit"], read(.pane(pane), EntrySelection(roles: [.toolCall, .toolResult], tools: ["Bash", "Edit"]))),
+            (["%12", "--role", "user,tool_result"], read(.pane(pane), EntrySelection(roles: [.user, .toolResult]))),
+            (["%12", "--since", "2h"], read(.pane(pane), EntrySelection(since: now.addingTimeInterval(-7200)))),
+        ]
+        for (arguments, expected) in cases {
+            XCTAssertEqual(try AgentConversationInvocation(arguments: ArraySlice(arguments), environment: environment, now: now), expected,
+                           "\(arguments)")
+        }
+        XCTAssertEqual(try CLICommand(arguments: ["agent", "conversation", "%12"], environment: environment),
+                       .agentConversation(read(.pane(pane))))
+        XCTAssertEqual(try CLICommand(arguments: ["agent", "conversation", "--help"], environment: [:]), .help)
+        let errors: [([String], String)] = [
+            ([], "name the conversation with a Pane, --conversation <id> --kind <kind> or --transcript <path>"),
+            (["%1", "--transcript", "t.jsonl"], "name the conversation with a Pane, --conversation <id> --kind <kind> or --transcript <path>"),
+            (["@1"], "agent conversation takes a tmux Pane id, e.g. %3"),
+            (["--conversation", "abc"], "--conversation needs --kind claude, codex, pi or opencode"),
+            (["--conversation", "../abc", "--kind", "claude"], "--conversation takes an id of letters, digits, _ and -"),
+            (["%1", "--kind", "claude"], "--kind goes with --conversation or --transcript, not with a Pane"),
+            (["--transcript", "t.json", "--kind", "opencode"], "OpenCode keeps no Transcript file; read it with --conversation <id> --kind opencode"),
+            (["%1", "--kind", "gpt"], "--kind takes claude, codex, pi or opencode"),
+            (["%1", "--head", "2", "--tail", "2"], "give only one of --head, --tail and --range"),
+            (["%1", "--tail", "0"], "--tail takes a whole number above 0"),
+            (["%1", "--range", "..", "--json"], "--range takes A..B, e.g. 40..60, -20..-1 or 40.."),
+            (["%1", "--range", "4-6"], "--range takes A..B, e.g. 40..60, -20..-1 or 40.."),
+            (["%1", "--tools", "--role", "user"], "give only one of --role, --tools and --tool"),
+            (["%1", "--role", "system"], "--role takes user, assistant, tool_call, tool_result or all, separated by commas"),
+            (["%1", "--context", "2"], "--context goes with --grep"),
+            (["%1", "--grep", "("], "--grep takes a regular expression; ( is not one"),
+            (["%1", "--full", "--max-chars", "9"], "give only one of --max-chars and --full"),
+            (["%1", "--info", "--tail", "5"], "--info prints no Entries, so it takes no selection; it takes --json"),
+            (["%1", "--since", "soon"], "--since takes a time, e.g. 2h, 30m, 17:30, mon 9am or 2026-10-18T09:00:00Z"),
+            (["%1", "--unknown"], CLICommand.usage),
+        ]
+        for (arguments, message) in errors {
+            XCTAssertThrowsError(try CLICommand(arguments: ["agent", "conversation"] + arguments, environment: environment), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+                XCTAssertEqual(error.localizedDescription, message, "\(arguments)")
+            }
+        }
+        XCTAssertThrowsError(try CLICommand(arguments: ["topic", "status", "--conversations"], environment: ["TMUX_PANE": "%1"]))
     }
 
     func testTopicCommandsRejectWhatTheShellToolRejected() {

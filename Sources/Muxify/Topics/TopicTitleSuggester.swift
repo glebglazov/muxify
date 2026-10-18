@@ -8,10 +8,7 @@ struct TopicTitleSuggester {
         case newTopic(TmuxPane?, Project?)
     }
 
-    struct Conversation: Hashable {
-        let kind: AgentKind
-        let id: String
-    }
+    typealias Conversation = AgentConversation
 
     enum CommandOutcome: Equatable {
         case completed(status: Int32, stdout: String, stderr: String)
@@ -50,16 +47,17 @@ struct TopicTitleSuggester {
     private static let instruction = "Give a short title for this work, at most 5 words. Return plain text on one line."
     private let commands: [String]
     private let commandTimeout: TimeInterval
-    private let homeDirectory: URL
+    private let transcriptRoots: TranscriptRoots
     private let transcriptLoader: TranscriptLoader?
     private let modelCall: ModelCall
 
     init(commands: [String], commandTimeout: TimeInterval = 30,
          homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+         environment: [String: String] = ProcessInfo.processInfo.environment,
          transcriptLoader: TranscriptLoader? = nil, modelCall: ModelCall? = nil) {
         self.commands = commands
         self.commandTimeout = commandTimeout
-        self.homeDirectory = homeDirectory
+        transcriptRoots = TranscriptRoots(environment: environment, home: homeDirectory)
         self.transcriptLoader = transcriptLoader
         self.modelCall = modelCall ?? Self.runCommand
     }
@@ -68,7 +66,7 @@ struct TopicTitleSuggester {
         let request = requestContext(for: source)
         var excerpts: [ConversationExcerpt] = []
         for conversation in request.conversations {
-            try validate(conversation)
+            guard conversation.hasSafeID else { throw Failure.invalidConversationID(conversation.kind, conversation.id) }
             let messages = try transcriptLoader?(conversation) ?? loadTranscript(conversation)
             let excerpt = ConversationExcerpt(conversation: conversation, messages: messages)
             if !excerpt.messages.isEmpty { excerpts.append(excerpt) }
@@ -132,23 +130,11 @@ struct TopicTitleSuggester {
     private func requestContext(for source: Source) -> RequestContext {
         switch source {
         case .newTopic(let pane, let project):
-            let conversations = pane.flatMap(Self.conversation(in:)).map { [$0] } ?? []
+            let conversations = pane.flatMap(AgentConversation.init(in:)).map { [$0] } ?? []
             return RequestContext(projectNames: project.map { [$0.name] } ?? [], conversations: conversations)
         case .topic(let topic, let snapshot, let projects):
             let windows = snapshot.windows.filter { $0.topicID == topic.id }
-            let windowIDs = Set(windows.map(\.id))
-            var conversations = snapshot.panes.filter { windowIDs.contains($0.windowID) }
-                .compactMap(Self.conversation(in:))
-            for session in topic.sessions {
-                guard case .array(let rememberedWindows)? = session["windows"] else { continue }
-                for window in rememberedWindows {
-                    guard let agent = window["agent"]?.string.flatMap(AgentKind.init(rawValue:)),
-                          let id = window["agent_conversation"]?.string, !id.isEmpty else { continue }
-                    conversations.append(Conversation(kind: agent, id: id))
-                }
-            }
-            var seen: Set<String> = []
-            conversations = conversations.filter { seen.insert($0.id).inserted }
+            let conversations = topic.agentConversations(in: snapshot)
 
             var names: [String] = []
             func project(at path: String) -> Project {
@@ -165,19 +151,6 @@ struct TopicTitleSuggester {
                 append(session["project_path"]?.string.map(project(at:)))
             }
             return RequestContext(projectNames: names, conversations: conversations)
-        }
-    }
-
-    private static func conversation(in pane: TmuxPane) -> Conversation? {
-        guard Agent.runs(in: pane), let kind = AgentKind(rawValue: pane.agent), !pane.agentConversation.isEmpty else { return nil }
-        return Conversation(kind: kind, id: pane.agentConversation)
-    }
-
-    private func validate(_ conversation: Conversation) throws {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
-        guard !conversation.id.isEmpty,
-              conversation.id.unicodeScalars.allSatisfy(allowed.contains) else {
-            throw Failure.invalidConversationID(conversation.kind, conversation.id)
         }
     }
 
@@ -222,105 +195,17 @@ struct TopicTitleSuggester {
         return String(title.prefix(60))
     }
 
-    private func loadTranscript(_ conversation: Conversation) throws -> [String] {
-        switch conversation.kind {
-        case .claude:
-            return firstTranscript(in: homeDirectory.appendingPathComponent(".claude/projects"), matches: { url in
-                url.lastPathComponent == conversation.id + ".jsonl"
-            }).map { readJSONLines($0, kind: .claude) } ?? []
-        case .codex:
-            return firstTranscript(in: homeDirectory.appendingPathComponent(".codex/sessions"), matches: { url in
-                url.lastPathComponent.hasSuffix("-\(conversation.id).jsonl")
-            }).map { readJSONLines($0, kind: .codex) } ?? []
-        case .pi:
-            return firstTranscript(in: homeDirectory.appendingPathComponent(".pi/agent/sessions"), matches: { url in
-                url.lastPathComponent.hasSuffix("_\(conversation.id).jsonl")
-            }).map { readJSONLines($0, kind: .pi) } ?? []
-        case .opencode:
-            let command = "opencode export " + Tmux.shellQuote(conversation.id)
-            guard case .completed(0, let output, _) = Self.runCommand(command, "", 30),
-                  let data = output.data(using: .utf8),
-                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let messages = root["messages"] as? [[String: Any]] else { return [] }
-            return messages.compactMap { message in
-                guard (message["info"] as? [String: Any])?["role"] as? String == "user",
-                      let parts = message["parts"] as? [[String: Any]] else { return nil }
-                let text = parts.compactMap { part in
-                    part["type"] as? String == "text" ? part["text"] as? String : nil
-                }.joined(separator: "\n")
-                return text.isEmpty ? nil : text
-            }
+    private func loadTranscript(_ conversation: Conversation) -> [String] {
+        let entries: [Entry]
+        if conversation.kind == .opencode {
+            guard case .completed(0, let output, _) = Self.runCommand("opencode export " + Tmux.shellQuote(conversation.id), "", 30)
+            else { return [] }
+            entries = TranscriptReader.entries(in: Data(output.utf8), kind: .opencode)
+        } else {
+            entries = transcriptRoots.transcript(of: conversation)
+                .flatMap { try? TranscriptReader.entries(inFile: $0, kind: conversation.kind) } ?? []
         }
-    }
-
-    private func firstTranscript(in root: URL, matches: (URL) -> Bool) -> URL? {
-        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey],
-                                                               options: [.skipsHiddenFiles]) else { return nil }
-        for case let url as URL in enumerator where matches(url) { return url }
-        return nil
-    }
-
-    private func readJSONLines(_ url: URL, kind: AgentKind) -> [String] {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
-        defer { try? handle.close() }
-        var pending = Data()
-        var messages = BoundedMessages()
-        while let chunk = try? handle.read(upToCount: 65_536), !chunk.isEmpty {
-            pending.append(chunk)
-            while let newline = pending.firstIndex(of: 0x0A) {
-                let line = pending.prefix(upTo: newline)
-                pending.removeSubrange(...newline)
-                if let message = Self.userMessage(in: Data(line), kind: kind) { messages.append(message) }
-            }
-        }
-        if !pending.isEmpty, let message = Self.userMessage(in: pending, kind: kind) { messages.append(message) }
-        return messages.values
-    }
-
-    private struct BoundedMessages {
-        private var first: [(Int, String)] = []
-        private var last: [(Int, String)] = []
-        private var index = 0
-
-        mutating func append(_ raw: String) {
-            let text = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
-            defer { index += 1 }
-            guard !text.isEmpty else { return }
-            let item = (index, text)
-            if first.count < 3 { first.append(item) }
-            last.append(item)
-            if last.count > 3 { last.removeFirst() }
-        }
-
-        var values: [String] {
-            var retained = first
-            for item in last where !retained.contains(where: { $0.0 == item.0 }) { retained.append(item) }
-            return retained.sorted { $0.0 < $1.0 }.map(\.1)
-        }
-    }
-
-    private static func userMessage(in data: Data, kind: AgentKind) -> String? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        switch kind {
-        case .claude:
-            guard object["isMeta"] as? Bool != true,
-                  object["type"] as? String == "user", let message = object["message"] as? [String: Any],
-                  message["role"] as? String == "user" else { return nil }
-            if let text = message["content"] as? String { return text }
-            return (message["content"] as? [[String: Any]])?.compactMap {
-                $0["type"] as? String == "text" ? $0["text"] as? String : nil
-            }.joined(separator: "\n")
-        case .codex:
-            guard object["type"] as? String == "event_msg", let payload = object["payload"] as? [String: Any],
-                  payload["type"] as? String == "user_message" else { return nil }
-            return payload["message"] as? String
-        case .pi:
-            guard object["type"] as? String == "message", let message = object["message"] as? [String: Any],
-                  message["role"] as? String == "user", let content = message["content"] as? [[String: Any]] else { return nil }
-            return content.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
-        case .opencode:
-            return nil
-        }
+        return entries.filter { $0.role == .user }.map(\.text)
     }
 
     private static func runCommand(_ command: String, _ input: String, _ timeout: TimeInterval) -> CommandOutcome {

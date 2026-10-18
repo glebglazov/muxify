@@ -12,7 +12,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "MuxifyCore", dependencies: [.product(name: "Yams", package: "Yams")]),
-        .testTarget(name: "MuxifyCoreTests", dependencies: ["MuxifyCore"]),
+        .testTarget(name: "MuxifyCoreTests", dependencies: ["MuxifyCore"], resources: [.copy("Fixtures")]),
     ],
     swiftLanguageModes: [.v5]
 )

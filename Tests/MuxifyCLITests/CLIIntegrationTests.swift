@@ -668,7 +668,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(sessions.map { ($0["project"] as? [String: Any])?["label"] as? String }, ["game", "tools"])
         let panes = sessions.flatMap { ($0["windows"] as? [[String: Any]] ?? []).flatMap { $0["panes"] as? [[String: Any]] ?? [] } }
         let agentPane = try XCTUnwrap(panes.first { $0["id"] as? String == agent.rawValue }, result.stdout)
-        XCTAssertEqual(agentPane["agent"] as? NSDictionary, ["kind": "claude", "status": "blocked", "unread": true] as NSDictionary)
+        XCTAssertEqual(agentPane["agent"] as? NSDictionary, ["kind": "claude", "status": "blocked", "unread": true, "conversation": NSNull()] as NSDictionary)
         let shellPane = try XCTUnwrap(panes.first { $0["id"] as? String == shell.rawValue }, result.stdout)
         XCTAssertTrue(shellPane["agent"] is NSNull, "a shell Pane has no Agent: \(shellPane)")
     }
@@ -912,7 +912,7 @@ final class CLIIntegrationTests: XCTestCase {
         let rows = try XCTUnwrap(try jsonLine(inTopic.stdout)["agents"] as? [[String: Any]], inTopic.stdout)
         XCTAssertEqual(rows.map { $0["pane_id"] as? String }, [blocked.rawValue])
         XCTAssertEqual(rows.first?["topic"] as? NSDictionary, ["id": id, "label": "Ship"] as NSDictionary)
-        XCTAssertEqual(rows.first?["agent"] as? NSDictionary, ["kind": "claude", "status": "blocked", "unread": true] as NSDictionary)
+        XCTAssertEqual(rows.first?["agent"] as? NSDictionary, ["kind": "claude", "status": "blocked", "unread": true, "conversation": NSNull()] as NSDictionary)
 
         for (filter, expected) in [(["--status", "working"], [working]), (["--unread"], [blocked])] {
             let result = try await run(cli, arguments: ["agent", "list"] + filter, environment: environment)
@@ -920,6 +920,124 @@ final class CLIIntegrationTests: XCTestCase {
             XCTAssertEqual(result.stdout.split(separator: "\n").map { String($0.prefix { $0 != "\t" }) }, expected.map(\.rawValue),
                            "\(filter)")
         }
+    }
+
+    func testAgentListGivesTheConversationOfEachAgent() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let agent = try sandbox.fakeAgent(in: "main", status: "done", unread: false, conversation: "conv-1")
+        let result = try await run(cli, arguments: ["agent", "list", "--json"], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(result.status, 0, result.output)
+        let rows = try XCTUnwrap(try jsonLine(result.stdout)["agents"] as? [[String: Any]], result.stdout)
+        XCTAssertEqual(rows.map { $0["pane_id"] as? String }, [agent.rawValue])
+        XCTAssertEqual((rows.first?["agent"] as? [String: Any])?["conversation"] as? String, "conv-1")
+    }
+
+    /// A Claude Transcript in a folder of its own, which CLAUDE_CONFIG_DIR names: two turns, each with one Bash call.
+    private func claudeTranscript(id: String) throws -> (environment: [String: String], file: URL) {
+        let config = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-claude-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: config) }
+        let file = config.appendingPathComponent("projects/-work/\(id).jsonl")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let records = (0..<2).flatMap { turn in [
+            #"{"type":"user","timestamp":"2026-10-18T09:0\#(turn):00Z","message":{"role":"user","content":"ask \#(turn)"}}"#,
+            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t\#(turn)","name":"Bash","input":{"command":"make"}}]}}"#,
+            #"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t\#(turn)","content":"PASS \#(turn)"}]}}"#,
+            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"answer \#(turn) \#(String(repeating: "x", count: 30))"}]}}"#,
+        ] }
+        try Data((records.joined(separator: "\n") + "\n").utf8).write(to: file)
+        // The CLI names the file that it found, which is under /private/var, not the /var symlink.
+        let real = try XCTUnwrap(realpath(file.path, nil))
+        defer { free(real) }
+        return (["CLAUDE_CONFIG_DIR": config.path], URL(fileURLWithPath: String(cString: real)))
+    }
+
+    func testAgentConversationReadsTheTranscriptOfThePanesAgent() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let agent = try sandbox.fakeAgent(in: "main", status: "done", unread: false, conversation: "conv-1")
+        let transcript = try claudeTranscript(id: "conv-1")
+        let environment = sandbox.cliEnvironment(pane: nil).merging(transcript.environment) { $1 }
+
+        let read = try await run(cli, arguments: ["agent", "conversation", agent.rawValue, "--json", "--max-chars", "10"], environment: environment)
+        XCTAssertEqual(read.status, 0, read.output)
+        let lines = try read.stdout.split(separator: "\n").map { try XCTUnwrap(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? NSDictionary) }
+        XCTAssertEqual(lines.first, ["kind": "claude", "conversation": "conv-1", "transcript": transcript.file.path] as NSDictionary)
+        XCTAssertEqual(lines.dropFirst().map { $0["index"] as? Int }, [0, 3, 4, 7], "user and assistant Entries keep their index")
+        XCTAssertEqual(lines[1], ["index": 0, "at": "2026-10-18T09:00:00Z", "role": "user", "tool": NSNull(), "text": "ask 0",
+                                  "chars": 5, "truncated": false] as NSDictionary)
+        XCTAssertEqual(lines[2]["truncated"] as? Bool, true)
+        XCTAssertEqual(read.stderr, "muxify: showed 4 of 4 user and assistant Entries (index 0..7); 4 tool Entries hidden; "
+                       + "2 Entries cut at 10 characters. Use --tools, --range or --full to read more.\n")
+
+        let tools = try await run(cli, arguments: ["agent", "conversation", agent.rawValue, "--tool", "bash", "--after", "4"], environment: environment)
+        XCTAssertEqual(tools.status, 0, tools.output)
+        XCTAssertEqual(tools.stdout, """
+        ==> claude conv-1 \(transcript.file.path) <==
+        [5] tool_call Bash
+        {"command":"make"}
+
+        [6] tool_result Bash
+        PASS 1
+
+
+        """)
+
+        let info = try await run(cli, arguments: ["agent", "conversation", "--transcript", transcript.file.path, "--info", "--json"],
+                                 environment: environment)
+        XCTAssertEqual(info.status, 0, info.output)
+        XCTAssertEqual(try jsonLine(info.stdout) as NSDictionary, [
+            "kind": "claude", "conversation": NSNull(), "transcript": transcript.file.path, "entries": 8,
+            "first_at": "2026-10-18T09:00:00Z", "last_at": "2026-10-18T09:01:00Z",
+            "roles": ["user": 2, "assistant": 2, "tool_call": 2, "tool_result": 2],
+        ] as NSDictionary)
+    }
+
+    func testAgentConversationFailsWithoutAnAgentAConversationIdOrATranscript() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let transcript = try claudeTranscript(id: "conv-1")
+        let environment = sandbox.cliEnvironment(pane: nil).merging(transcript.environment) { $1 }
+        let shell = try sandbox.pane(of: "main")
+        let fresh = try sandbox.fakeAgent(in: "main", status: nil, unread: false)
+        let notTranscript = transcript.file.deletingLastPathComponent().appendingPathComponent("notes.jsonl")
+        try Data("{\"type\":\"note\"}\n".utf8).write(to: notTranscript)
+        let folder = try XCTUnwrap(transcript.environment["CLAUDE_CONFIG_DIR"]) + "/projects"
+        let cases: [([String], String)] = [
+            ([shell.rawValue], "No Agent runs in Pane \(shell.rawValue)."),
+            ([fresh.rawValue], "The Agent in Pane \(fresh.rawValue) has no conversation id yet."),
+            (["%999"], "No tmux Pane %999."),
+            (["--conversation", "nope", "--kind", "claude"], "No Transcript of claude conversation nope in \(folder)."),
+            (["--transcript", notTranscript.path], "No Entries could be read as claude from \(notTranscript.path)."),
+        ]
+        for (arguments, message) in cases {
+            let result = try await run(cli, arguments: ["agent", "conversation"] + arguments, environment: environment)
+            XCTAssertEqual(result.status, 1, "\(arguments): \(result.output)")
+            XCTAssertEqual(result.stdout, "", "\(arguments)")
+            XCTAssertEqual(result.stderr, "muxify: \(message)\n", "\(arguments)")
+        }
+    }
+
+    func testTopicShowListsTheConversationsOfItsLiveAndRememberedAgentsOnlyWhenAsked() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        _ = try sandbox.fakeAgent(in: "game/ship", status: "done", unread: false, conversation: "live-1")
+        let environment = sandbox.cliEnvironment(pane: nil)
+
+        let plain = try await run(cli, arguments: ["topic", "show", "--topic", id], environment: environment)
+        XCTAssertEqual(plain.status, 0, plain.output)
+        XCTAssertFalse(plain.stdout.contains("conversation"), plain.stdout)
+
+        let text = try await run(cli, arguments: ["topic", "show", "--topic", id, "--conversations"], environment: environment)
+        XCTAssertEqual(text.status, 0, text.output)
+        XCTAssertEqual(text.stdout, plain.stdout + "conversation\tclaude\tlive-1\n")
+
+        let json = try await run(cli, arguments: ["topic", "show", "--topic", id, "--conversations", "--json"], environment: environment)
+        XCTAssertEqual(json.status, 0, json.output)
+        let object = try jsonLine(json.stdout)
+        XCTAssertEqual((object["topic"] as? [String: Any])?["id"] as? String, id)
+        XCTAssertEqual(object["conversations"] as? [NSDictionary], [["kind": "claude", "conversation": "live-1"]])
     }
 
     func testAgentListWithATopicThatIsNotOpenFails() async throws {
@@ -1209,12 +1327,13 @@ private final class TopicSandbox {
 
     /// A Pane in `session` that runs a program, as an Agent does, with the pane options that its Extension and
     /// Muxify write. `status` nil is an Agent before its first turn.
-    func fakeAgent(in session: String, status: String?, unread: Bool) throws -> PaneID {
+    func fakeAgent(in session: String, status: String?, unread: Bool, conversation: String? = nil) throws -> PaneID {
         let id = try tmux(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=" + session + ":", "sleep 600"])
         guard let pane = PaneID(rawValue: id) else { throw CLIError("split-window printed no Pane id: \(id)") }
         try tmux(["set-option", "-p", "-t", id, "@muxify_agent", "claude"])
         if let status { try tmux(["set-option", "-p", "-t", id, "@muxify_agent_status", status]) }
         if unread { try tmux(["set-option", "-p", "-t", id, "@muxify_agent_unread", "1"]) }
+        if let conversation { try tmux(["set-option", "-p", "-t", id, "@muxify_agent_conversation", conversation]) }
         return pane
     }
 

@@ -27,8 +27,8 @@ class TopicsCli(unittest.TestCase):
         (s.root/'config/muxify/config.yaml').write_text('projects:\n  paths:\n    - path: ' + str(cls.projects) + '/*\n')
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(s.root))
 
-    def muxify(self, *args, pane):
-        environment = dict(self.s.env, TMUX_PANE=pane)
+    def muxify(self, *args, pane, env=None):
+        environment = dict(self.s.env, TMUX_PANE=pane, **(env or {}))
         return subprocess.run([str(CLI), *args], env=environment, capture_output=True, text=True, timeout=30)
 
     def test_topic_forget_removes_live_and_settled_topics(self):
@@ -67,13 +67,15 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(listed.returncode, 0, listed.stderr)
         self.assertIn(topic_id + '\tCLI check', listed.stdout.splitlines(), 'topic list does not show the new Topic')
 
-    def fake_agent(self, session, status, unread=False):
+    def fake_agent(self, session, status, unread=False, conversation=None):
         """A Pane that runs a program, as an Agent does, with the pane options its Extension and Muxify write."""
         pane = self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', '=' + session + ':', 'sleep 600')
         self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'claude')
         self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', status)
         if unread:
             self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_unread', '1')
+        if conversation:
+            self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_conversation', conversation)
         return pane
 
     def test_topic_show_lists_both_sessions_of_the_topic_and_the_status_of_its_agent(self):
@@ -94,7 +96,7 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual([s['name'] for s in topic['sessions']], ['cli-show-home/show-check', 'cli-show-tools/show-check'],
                          shown.stdout)
         panes = [p for s in topic['sessions'] for w in s['windows'] for p in w['panes']]
-        self.assertIn({'kind': 'claude', 'status': 'working', 'unread': False}, [p['agent'] for p in panes], shown.stdout)
+        self.assertIn({'kind': 'claude', 'status': 'working', 'unread': False, 'conversation': None}, [p['agent'] for p in panes], shown.stdout)
 
     def test_agent_list_shows_an_agent_with_its_status_unread_and_topic(self):
         (self.projects/'cli-agents').mkdir(parents=True)
@@ -108,12 +110,42 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(listed.returncode, 0, listed.stderr)
         row = next((r for r in json.loads(listed.stdout)['agents'] if r['pane_id'] == agent), None)
         self.assertIsNotNone(row, 'agent list --unread does not show the Unread Agent: %s' % listed.stdout)
-        self.assertEqual(row['agent'], {'kind': 'claude', 'status': 'done', 'unread': True}, row)
+        self.assertEqual(row['agent'], {'kind': 'claude', 'status': 'done', 'unread': True, 'conversation': None}, row)
         self.assertEqual(row['topic'], {'id': topic_id, 'label': 'Agents check'}, row)
 
         text = self.muxify('agent', 'list', '--topic', 'Agents check', pane=pane)
         self.assertEqual(text.returncode, 0, text.stderr)
         self.assertEqual(text.stdout, '\t'.join([agent, 'claude', 'done', 'unread', 'Agents check', 'cli-agents/agents-check']) + '\n')
+
+    def test_agent_conversation_reads_the_transcript_of_a_panes_agent_without_its_tool_entries(self):
+        (self.projects/'cli-conversation').mkdir(parents=True)
+        pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
+        made = self.muxify('topic', 'new', 'Conversation check', '--project', str(self.projects/'cli-conversation'), pane=pane)
+        self.assertEqual(made.returncode, 0, made.stderr)
+        agent = self.fake_agent('cli-conversation/conversation-check', 'done', conversation='conv-check')
+        claude = self.s.root/'claude'
+        transcript = claude/'projects/-work/conv-check.jsonl'
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text('\n'.join(json.dumps(r) for r in [
+            {'type': 'user', 'message': {'role': 'user', 'content': 'run the tests'}},
+            {'type': 'assistant', 'message': {'role': 'assistant', 'content': [
+                {'type': 'thinking', 'thinking': 'not an Entry'},
+                {'type': 'tool_use', 'id': 't1', 'name': 'Bash', 'input': {'command': 'make test'}}]}},
+            {'type': 'user', 'message': {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': 'PASS'}]}},
+            {'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'The tests pass.'}]}},
+        ]) + '\n')
+
+        read = self.muxify('agent', 'conversation', agent, '--json', pane=pane, env={'CLAUDE_CONFIG_DIR': str(claude)})
+        self.assertEqual(read.returncode, 0, read.stderr)
+        lines = [json.loads(line) for line in read.stdout.splitlines()]
+        self.assertEqual(lines[0]['conversation'], 'conv-check', read.stdout)
+        self.assertEqual([(e['index'], e['role'], e['text']) for e in lines[1:]],
+                         [(0, 'user', 'run the tests'), (3, 'assistant', 'The tests pass.')], read.stdout)
+        self.assertIn('2 tool Entries hidden', read.stderr)
+
+        listed = self.muxify('topic', 'show', '--conversations', pane=agent)
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertIn('conversation\tclaude\tconv-check\n', listed.stdout)
 
     def test_window_move_moves_a_window_that_is_not_the_callers_and_it_shows_under_the_topic(self):
         (self.projects/'cli-move').mkdir(parents=True)

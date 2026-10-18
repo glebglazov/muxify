@@ -14,7 +14,8 @@ struct TopicInvocation: Equatable {
         case settle(removeWorktrees: Bool)
         case forget(removeWorktrees: Bool)
         case list
-        case show
+        /// `conversations` also lists the conversation of each Agent that the Topic has or remembers.
+        case show(conversations: Bool)
         /// `project` is as typed and limits the run to the Session that uses it. `command` is the argument vector
         /// after `--`; it runs once per live Session, never in a Pane.
         case exec(project: String?, timeout: TimeInterval, command: [String])
@@ -180,6 +181,7 @@ extension TopicInvocation {
         var timeout: TimeInterval?
         var execArguments: [String]?
         var stat = false
+        var conversations = false
         var targets = TargetOptions(accepting: TargetOption.allCases, repeatsTopic: name == "snooze" || name == "unsnooze")
         var output = Output.text
         while let argument = args.popFirst() {
@@ -204,6 +206,8 @@ extension TopicInvocation {
                 timeout = seconds
             } else if argument == "--stat" {
                 stat = true
+            } else if argument == "--conversations" {
+                conversations = true
             } else if argument == "--" {
                 execArguments = Array(args)
                 args = []
@@ -217,6 +221,7 @@ extension TopicInvocation {
         if name != "settle", name != "forget", removeWorktrees { throw usageError }
         if name != "exec", timeout != nil || execArguments != nil { throw usageError }
         if name != "diff", stat { throw usageError }
+        if name != "show", conversations { throw usageError }
         switch (name, words.count, project) {
         case ("new", 0...1, _):
             if let title = words.first, title.allSatisfy(\.isWhitespace) { throw usageError }
@@ -226,7 +231,7 @@ extension TopicInvocation {
         case ("settle", 0, nil): command = .settle(removeWorktrees: removeWorktrees)
         case ("forget", 0, nil): command = .forget(removeWorktrees: removeWorktrees)
         case ("list", 0, nil): command = .list
-        case ("show", 0, nil): command = .show
+        case ("show", 0, nil): command = .show(conversations: conversations)
         case ("exec", 0, _):
             guard let execArguments, !execArguments.isEmpty else { throw usageError }
             command = .exec(project: project, timeout: timeout ?? 60, command: execArguments)
@@ -301,6 +306,8 @@ extension TopicInvocation {
             case .diff(let project, let stat):
                 return try TopicGit(report: .diff(stat: stat)).run(try TopicExec.sessions(of: topic, project: project.map(Self.directory)),
                                                                    topic: topic, output: output)
+            case .show(conversations: true):
+                return try reportConversations(of: topic)
             default: break
             }
         }
@@ -334,6 +341,29 @@ extension TopicInvocation {
             }
         }
         if case .failed(let failure) = response { throw CLIError(failure) }
+    }
+
+    /// `topic show --conversations`: the Topic as `topic show` prints it, then the conversation of each Agent in its live
+    /// Panes and in its remembered Sessions, which `agent conversation --conversation <id> --kind <kind>` reads.
+    private func reportConversations(of topic: TopicDetail) throws {
+        let record: TopicRecord?
+        do {
+            record = try TopicStore(paths: paths).read().records.first { $0.id == topic.id }
+        } catch {
+            throw CLIError("Muxify could not read the Topic records in \(paths.state.path). \(error.localizedDescription)")
+        }
+        let conversations = record?.agentConversations(in: TmuxServer.local.snapshot()) ?? []
+        switch output {
+        case .json:
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            print(String(decoding: try encoder.encode(TopicConversations(topic: topic, conversations: conversations)), as: UTF8.self))
+        case .text:
+            try Self.report(.topic(topic), output: .text)
+            for conversation in conversations {
+                print(["conversation", conversation.kind.rawValue, conversation.id].map(\.oneLineField).joined(separator: "\t"))
+            }
+        }
     }
 
     private func request(projects: [Project], service: TopicService) throws -> TopicCommand {
@@ -380,5 +410,21 @@ extension TopicInvocation {
             throw CLIError(CLICommand.usage, exitCode: 2)
         }
         return folder
+    }
+}
+
+/// The `--json` form of `topic show --conversations`.
+private struct TopicConversations: Encodable {
+    struct Conversation: Encodable {
+        let kind: AgentKind
+        let conversation: String
+    }
+
+    let topic: TopicDetail
+    let conversations: [Conversation]
+
+    init(topic: TopicDetail, conversations: [AgentConversation]) {
+        self.topic = topic
+        self.conversations = conversations.map { Conversation(kind: $0.kind, conversation: $0.id) }
     }
 }

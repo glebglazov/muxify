@@ -109,7 +109,7 @@ final class TopicWireTests: XCTestCase {
                                                             createdAt: nil, snoozedUntil: nil, sessions: [session])),
                             #"{"topic":{"created_at":null,"home_project":"/work/game","id":"a","label":"Fix","sessions":[{"id":"$2","name":"game/fix","#
                             + #""project":{"label":"game","path":"/work/game"},"windows":[{"active":true,"id":"@3","index":1,"name":"zsh","panes":["#
-                            + #"{"active":false,"agent":{"kind":"claude","status":null,"unread":false},"command":"2.1.289","id":"%4","index":1,"label":"claude","path":"/work/game","window_id":"@3"},"#
+                            + #"{"active":false,"agent":{"conversation":null,"kind":"claude","status":null,"unread":false},"command":"2.1.289","id":"%4","index":1,"label":"claude","path":"/work/game","window_id":"@3"},"#
                             + #"{"active":true,"agent":null,"command":"zsh","id":"%5","index":2,"label":"/w/game","path":"/work/game","window_id":"@3"}]}],"#
                             + #""worktree":{"base":null,"branch":null,"path":"/trees/fix"}}],"slug":null,"snoozed_until":null,"title":"Fix"}}"#)
         try assertRoundTrip(TopicResponse.failed(TopicFailure(kind: .storeBusy, phase: .recordSaved, message: "busy")),
