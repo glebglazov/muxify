@@ -377,10 +377,25 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
+    func testBrowserAvailabilityUsesTheNewestClientOnTheServerWhenNoClientShowsThePanesSession() {
+        let runner = RecordingRunner(results: [
+            .init(status: 0, output: "90 1 999\n"),
+            .init(status: 0, output: "90 1 999\n40 0 200\n50 0 100\n"),
+            .init(status: 0, output: "@muxify_client_live value\n"),
+            .init(status: 0, output: "100␟tty␟home␟host␟local\n"),
+        ])
+        XCTAssertEqual(BrowserAvailability.check(pane: "%7", using: runner), .local)
+        XCTAssertEqual(runner.calls.prefix(2).map(\.arguments), [
+            ["list-clients", "-t", "%7", "-F", "#{client_activity} #{client_control_mode} #{client_pid}"],
+            ["list-clients", "-F", "#{client_activity} #{client_control_mode} #{client_pid}"],
+        ])
+    }
+
     func testBrowserAvailabilityQuietFailuresAndUnmarkedClients() {
         let cases: [[CLICommandResult]] = [
             [.init(status: 1, output: "")],
-            [.init(status: 0, output: "10 1 123\n")],
+            [.init(status: 0, output: "10 1 123\n"), .init(status: 1, output: "")],
+            [.init(status: 0, output: ""), .init(status: 0, output: "10 1 123\n")],
             [.init(status: 0, output: "10 0 123\n"), .init(status: 1, output: "")],
             [.init(status: 0, output: "10 0 123\n"), .init(status: 0, output: "")],
             [.init(status: 0, output: "10 0 123\n"), .init(status: 0, output: "@muxify_client_bad x"), .init(status: 1, output: "")],

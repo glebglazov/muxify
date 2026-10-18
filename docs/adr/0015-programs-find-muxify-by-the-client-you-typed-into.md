@@ -12,4 +12,4 @@ A program in a Pane, such as an Agent skill that wants to show a page, must know
 
 ## Consequences
 
-The answer is for the moment of the check. A long run started in Muxify that checks after you typed in another terminal gets no, so programs check when they start.
+The answer is for the moment of the check. A long run started in Muxify that checks after you typed in another terminal gets no, so programs check when they start. When no Client shows the Pane's Session, because Muxify shows another Session, the check takes the newest Client on the server ([0021](0021-the-client-check-falls-back-to-the-newest-client-on-the-server.md)).

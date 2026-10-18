@@ -408,25 +408,33 @@ The command uses the same Client check as the script below and does not start Mu
 
 On a machine without the CLI, run this `/bin/sh` check when the program starts. It prints `local`, `remote`,
 or `no`. It needs only `tmux` and shell builtins. It checks the most recently
-active non-control Client of the Pane's own Session.
+active non-control Client of the Pane's own Session. When no such Client shows
+that Session, for example because Muxify shows another Session, it checks the
+most recently active non-control Client on the server.
 
 ```sh
 muxify_environment() (
     [ -n "${TMUX_PANE:-}" ] || { printf '%s\n' no; return; }
-    clients=$(tmux list-clients -t "$TMUX_PANE" -F '#{client_activity} #{client_control_mode} #{client_pid}' 2>/dev/null) || {
-        printf '%s\n' no; return
-    }
-    newest=-1
-    client=
-    while read -r activity control pid; do
-        [ "$control" = 0 ] || continue
-        if [ "$activity" -gt "$newest" ]; then
-            newest=$activity
-            client=$pid
-        fi
-    done <<EOF
-$clients
+    newest_client() {
+        newest=-1
+        client=
+        while read -r activity control pid; do
+            [ "$control" = 0 ] || continue
+            if [ "$activity" -gt "$newest" ]; then
+                newest=$activity
+                client=$pid
+            fi
+        done <<EOF
+$1
 EOF
+    }
+    format='#{client_activity} #{client_control_mode} #{client_pid}'
+    clients=$(tmux list-clients -t "$TMUX_PANE" -F "$format" 2>/dev/null) || { printf '%s\n' no; return; }
+    newest_client "$clients"
+    if [ -z "$client" ]; then
+        clients=$(tmux list-clients -F "$format" 2>/dev/null) || { printf '%s\n' no; return; }
+        newest_client "$clients"
+    fi
     [ -n "$client" ] || { printf '%s\n' no; return; }
     options=$(tmux show-options -s 2>/dev/null) || { printf '%s\n' no; return; }
     separator='␟'

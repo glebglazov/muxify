@@ -11,15 +11,24 @@ enum BrowserAvailability: String {
             guard let result = try? runner.run("tmux", arguments: arguments, quiet: true), result.status == 0 else { return nil }
             return result.output
         }
-        guard let clients = output(["list-clients", "-t", pane, "-F", "#{client_activity} #{client_control_mode} #{client_pid}"]) else { return .no }
-        var newest: Int64 = -1
-        var client: String?
-        for line in clients.split(separator: "\n") {
-            let fields = line.split(whereSeparator: \.isWhitespace)
-            guard fields.count >= 3, fields[1] == "0", let activity = Int64(fields[0]), activity > newest else { continue }
-            newest = activity
-            client = fields.dropFirst(2).joined(separator: " ")
+        func clients(_ scope: [String]) -> String? {
+            output(["list-clients"] + scope + ["-F", "#{client_activity} #{client_control_mode} #{client_pid}"])
         }
+        func newest(_ clients: String) -> String? {
+            var newest: Int64 = -1
+            var client: String?
+            for line in clients.split(separator: "\n") {
+                let fields = line.split(whereSeparator: \.isWhitespace)
+                guard fields.count >= 3, fields[1] == "0", let activity = Int64(fields[0]), activity > newest else { continue }
+                newest = activity
+                client = fields.dropFirst(2).joined(separator: " ")
+            }
+            return client
+        }
+        guard let sessionClients = clients(["-t", pane]) else { return .no }
+        // Muxify moves its one Client between Sessions, so the Pane's Session often has no Client while you
+        // look at another Session in Muxify. Then the Client you typed into is the newest on the server.
+        let client = newest(sessionClients) ?? clients([]).flatMap(newest)
         guard let client, let options = output(["show-options", "-s"]) else { return .no }
         for line in options.split(separator: "\n") {
             guard let option = line.split(whereSeparator: \.isWhitespace).first, option.hasPrefix("@muxify_client_"),

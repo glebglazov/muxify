@@ -115,22 +115,19 @@ class ClientTerminal(unittest.TestCase):
         self.assertIn(app_executables, path.split(':'), 'the Pane did not get the older build\'s PATH')
         self.assertEqual(cli, '', 'muxify resolved to the app in Contents/MacOS: %s' % os.listdir(app_executables))
 
-    def test_check_follows_the_client_that_received_input(self):
-        sandbox, fields, muxify_pid = self.sandbox, self.fields, self.muxify_pid
-        pane = sandbox.tmux('display-message', '-p', '-c', fields[1], '#{pane_id}')
-        session = sandbox.tmux('display-message', '-p', '-t', pane, '#{session_id}')
-        self.assertEqual(self.answer(pane), 'local')
+    def type_in_plain_client(self, session):
+        """Attaches a plain tmux Client, as Ghostty.app would, and types into it until it is the newest Client."""
         master, slave = pty.openpty()
         os.set_blocking(master, False)
         self.addCleanup(os.close, master)
         self.addCleanup(os.close, slave)
-        plain = sandbox.tmux_client(session, slave)
+        plain = self.sandbox.tmux_client(session, slave)
         def stop_plain():
-            sandbox._terminate([plain.pid])
+            self.sandbox._terminate([plain.pid])
             plain.wait(timeout=5)
         self.addCleanup(stop_plain)
         wait(lambda: plain.pid in self.clients(), 'plain Client did not attach')
-        previous = self.clients()[muxify_pid]['activity']
+        previous = self.clients()[self.muxify_pid]['activity']
         def plain_active():
             try:
                 while os.read(master, 65536):
@@ -140,14 +137,36 @@ class ClientTerminal(unittest.TestCase):
             os.write(master, b' ')
             return self.clients()[plain.pid]['activity'] > previous
         wait(plain_active, 'plain Client did not receive input')
-        self.assertEqual(self.answer(pane), 'no')
+        return plain
 
-        previous = self.clients()[plain.pid]['activity']
+    def type_in_muxify(self, after):
         def muxify_active():
             # ClientVerification sends one space through Ghostty without taking the keyboard.
-            sandbox.act('action', 'client-input', 'Client input')
-            return self.clients()[muxify_pid]['activity'] > previous
+            self.sandbox.act('action', 'client-input', 'Client input')
+            return self.clients()[self.muxify_pid]['activity'] > after
         wait(muxify_active, 'Muxify Client did not receive input')
+
+    def test_check_follows_the_client_that_received_input(self):
+        sandbox, fields = self.sandbox, self.fields
+        pane = sandbox.tmux('display-message', '-p', '-c', fields[1], '#{pane_id}')
+        session = sandbox.tmux('display-message', '-p', '-t', pane, '#{session_id}')
+        self.assertEqual(self.answer(pane), 'local')
+        plain = self.type_in_plain_client(session)
+        self.assertEqual(self.answer(pane), 'no')
+        self.type_in_muxify(after=self.clients()[plain.pid]['activity'])
+        self.assertEqual(self.answer(pane), 'local')
+
+    def test_pane_in_a_session_that_no_client_shows_follows_the_newest_client_on_the_server(self):
+        sandbox, fields = self.sandbox, self.fields
+        shown = sandbox.tmux('display-message', '-p', '-c', fields[1], '#{session_id}')
+        sandbox.tmux('new-session', '-d', '-s', 'unshown', '-c', str(sandbox.root), '/bin/sh')
+        self.addCleanup(sandbox.tmux, 'kill-session', '-t', '=unshown')
+        pane = sandbox.tmux('display-message', '-p', '-t', '=unshown:', '#{pane_id}')
+        self.assertEqual(sandbox.tmux('display-message', '-p', '-t', pane, '#{session_attached}'), '0')
+        self.assertEqual(self.answer(pane), 'local')
+        plain = self.type_in_plain_client(shown)
+        self.assertEqual(self.answer(pane), 'no')
+        self.type_in_muxify(after=self.clients()[plain.pid]['activity'])
         self.assertEqual(self.answer(pane), 'local')
 
     def test_remote_marker_matches_script_and_command(self):
