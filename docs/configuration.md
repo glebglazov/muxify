@@ -306,8 +306,9 @@ Without `command_palettes`, Muxify has two palettes. **Commands** opens on
 ⇧⌘P with only `commands`. **Go to…** opens on ⌘P with `topics` and `sessions`.
 `command_palettes: []` removes both. Names must be unique. `sources` accepts:
 
-- `topics`: the open Topics, Pinned first, then the Snoozed and Settled ones.
-  Only a Local App Window with Topics on has them.
+- `topics`: the open Topics, Pinned first. Its Snoozed and Settled Topics
+  come after the rows of every other Source, even when they match the query
+  better. Only a Local App Window with Topics on has them.
 - `sessions`: one row for each [Project](#projects) and Worktree, which holds
   the running Sessions that start in it, then one row for each Session outside
   every Project. ↩ on a Project row goes to its Session visited last, or starts

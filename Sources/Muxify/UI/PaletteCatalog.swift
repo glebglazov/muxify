@@ -38,8 +38,8 @@ enum MoveDestination: Hashable {
     case newWindow(title: String)
 }
 
-/// What the Command Palettes of an App Window search, as sections for the ranker: Topics, Snoozed and
-/// Settled for the topics Source, then one section for each other Source.
+/// What the Command Palettes of an App Window search, as sections for the ranker: one for each Source, with
+/// the topics Source's Snoozed and Settled sections after all of them.
 struct PaletteCatalog {
     var windows: [TmuxWindow]
     var agents: [Agent]
@@ -66,10 +66,12 @@ struct PaletteCatalog {
         FuzzyRanker.list(sections(sources), query: FuzzyQuery(query))
     }
 
-    /// The rows before any query, in the order of `sources`. Windows show on an empty query only when theirs
-    /// is the only Source, and a Window with an Agent is left out beside the agents Source.
+    /// The rows before any query, in the order of `sources`, then the Snoozed and Settled Topics, which rank
+    /// below every other Source's rows for any query. Windows show on an empty query only when theirs is the
+    /// only Source, and a Window with an Agent is left out beside the agents Source.
     func sections(_ sources: [PaletteSource]) -> [PickSectionInput<PaletteItem>] {
-        sources.flatMap { source -> [PickSectionInput<PaletteItem>] in
+        let laterTopics = sources.contains(.topics) ? snoozedAndSettledSections : []
+        return sources.flatMap { source -> [PickSectionInput<PaletteItem>] in
             switch source {
             case .commands:
                 return [PickSectionInput(id: "commands", title: "Commands", rule: .ranked(showsWhenEmpty: true),
@@ -78,7 +80,7 @@ struct PaletteCatalog {
                                   pick: .available(PaletteItem(kind: .command, ref: .command($0))))
                 })]
             case .topics:
-                return offersTopics ? topicSections : []
+                return openTopicSection.map { [$0] } ?? []
             case .sessions:
                 return [PickSectionInput(id: "sessions", title: "Sessions", rule: .ranked(showsWhenEmpty: true),
                                          candidates: sessionCandidates)]
@@ -89,20 +91,24 @@ struct PaletteCatalog {
             case .agents:
                 return [PickSectionInput(id: "agents", title: "Agents", rule: .ranked(showsWhenEmpty: true), candidates: agentCandidates)]
             }
-        }
+        } + laterTopics
     }
 
     // MARK: Topics
 
-    private var topicSections: [PickSectionInput<PaletteItem>] {
-        guard let topics else { return [] }
-        let open = topics.rows.compactMap(topicCandidate)
+    private var openTopicSection: PickSectionInput<PaletteItem>? {
+        guard offersTopics, let topics else { return nil }
+        return PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
+                                candidates: topics.rows.compactMap(topicCandidate))
+    }
+
+    private var snoozedAndSettledSections: [PickSectionInput<PaletteItem>] {
+        guard offersTopics, let topics else { return [] }
         let snoozed = (topics.groups.first { $0.kind == .snoozed }?.topics ?? []).compactMap(snoozedCandidate)
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
             .map(settledCandidate)
         return [
-            PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true), candidates: open),
             PickSectionInput(id: "snoozed", title: "Snoozed", rule: .ranked(showsWhenEmpty: true), candidates: snoozed),
             PickSectionInput(id: "settled", title: "Settled", rule: .ranked(showsWhenEmpty: true), candidates: settled),
         ]

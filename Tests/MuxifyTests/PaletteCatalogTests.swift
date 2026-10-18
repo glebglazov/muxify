@@ -50,7 +50,7 @@ final class PaletteCatalogTests: XCTestCase {
     private func ids(_ list: PickList<PaletteItem>) -> [String] { list.rows.map(\.id) }
     private let goTo: [PaletteSource] = [.topics, .sessions]
 
-    func testGoToListsTopicsThenSnoozedAndSettledThenSessionsWithTheActiveTopicFirst() {
+    func testGoToListsTopicsThenSessionsThenSnoozedAndSettledWithTheActiveTopicFirst() {
         var snoozed = topic("z", "Zzz")
         snoozed.snoozedUntil = "never"
         var settled = topic("s", "Settled")
@@ -61,7 +61,7 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@3", session: "scratch", directory: "/work/notes")]
         let visits = visits([(.topic(.topic("b")), 100), (.topic(.topic("a")), 300), (.topic(.noTopic), 200)])
         let list = catalog(records: records, windows: windows, selected: "@1", visits: visits).list(goTo, query: "")
-        XCTAssertEqual(list.sections.map(\.id), ["topics", "snoozed", "settled", "sessions"])
+        XCTAssertEqual(list.sections.map(\.id), ["topics", "sessions", "snoozed", "settled"])
         XCTAssertEqual(CommandPaletteConfig.goTo.sources, goTo)
         let topics = list.sections[0].rows
         XCTAssertEqual(topics.map(\.id), ["topic-a", "topic-b", "topic-c"], "the Active Topic, then visits order, Dormant after; no No Topic row")
@@ -70,6 +70,16 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(topics[2].pick.payload?.ref, .topic(id: "c", window: nil))
         XCTAssertEqual(topics[1].pick.payload?.ref, .topic(id: "b", window: windows[1]))
         XCTAssertEqual(topics[1].trailing, "2h")
+    }
+
+    func testSnoozedAndSettledTopicsRankBelowAWeakerSessionMatch() {
+        var snoozed = topic("z", "Scratch")
+        snoozed.snoozedUntil = "never"
+        var settled = topic("s", "Scratch")
+        settled.settledAt = "2026-01-01T00:00:00Z"
+        let windows = [window("@1", session: "old-scratch-2", directory: "/tmp/old")]
+        let list = catalog(records: [snoozed, settled], windows: windows).list(goTo, query: "scratch")
+        XCTAssertEqual(ids(list), ["session:$old-scratch-2", "topic-z", "topic-s"])
     }
 
     func testTopicsModeListsEveryProjectWithItsNoTopicSessionAndTheSessionsOutsideProjects() {
@@ -187,13 +197,13 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@2", session: "game-scratch", directory: "/tmp/scratch")]
         let catalog = catalog(records: records, windows: windows)
         let list = catalog.list(goTo, query: "game")
-        XCTAssertEqual(list.sections.map(\.title), ["Topics", "Snoozed", "Settled", "Sessions"])
+        XCTAssertEqual(list.sections.map(\.title), ["Topics", "Sessions", "Snoozed", "Settled"])
         XCTAssertEqual(list.sections[0].rows.map(\.id), ["topic-a"])
-        XCTAssertEqual(list.sections[1].rows[0].pick.payload?.ref, .topic(id: "z", window: nil), "a Dormant Snoozed Topic Reopens")
-        XCTAssertEqual(list.sections[1].rows[0].trailing, "Reopen")
-        XCTAssertEqual(list.sections[1].rows[0].detail.text, "until never")
-        XCTAssertEqual(list.sections[2].rows[0].detail.text, "Shipped the GS reward cap")
-        XCTAssertEqual(list.sections[3].rows.first?.id, "session:$game-scratch", "a running Session before the Projects")
+        XCTAssertEqual(list.sections[2].rows[0].pick.payload?.ref, .topic(id: "z", window: nil), "a Dormant Snoozed Topic Reopens")
+        XCTAssertEqual(list.sections[2].rows[0].trailing, "Reopen")
+        XCTAssertEqual(list.sections[2].rows[0].detail.text, "until never")
+        XCTAssertEqual(list.sections[3].rows[0].detail.text, "Shipped the GS reward cap")
+        XCTAssertEqual(list.sections[1].rows.first?.id, "session:$game-scratch", "a running Session before the Projects")
         let byOutcome = catalog.list(goTo, query: "sett gs")
         XCTAssertEqual(ids(byOutcome), ["topic-s"], "one word on the type word, one on the outcome")
         XCTAssertEqual(byOutcome.rows[0].title.marks, [5, 6, 7, 8])

@@ -425,7 +425,7 @@ class CommandPalette(unittest.TestCase):
             order += [key for key in more if key not in order]
         self.fail('the palette list did not end: %s' % order)
 
-    def test_an_empty_query_lists_topics_snoozed_settled_and_sessions_in_that_order(self):
+    def test_an_empty_query_lists_topics_sessions_snoozed_and_settled_in_that_order(self):
         empty = self.s.root/'projects/sw-order-empty'
         outside = self.s.root/'outside-order'
         for directory in [empty, outside]:
@@ -438,17 +438,20 @@ class CommandPalette(unittest.TestCase):
         outside_sid = self.new_session('sw-order-outside', outside)
         for sid in [self.new_session('beta/sw-order-open', self.beta, topic='sw-order-open'), outside_sid]:
             self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
-        rows = ['palette-row-topic-sw-order-open', 'palette-row-topic-sw-order-snoozed', 'palette-row-topic-sw-order-settled',
-                self.session_row(outside_sid), self.project_row(empty)]
+        placed = [('palette-row-topic-sw-order-open', 'topics'), (self.session_row(outside_sid), 'sessions'),
+                  (self.project_row(empty), 'sessions'), ('palette-row-topic-sw-order-snoozed', 'snoozed'),
+                  ('palette-row-topic-sw-order-settled', 'settled')]
+        rows = [row for row, _ in placed]
         self.open_palette()
         # The app sees the new Sessions at its next read of tmux, and the open palette follows.
         order = wait(lambda: (lambda order: order if set(rows) <= set(order) else None)(self.palette_order()),
                      'an empty query does not list every section\'s row: %s' % rows, seconds=10)
-        headers = ['palette-section-' + name for name in ['topics', 'snoozed', 'settled', 'sessions']]
+        names = ['topics', 'sessions', 'snoozed', 'settled']
+        headers = ['palette-section-' + name for name in names]
         self.assertEqual([key for key in order if key.startswith('palette-section-')], headers, order)
         bounds = [order.index(header) for header in headers] + [len(order)]
-        for index, row in enumerate(rows):
-            section = min(index, 3)
+        for row, name in placed:
+            section = names.index(name)
             self.assertTrue(bounds[section] < order.index(row) < bounds[section + 1], '%s is not under %s: %s' % (row, headers[section], order))
         self.close_palette()
 
