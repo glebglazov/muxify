@@ -187,6 +187,7 @@ final class NotificationsAndSnoozeTests: XCTestCase {
         never.snoozedUntil = "never"
         var past = TopicRecord(id: "past")
         past.snoozedUntil = "2026-10-07T07:00:00.100Z"
+        past.sessions = [.object(["project_path": .string("/work/app")])]
         var settled = TopicRecord(id: "settled")
         settled.snoozedUntil = past.snoozedUntil
         settled.settledAt = past.snoozedUntil

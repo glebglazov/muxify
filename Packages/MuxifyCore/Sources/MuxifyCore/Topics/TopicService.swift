@@ -77,6 +77,36 @@ public struct TopicService: Sendable {
         } catch { return .failure(failure(error, phase: .nothingChanged)) }
     }
 
+    /// The Worktree that the Topic made for the target Session, which Remove and Kill can remove. Nil when the
+    /// Session works in no such Worktree.
+    public func removeAndKillWorktree(of session: SessionID) -> Result<TopicForgetChoices.Worktree?, TopicFailure> {
+        do {
+            let records = try store.read().records
+            let snapshot = server.snapshot()
+            let window = try sessionWindow(.session(session), caller: nil, snapshot: snapshot, client: nil)
+            guard let topic = TopicMembershipPlan.openTopic(of: window, records: records) else { throw TopicRequestError.sourceHasNoTopic }
+            return .success(madeWorktree(of: window, topic: topic, snapshot: snapshot))
+        } catch { return .failure(failure(error, phase: .nothingChanged)) }
+    }
+
+    private func madeWorktree(of window: TmuxWindow, topic: TopicRecord, snapshot: TmuxSnapshot) -> TopicForgetChoices.Worktree? {
+        guard let worktree = TopicLocation(of: window, record: topic, projects: projects).worktree else { return nil }
+        return TopicForgetChoices(topic: topic, snapshot: snapshot, projects: projects, root: paths.worktrees.path)
+            .worktrees.first { Folder.local($0.spec.path) == worktree }
+    }
+
+    /// A window of the Session that the target names, or of the Session of the Pane that the target or the caller names.
+    private func sessionWindow(_ target: TopicTarget?, caller: TopicCaller?, snapshot: TmuxSnapshot, client: String?) throws -> TmuxWindow {
+        let sessionID: String
+        if case .session(let id)? = target { sessionID = id.rawValue }
+        else {
+            guard let pane = paneRequest(target, caller: caller) else { throw TopicRequestError.noTarget }
+            sessionID = try executor.pane(pane, in: snapshot, client: client).source.window.sessionID
+        }
+        guard let window = snapshot.windows.first(where: { $0.sessionID == sessionID }) else { throw TopicEditFailure.sourceUnavailable }
+        return window
+    }
+
     private var executor: TopicExecutor { TopicExecutor(server: server, worktreesRoot: paths.worktrees.path) }
 
     private func list() -> TopicResponse {
@@ -156,7 +186,11 @@ public struct TopicService: Sendable {
             if let record = edit.record {
                 let locks = SessionLock.locks(in: snapshot.windows, records: records)
                 let moved = try store.write(locks: locks) { transaction -> [SessionLock] in
-                    try transaction.apply(TopicRecordChange(before: read, after: record), insertPosition: insertPosition, replacingLockOf: planned.replacedLockOf)
+                    if let left = edit.leftTopic {
+                        _ = try transaction.apply(TopicRecordChange(before: records.first { $0.id == left.id }, after: left))
+                    }
+                    return try transaction.apply(TopicRecordChange(before: read, after: record), insertPosition: insertPosition,
+                                                 replacingLockOf: planned.replacedLockOf)
                 }
                 commands += moved.map { .tmux($0.setOption) }
                 phase = .recordSaved
@@ -275,8 +309,9 @@ public struct TopicService: Sendable {
                 plan = try TopicMembershipPlan(source: moved, title: title, records: records, windows: windows,
                                                projects: projects, clientTTY: client, order: sessionOrder)
             }
-            return Planned(edit: TopicEdit(record: plan.record, commands: plan.commands, selection: selection),
-                           shown: WindowID(rawValue: moved.window.id).map { .window($0) }, replacedLockOf: plan.endedLockOf)
+            var edit = TopicEdit(record: plan.record, commands: plan.commands, selection: selection)
+            edit.leftTopic = plan.leftTopic
+            return Planned(edit: edit, shown: WindowID(rawValue: moved.window.id).map { .window($0) }, replacedLockOf: plan.endedLockOf)
         case .removeFromTopic:
             if case .window = request.target {
                 let (pane, fresh) = try source()
@@ -305,13 +340,27 @@ public struct TopicService: Sendable {
                 if let client { commands.append(.tmux(["switch-client", "-c", client, "-t", target])) }
                 commands.append(.tmux(["move-window", "-d", "-s", window.sessionID + ":" + window.id, "-t", target]))
                 if existing == nil { commands.append(.removeTopicPlaceholder) }
-                return Planned(edit: TopicEdit(record: nil, commands: commands, selection: .paneID(pane.paneID)))
+                let record = TopicMembershipPlan.ends(.window(window), windows: fresh.windows)
+                    ? TopicMembershipPlan.openTopic(of: window, records: records)?.forgetting(window, projects: projects) : nil
+                return Planned(edit: TopicEdit(record: record, commands: commands, selection: .paneID(pane.paneID)))
             }
-            let sessionID: String
-            if case .session(let id) = request.target { sessionID = id.rawValue }
-            else { sessionID = try source().0.window.sessionID }
-            let plan = TopicMembershipPlan(removingSession: sessionID)
+            let plan = TopicMembershipPlan(removingSession: try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client),
+                                           records: records, projects: projects)
             return Planned(edit: TopicEdit(record: plan.record, commands: plan.commands, selection: .unchanged))
+        case .removeAndKill(let worktrees):
+            let window = try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client)
+            guard let topic = TopicMembershipPlan.openTopic(of: window, records: records) else { throw TopicRequestError.sourceHasNoTopic }
+            let next = snapshot.windows.first { $0.topicID == topic.id && $0.sessionID != window.sessionID && $0.isActive }
+                ?? snapshot.windows.first { $0.topicID == topic.id && $0.sessionID != window.sessionID }
+            var commands: [TopicPlan.Command] = []
+            if let client, let next { commands.append(.tmux(["switch-client", "-c", client, "-t", next.sessionID + ":" + next.id])) }
+            commands.append(.tmux(["kill-session", "-t", window.sessionID]))
+            if let tree = madeWorktree(of: window, topic: topic, snapshot: snapshot), tree.canRemove(killing: [window.sessionID]),
+               worktrees.contains(tree.id) {
+                commands.append(.removeCleanWorktree(tree.spec))
+            }
+            return Planned(edit: TopicEdit(record: topic.forgetting(window, projects: projects), commands: commands,
+                                           selection: next.map { .sessionID($0.sessionID) } ?? .emptyTopic(topic.id)))
         case .rename(let title):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             return Planned(edit: try TopicRenamePlan(topic: topic, title: title, records: records,

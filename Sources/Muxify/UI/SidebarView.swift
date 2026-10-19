@@ -446,7 +446,7 @@ private struct GroupedTopicRow: View {
     private var details: [String] {
         switch topic.kind {
         case .open: return []
-        case .snoozed(let wake): return [wake] + (topic.isDormant ? ["Dormant"] : [])
+        case .snoozed(let wake): return [wake] + (topic.idleLabel.map { [$0] } ?? [])
         case .settled(let detail): return detail.isEmpty ? [] : [detail]
         }
     }
@@ -532,7 +532,7 @@ private struct TopicCard: View {
     static let viewport = "topics-viewport"
 
     var body: some View {
-        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.mark, viewport: Self.viewport, restingOpacity: topic.isDormant ? 0.55 : 1) {
+        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.mark, viewport: Self.viewport, restingOpacity: topic.hasNoLiveSession ? 0.55 : 1) {
             header
         } content: {
             CardList(blocks: topic.sessions.compactMap { session in
@@ -558,7 +558,7 @@ private struct TopicCard: View {
                     .topicLink()
                     .disabled(store.changingTopic)
                     .accessibilityIdentifier("settle-topic-" + id)
-                    .opacity(hints.sidebarActive ? 0.5 : (topic.isDormant ? 0.55 : 1))
+                    .opacity(hints.sidebarActive ? 0.5 : (topic.hasNoLiveSession ? 0.55 : 1))
             }
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.listSpace)) } action: { frame in
@@ -587,9 +587,9 @@ private struct TopicCard: View {
     private var header: some View {
         CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned,
                    hintTarget: namedTopicID.map { .topic($0) },
-                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isDormant ? ["Dormant"] : []),
+                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.idleLabel.map { [$0] } ?? []),
                    summary: formatted.summary, reservesCorner: true) {
-            if topic.isDormant { Text("Dormant").font(.system(size: 10)).foregroundStyle(.secondary) }
+            if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
         }
         .longPressDrag(listID ?? .topic(""), state: $drag, in: Self.listSpace, isEnabled: listID != nil && !store.changingTopic,
                        placement: { placement(listID ?? .topic(""), $0) }, onTap: press) { drop in

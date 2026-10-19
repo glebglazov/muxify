@@ -137,10 +137,15 @@ final class CommandPalette {
                 actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
                 actions += [.settleTopic, .addProjectToTopic, .rename, .suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
             }
-            if topic.settledAt != nil || !store.windows.contains(where: { $0.topicID == id }) { actions += [.reopenTopic, .startTopicFresh] }
+            if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
+                actions += [.reopenTopic, .startTopicFresh]
+            }
             actions += [.forgetTopic]
         case .session(let session):
-            if store?.isRemote == false { actions += [.move]; if session.windows.first?.topicID != nil { actions += [.removeFromTopic] } }
+            if store?.isRemote == false {
+                actions += [.move]
+                if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
+            }
             if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
             actions += [.rename, .newWindow, .killSession]
         case .window(let window):
@@ -163,7 +168,10 @@ final class CommandPalette {
         case .jumpTo:
             switch item.kind {
             case _ where moving != nil: return "Move Here"
-            case .topic, .snoozedTopic: if case .topic(_, nil) = item.ref { return "Reopen Topic" } else { return "Go to Topic" }
+            case .topic, .snoozedTopic:
+                guard case .topic(let id, nil) = item.ref,
+                      store?.topicWatcher.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
+                return "Reopen Topic"
             case .settledTopic: return "Reopen Topic"
             case .session: return "Switch to Session"
             // A Project row's target is the Session ↩ goes to; without one, ↩ starts it.
@@ -192,6 +200,7 @@ final class CommandPalette {
         case .pinTopic: return "Pin"
         case .unpinTopic: return "Unpin"
         case .removeFromTopic: return "Remove from Topic"
+        case .removeFromTopicAndKill: return "Remove from Topic and Kill…"
         case .newWindow: return "New Window"
         case .revealFolder: return "Reveal in Finder"
         case .killWindow: return "Kill Window"
@@ -376,6 +385,11 @@ final class CommandPalette {
         if flow != nil, handleFlow(trigger) { return true }
         let list = results
         let item = selected(in: list)
+        if trigger == KeyTrigger(modifiers: .command, key: .special(.enter)), case .command(let command)? = item?.pick.payload?.ref,
+           command.commandReturnTitle != nil {
+            acceptSelected(commandReturn: true)
+            return true
+        }
         if let action = store.config.paletteKeybinds.action(for: trigger) {
             switch action {
             case .selectNext, .selectPrev:

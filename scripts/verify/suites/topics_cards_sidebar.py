@@ -457,7 +457,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.write_topic('group-again', 'Group again', self.beta, snoozed_until='never')
         self.expand('snoozed-topics')
         rs = self.s.wait_rows(lambda rs: self.grouped('topic-group-again', 'snoozed-topics', rs), 'Topic is not in the Snoozed group')
-        self.assertIn('Dormant', self.describe('topic-group-again', rs), 'a snoozed Topic with no Session does not say Dormant')
+        self.assertIn('Empty', self.describe('topic-group-again', rs), 'a snoozed Topic that remembers no Session does not say Empty')
         # GroupedTopicRow in UI/SidebarView.swift gives the context menu's items as accessibility actions.
         self.s.act('action', 'topic-group-again', 'Snooze again…')
         self.s.wait_rows(lambda rs: self.s.has('palette-accept', rs), 'Snooze again did not open the Snooze palette')

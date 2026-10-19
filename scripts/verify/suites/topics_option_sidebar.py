@@ -40,6 +40,9 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.write_topic('leaves', 'Leaves proof', self.beta)
         self.select_window(sid + ':')
         self.s.wait_rows(lambda rs: self.s.has('topic-leaves-session-' + sid, rs), 'Session %s never joined Topic leaves' % sid)
+        # A Topic that remembers its Session is Dormant when the Session leaves outside Muxify; one that never
+        # remembered it is Empty.
+        wait(lambda: self.records()['leaves'].get('sessions'), 'Topic leaves did not remember Session %s' % sid)
         self.s.tmux('set-option', '-u', '-t', sid, '@muxify_topic')
         latency, rs = self.rows_until(lambda rs: self.no_topic_cards(rs) == [sid] and 'Dormant' in self.describe('topic-leaves', rs))
         self.assertIsNotNone(latency, 'Session %s is not back in No Topic; %s; No Topic cards: %s'
@@ -111,14 +114,14 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertIsNotNone(latency, 'Topics view: Topic rows %s; Sessions view rows %s'
                              % (self.topic_rows(rs), [sid for sid in live if self.s.has('session-' + sid, rs)]))
 
-    def test_new_topic_is_dormant_until_add_a_project_in_its_empty_view_opens_its_first_session(self):
+    def test_new_topic_is_empty_until_add_a_project_in_its_empty_view_opens_its_first_session(self):
         s = self.s
         record = self.create_topic('New Topic proof')
         self.assertNotIn('home_project', record, json.dumps(record))
         self.assertEqual(record.get('sessions'), [], json.dumps(record))
         key = 'topic-' + record['id']
         self.find(key)
-        self.assertIn('Dormant', self.describe(key, s.rows()), 'the new Topic card is not Dormant')
+        self.assertIn('Empty', self.describe(key, s.rows()), 'the new Topic card is not Empty')
         self.open_add_project()
         self.pick_project(self.alpha_tree['new-topic-base'], False)
         s.act('press', 'palette-accept')

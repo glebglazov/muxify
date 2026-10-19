@@ -23,6 +23,9 @@ public enum ConfigAction: String, KeybindAction {
     case snoozeTopics = "snooze_topics"
     case toggleZen = "toggle_zen"
     case settleTopic = "settle_topic"
+    case removeSessionFromTopic = "remove_session_from_topic"
+    case forgetTopic = "forget_topic"
+    case renameTopic = "rename_topic"
     case toggleLock = "toggle_lock"
     case markRead = "mark_read"
     case markUnread = "mark_unread"
@@ -79,6 +82,9 @@ public enum ConfigAction: String, KeybindAction {
         .moveSession: ["cmd+shift+m"],
         .addProjectToTopic: ["cmd+shift+a"],
         .settleTopic: [],
+        .removeSessionFromTopic: [],
+        .forgetTopic: [],
+        .renameTopic: [],
         .toggleLock: [],
         .markRead: ["cmd+shift+r"],
         .markUnread: ["cmd+shift+u"],
@@ -162,6 +168,7 @@ public enum PaletteAction: String, KeybindAction {
     case pinTopic = "pin_topic"
     case unpinTopic = "unpin_topic"
     case removeFromTopic = "remove_from_topic"
+    case removeFromTopicAndKill = "remove_from_topic_and_kill"
     case newWindow = "new_window"
     case revealFolder = "reveal_folder"
     case killWindow = "kill_window"
@@ -199,6 +206,7 @@ public enum PaletteAction: String, KeybindAction {
         .pinTopic: [],
         .unpinTopic: [],
         .removeFromTopic: [],
+        .removeFromTopicAndKill: [],
         .newWindow: [],
         .revealFolder: [],
         .killWindow: [],

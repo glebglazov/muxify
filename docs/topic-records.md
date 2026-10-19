@@ -86,6 +86,20 @@ snapshot does not write a file. If some Sessions disappear, the record keeps
 only the live Sessions. If all Sessions disappear, it keeps the last live set,
 including a change that is still waiting for its write delay.
 
+Remove from Topic, Remove from Topic and Kill, and a Move of a Session take
+the Session out of the record's `sessions` in the same edit that changes tmux.
+Removing or moving the last Window of a Session does the same, because tmux ends
+the Session. A Topic whose `sessions` is then empty is Empty: going to it
+offers Add a Project and creates nothing. A Session that ends while it is still
+in the Topic (Kill Session, a tmux restart, a shell that exits) stays in
+`sessions`, so the Topic is Dormant and going to it Reopens the Session. When
+another writer changed `sessions` while the app's write delay ran, the app drops
+that pending write, so it cannot put a removed Session back. Plain Remove from
+Topic keeps the Worktree for the Session that now has no Topic. Remove from
+Topic and Kill removes the clean Worktree that the Topic made for the Session
+when the request names it, as Forget does: Git removes it without force and
+keeps its branch.
+
 A remembered Session stores its `project_path`. A worktree Session also stores
 `worktree_path` and `branch`, and `worktree_created` is true when the Topic made
 the Worktree. A Worktree that the Topic made also stores `base`, the full id of

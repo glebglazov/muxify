@@ -69,6 +69,8 @@ extension CommandPalette {
             if let window { close(); store.setLock(ofSession: window.sessionID, action == .lockSession) }
         case .newWindow:
             if let window { close(); store.newWindow(beside: window) }
+        case .removeFromTopicAndKill:
+            if let window, scope == .session { begin(.confirm(PaletteConfirmation(.removeAndKill(window))), keepingHistory: true) }
         case .removeFromTopic:
             if let window {
                 close()

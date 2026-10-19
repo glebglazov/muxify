@@ -26,6 +26,9 @@ struct TopicMembershipMenu: View {
             }
             if isSession, currentSource.window.topicID != nil {
                 Button("Remove from Topic") { store.removeFromTopic(currentSource.window) }
+                Button("Remove from Topic and Kill…") {
+                    store.palette.begin(.confirm(PaletteConfirmation(.removeAndKill(currentSource.window))))
+                }
             }
         }
         .disabled(store.changingTopic)

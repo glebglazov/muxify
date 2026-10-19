@@ -45,10 +45,14 @@ public struct TopicMembershipPlan: Sendable {
     public let commands: [TopicPlan.Command]
     /// The Session whose Lock the move ends: a Locked Session goes into a Topic (ADR 0018).
     private(set) var endedLockOf: String? = nil
+    /// The Topic that the moved Session left, without that Session, when it is not `record`.
+    private(set) var leftTopic: TopicRecord? = nil
 
-    init(removingSession sessionID: String) {
-        record = nil
-        commands = [.tmux(["set-option", "-u", "-t", sessionID, "@muxify_topic"])]
+    /// The Topic forgets the Session at once: a pending write of the remembered Sessions keeps the last live set,
+    /// so without this the Topic stays Dormant and Reopen makes the Session again.
+    init(removingSession window: TmuxWindow, records: [TopicRecord], projects: [Project]) {
+        record = Self.openTopic(of: window, records: records)?.forgetting(window, projects: projects)
+        commands = [.tmux(["set-option", "-u", "-t", window.sessionID, "@muxify_topic"])]
     }
 
     init(source: Source, destination: TopicRecord, records: [TopicRecord], windows: [TmuxWindow], projects: [Project],
@@ -117,6 +121,10 @@ public struct TopicMembershipPlan: Sendable {
                 commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", target + window.id]))
             }
         }
+        if Self.ends(source, windows: windows), let left = Self.openTopic(of: window, records: records)?.forgetting(window, projects: projects) {
+            if left.id == record.id { record = record.forgetting(window, projects: projects) ?? record }
+            else { leftTopic = left }
+        }
         self.record = record
         self.commands = commands
     }
@@ -142,6 +150,18 @@ public struct TopicMembershipPlan: Sendable {
         windows.first {
             $0.topicID == destination.id && TopicLocation(of: $0, record: destination, projects: projects).project.folder == project.folder
         }
+    }
+
+    /// Whether moving `source` out leaves its Session with no Window, so that tmux ends the Session.
+    static func ends(_ source: Source, windows: [TmuxWindow]) -> Bool {
+        let window = source.window
+        if case .pane = source, window.paneCount > 1 { return false }
+        if case .session = source { return true }
+        return !windows.contains { $0.sessionID == window.sessionID && $0.id != window.id }
+    }
+
+    static func openTopic(of window: TmuxWindow, records: [TopicRecord]) -> TopicRecord? {
+        records.first { $0.id == window.topicID && $0.settledAt == nil }
     }
 
     /// The record that a Window's Session belongs to: its Topic, else a Topic that remembers its Worktree.

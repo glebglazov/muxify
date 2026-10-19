@@ -72,9 +72,11 @@ final class TopicMembershipTests: XCTestCase {
         XCTAssertTrue(plan.commands.contains(.tmux(["move-window", "-d", "-s", "$1:@1", "-t", "=game/untitled-1:"])))
     }
 
-    func testRemoveFromTopicUnsetsOnlyMembership() {
-        let plan = TopicMembershipPlan(removingSession: "$1")
-        XCTAssertNil(plan.record)
+    func testRemoveFromTopicUnsetsMembershipAndTheTopicForgetsTheSession() {
+        var remembering = topic
+        remembering.sessions = [.object(["project_path": .string("/work/game")]), .object(["project_path": .string("/work/tools")])]
+        let plan = TopicMembershipPlan(removingSession: window(topic: topic.id), records: [remembering], projects: [project])
+        XCTAssertEqual(plan.record?.sessions, [.object(["project_path": .string("/work/tools")])])
         XCTAssertEqual(plan.commands, [.tmux(["set-option", "-u", "-t", "$1", "@muxify_topic"])])
     }
 

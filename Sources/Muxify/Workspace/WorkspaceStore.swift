@@ -321,6 +321,19 @@ final class WorkspaceStore {
         perform(TopicRequest(.removeFromTopic, target: .session(session)), presenting: .membership(selecting: nil))
     }
 
+    /// The Session leaves its Topic and stops. The palette shows the Topic's next Session, or the Empty Topic.
+    func removeAndKill(_ window: TmuxWindow, worktrees: [String]) {
+        guard let session = SessionID(rawValue: window.sessionID) else { return }
+        perform(TopicRequest(.removeAndKill(worktrees: worktrees), target: .session(session)))
+    }
+
+    func presentRenameTopic(keepingHistory: Bool = false) {
+        topicWatcher.reload()
+        guard !changingTopic, !isRemote,
+              let topic = topicWatcher.records.first(where: { $0.id == activeTopicID && $0.settledAt == nil }) else { return }
+        palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "", keepingHistory: keepingHistory)
+    }
+
     func presentAddProject(toTopic id: String? = nil, keepingHistory: Bool = false) {
         topicWatcher.reload()
         let selected = id ?? activeTopicID
@@ -567,11 +580,11 @@ final class WorkspaceStore {
         if let topic = topicWatcher.records.first(where: { $0.id == selected && $0.settledAt == nil }) { palette.begin(.confirm(PaletteConfirmation(.settle(topic))), keepingHistory: keepingHistory) }
     }
 
-    func presentForgetTopic(_ id: String) {
+    func presentForgetTopic(_ id: String, keepingHistory: Bool = false) {
         topicWatcher.reload()
         guard let topic = topicWatcher.records.first(where: { $0.id == id }) else { return }
         guard !changingTopic, !isRemote else { return }
-        palette.begin(.confirm(PaletteConfirmation(.forget(topic))))
+        palette.begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: keepingHistory)
     }
 
     func forgetTopic(_ id: String, choices: [TopicSettleSession], worktrees: [String]) {
@@ -594,8 +607,9 @@ final class WorkspaceStore {
     }
 
     /// The open Topic has a Session to create, the same test that makes the empty-Topic view offer the Reopen choice.
+    /// An Empty Topic remembers no Session, so going to it offers Add a Project, not a Session in its Home Project.
     private func reopensOnArrival(_ id: String) -> Bool {
-        guard topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }),
+        guard topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil && !$0.sessions.isEmpty }),
               case .success(let reopening)? = reopening(id, .reopen) else { return false }
         return !reopening.sessions.isEmpty
     }
@@ -941,6 +955,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var browsers: [String: Browser] = [:]
     @ObservationIgnored private var topicSnapshots: [String: TmuxSnapshot] = [:]
     @ObservationIgnored private var rememberedTopics: [String: TopicRecord] = [:]
+    /// The record's `sessions` on disk when its pending snapshot was taken.
+    @ObservationIgnored private var topicSnapshotBases: [String: [JSONValue]] = [:]
     @ObservationIgnored private var topicPersistWork: [String: DispatchWorkItem] = [:]
     @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
     /// Keep changes dirty until tmux confirms the write, including commands
@@ -2029,6 +2045,7 @@ final class WorkspaceStore {
             if let updated = previous.remembering(snapshot, projects: projects, order: topicConfig.sessionOrder, branches: topicBranches) {
                 rememberedTopics[record.id] = updated
                 topicSnapshots[record.id] = snapshot
+                topicSnapshotBases[record.id] = record.sessions
                 topicPersistWork[record.id]?.cancel()
                 topicPersistWork[record.id] = nil
             }
@@ -2046,19 +2063,23 @@ final class WorkspaceStore {
     }
 
     /// Writes the Sessions that the last snapshot gave the Topic onto its record as it is on disk now.
+    /// When another writer changed the Sessions after the snapshot, as `muxify topic remove` does, the snapshot
+    /// is stale and is dropped: it would put a removed Session back, and the Topic would be Dormant, not Empty.
     private func persistRememberedTopic(_ id: String) {
         guard let pending = topicSnapshots[id] else { return }
+        let base = topicSnapshotBases[id]
         let projects = projects
         let branches = topicBranches
         let order = topicConfig.sessionOrder
         do {
             try topicWatcher.write { transaction in
-                guard let current = transaction.records.first(where: { $0.id == id }),
+                guard let current = transaction.records.first(where: { $0.id == id }), current.sessions == base,
                       let updated = current.remembering(pending, projects: projects, order: order, branches: branches) else { return }
                 try transaction.update(id) { $0 = updated }
             }
             rememberedTopics[id] = nil
             topicSnapshots[id] = nil
+            topicSnapshotBases[id] = nil
         } catch { NSLog("muxify: remembering Topic \(id): \(error)") }
     }
 
@@ -2076,6 +2097,10 @@ final class WorkspaceStore {
         case .snoozeTopics: if !isRemote { presentSnooze([activeTopicID].compactMap { $0 }, from: .choose) }
         case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
+        case .removeSessionFromTopic:
+            if !isRemote, !changingTopic, let window = selectedWindow, window.topicID != nil, window.topicID == activeTopicID { removeFromTopic(window) }
+        case .forgetTopic: if let id = activeTopicID, topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }) { presentForgetTopic(id) }
+        case .renameTopic: presentRenameTopic()
         case .toggleLock: toggleLockOfCurrentSession()
         case .markRead: changeRead(.read, in: currentReadTarget)
         case .markUnread: changeRead(.unread, in: currentReadTarget)

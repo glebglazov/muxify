@@ -11,6 +11,8 @@ struct TopicEdit: Sendable {
     }
 
     public let record: TopicRecord?
+    /// The Topic that a moved Session left, without that Session. The write that saves `record` saves it too.
+    public var leftTopic: TopicRecord? = nil
     public var newWorktree: TopicPlan.NewWorktree? = nil
     public let commands: [TopicPlan.Command]
     public let selection: Selection

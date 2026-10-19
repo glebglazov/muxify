@@ -35,6 +35,8 @@ final class PaletteConfirmation {
         case killWindow(TmuxWindow)
         /// The Session of this Window.
         case killSession(TmuxWindow)
+        /// The Session of this Window leaves its Topic and stops.
+        case removeAndKill(TmuxWindow)
     }
     enum Choices {
         case loading
@@ -51,10 +53,19 @@ final class PaletteConfirmation {
 
     var requiresCommandReturn: Bool {
         switch target {
-        case .forget, .killWindow, .killSession: return true
+        case .forget, .killWindow, .killSession, .removeAndKill: return true
         case .settle:
             guard case .ready(let sessions, _) = choices else { return true }
             return sessions.contains { $0.disposition == .kill }
+        }
+    }
+
+    /// Whether the Worktree row can switch to Remove: no Session that stays live works in it.
+    func canRemove(_ tree: TopicForgetChoices.Worktree) -> Bool {
+        switch (target, choices) {
+        case (.removeAndKill(let window), _): return tree.canRemove(killing: [window.sessionID])
+        case (_, .ready(let sessions, _)): return tree.canRemove(sessions: sessions)
+        default: return false
         }
     }
 }
@@ -105,7 +116,7 @@ enum PaletteFlow {
         case .confirm(let draft):
             switch draft.target {
             case .settle: "Outcome note (optional)"
-            case .forget, .killWindow, .killSession: "Review and confirm"
+            case .forget, .killWindow, .killSession, .removeAndKill: "Review and confirm"
             }
         }
     }
@@ -143,12 +154,17 @@ extension CommandPalette {
             case .forget(let topic): return "\(topicTitle(topic)) › Forget"
             case .killWindow(let window): return "\(window.displayTitle) › Kill Window"
             case .killSession(let window): return "\(window.sessionName) › Kill Session"
+            case .removeAndKill(let window): return "\(window.sessionName) › Remove from Topic and Kill"
             }
         }
     }
 
     var stepNote: String? {
-        guard let store, let flow else { return nil }
+        guard let store else { return nil }
+        guard let flow else {
+            guard case .command(let command)? = selected(in: results)?.pick.payload?.ref, let title = command.commandReturnTitle else { return nil }
+            return "↩ Run · ⌘↩ " + title
+        }
         switch flow {
         case .move(let draft) where draft.resolution == .loading: return "Reading the active Pane…"
         case .text(.newTopic): return store.newTopicFailure ?? "Makes an empty Topic. Its first Project comes next."
@@ -168,6 +184,10 @@ extension CommandPalette {
             case .forget: return "This removes the Topic for good. It cannot be Reopened."
             case .killWindow: return "This stops every process in the Window."
             case .killSession: return "This stops every process in the Session."
+            case .removeAndKill(let window):
+                let topic = topicTitle(id: window.topicID ?? "")
+                let others = store.windows.contains { $0.topicID == window.topicID && $0.sessionID != window.sessionID }
+                return "This stops every process in the Session. \(topic) stays open" + (others ? "." : ", Empty.")
             }
         default: return nil
         }
@@ -309,8 +329,16 @@ extension CommandPalette {
                                       choice: .worktree(session.id)))
             }
         }
+        if case .removeAndKill(let window) = draft.target {
+            let windows = store?.windows.filter { $0.sessionID == window.sessionID } ?? []
+            rows.append(choiceRow("kill-session", "Kill \(window.sessionName)",
+                                  detail: "\(windows.count) Windows · \(windows.reduce(0) { $0 + $1.paneCount }) Panes", choice: .accept))
+            for agent in store?.agents.filter({ $0.sessionID == window.sessionID }) ?? [] {
+                rows.append(PickCandidate(id: "agent-" + agent.id, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
+            }
+        }
         for tree in worktrees {
-            let canRemove = tree.canRemove(sessions: sessions)
+            let canRemove = draft.canRemove(tree)
             rows.append(PickCandidate(id: "worktree-" + tree.id, title: tree.id,
                                       trailing: canRemove && draft.removedWorktrees.contains(tree.id) ? "Remove" : "Keep",
                                       pick: canRemove ? .available(PaletteItem(kind: .worktree, ref: .choice(.worktree(tree.id))))
@@ -344,6 +372,9 @@ extension CommandPalette {
         case .killSession(let window):
             loadKill(window, session: true, draft: draft, submitting: false)
             return
+        case .removeAndKill(let window):
+            loadRemoveAndKill(window, draft: draft)
+            return
         case .settle(let topic): target = .topic(.id(topic.id)); forget = false
         case .forget(let topic): target = .topic(.id(topic.id)); forget = true
         }
@@ -365,6 +396,25 @@ extension CommandPalette {
                 case .success(let choices): draft.choices = .ready(choices, [])
                 case .failure(let error): draft.choices = .failed(error.message)
                 }
+            }
+        }
+    }
+
+    /// The Worktree that the Topic made for the Session: a clean one starts as Remove.
+    private func loadRemoveAndKill(_ window: TmuxWindow, draft: PaletteConfirmation) {
+        guard let store, let session = SessionID(rawValue: window.sessionID) else { return }
+        draft.choices = .loading
+        let token = invocation
+        let service = store.topicService()
+        Task {
+            let result = await Task.detached { service.removeAndKillWorktree(of: session) }.value
+            guard self.invocation == token else { return }
+            switch result {
+            case .success(let tree):
+                let trees = tree.map { [$0] } ?? []
+                draft.removedWorktrees = Set(trees.filter(draft.canRemove).map(\.id))
+                draft.choices = .ready([], trees)
+            case .failure(let error): draft.choices = .failed(error.message)
             }
         }
     }
@@ -422,6 +472,11 @@ extension CommandPalette {
         guard canAccept else { return }
         if flow?.markedIDs != nil { continueWithMarks(); return }
         if requiresCommandReturn && !commandReturn { return }
+        if flow == nil, commandReturn, case .command(let command)? = selected(in: results)?.pick.payload?.ref,
+           command.commandReturnTitle != nil {
+            runCommandReturn(command)
+            return
+        }
         if acceptsText { accept(.accept) }
         else if case .choice(let choice) = selected(in: results)?.pick.payload?.ref { accept(choice) }
         else if let row = selected(in: results) { perform(.jumpTo, on: row) }
@@ -472,7 +527,7 @@ extension CommandPalette {
             if case .settle = draft.target, let index = sessions.firstIndex(where: { $0.id == id }) {
                 sessions[index].removeWorktree.toggle()
                 draft.choices = .ready(sessions, worktrees)
-            } else if let tree = worktrees.first(where: { $0.id == id }), tree.canRemove(sessions: sessions) {
+            } else if let tree = worktrees.first(where: { $0.id == id }), draft.canRemove(tree) {
                 if !draft.removedWorktrees.insert(id).inserted { draft.removedWorktrees.remove(id) }
             }
         case (.confirm(let draft), .accept):
@@ -484,6 +539,8 @@ extension CommandPalette {
                 store.forgetTopic(topic.id, choices: sessions, worktrees: removed)
             case .killWindow(let window): loadKill(window, session: false, draft: draft, submitting: true)
             case .killSession(let window): loadKill(window, session: true, draft: draft, submitting: true)
+            case .removeAndKill(let window):
+                store.removeAndKill(window, worktrees: worktrees.filter { draft.removedWorktrees.contains($0.id) && draft.canRemove($0) }.map(\.id))
             }
         default: break
         }

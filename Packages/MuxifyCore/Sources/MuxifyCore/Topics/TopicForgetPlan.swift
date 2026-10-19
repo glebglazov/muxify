@@ -8,7 +8,12 @@ public struct TopicForgetChoices: Sendable {
         public let sessionIDs: Set<String>
 
         public func canRemove(sessions: [TopicSettleSession]) -> Bool {
-            isClean && sessionIDs.isSubset(of: Set(sessions.filter { $0.disposition == .kill }.map(\.id)))
+            canRemove(killing: Set(sessions.filter { $0.disposition == .kill }.map(\.id)))
+        }
+
+        /// Clean, and no Session that stays live works in it.
+        public func canRemove(killing killed: Set<String>) -> Bool {
+            isClean && sessionIDs.isSubset(of: killed)
         }
     }
 

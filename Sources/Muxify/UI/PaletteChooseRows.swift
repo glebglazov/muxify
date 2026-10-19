@@ -71,7 +71,7 @@ extension CommandPalette {
             var trailing = topics.activeTopic == row.id ? "Active" : ""
             if case .snoozed(let wake) = row.kind { trailing = "until " + wake }
             return PickCandidate(id: row.id.accessibilityID, title: row.title,
-                                 fields: (row.isDormant ? [.detail("Dormant")] : []) + row.sessions.map { .label($0.projectName) },
+                                 fields: (row.idleLabel.map { [.detail($0)] } ?? []) + row.sessions.map { .label($0.projectName) },
                                  trailing: trailing, mark: row.mark,
                                  pick: .available(PaletteItem(kind: kind, ref: .choice(.mark(id)))))
         }

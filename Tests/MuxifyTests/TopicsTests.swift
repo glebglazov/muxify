@@ -42,7 +42,8 @@ final class TopicsTests: XCTestCase {
         var topic = TopicRecord(id: "a", title: "Fix reward", homeProject: "/work/app")
         topic.sessions = [.object(["project_path": .string("/work/app"), "worktree_path": .string("/trees/fix")]),
                           .object(["project_path": .string("/work/app/tools")])]
-        let dormant = TopicRecord(id: "b", slug: "untitled-3")
+        var dormant = TopicRecord(id: "b", slug: "untitled-3")
+        dormant.sessions = [.object(["project_path": .string("/work/app")])]
         var settled = TopicRecord(id: "settled", title: "Done")
         settled.settledAt = "2026-10-06T20:00:00Z"
         let windows = [window("@1", session: "$1", topic: "a", path: "/trees/fix/src"),
@@ -58,6 +59,7 @@ final class TopicsTests: XCTestCase {
         XCTAssertEqual(model.rows[0].sessions[0].windows.count, 2)
         XCTAssertFalse(model.rows[0].isDormant)
         XCTAssertTrue(model.rows[1].isDormant)
+        XCTAssertEqual(model.rows[1].idleLabel, "Dormant")
         XCTAssertEqual(model.noTopicSessions.count, 3)
     }
 

@@ -62,7 +62,9 @@ final class TopicGroupsTests: XCTestCase {
 
     func testSnoozedRowsKeepTopicOrderAndShowWakeTimeAndDormancy() {
         let wake = SnoozeDeadline.at(now.addingTimeInterval(3600))
-        let records = [snoozed("second", until: .never, order: 2), snoozed("first", until: wake, order: 1)]
+        var second = snoozed("second", until: .never, order: 2)
+        second.sessions = [.object(["project_path": .string("/work/app")])]
+        let records = [second, snoozed("first", until: wake, order: 1)]
         let topics = model(records, windows: [window("@1", session: "$1", topic: "first")])
         let group = topics.groups.first { $0.kind == .snoozed }!
         XCTAssertEqual(group.topics.map(\.id), [.topic("first"), .topic("second")])

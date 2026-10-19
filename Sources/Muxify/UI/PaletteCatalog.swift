@@ -129,10 +129,10 @@ struct PaletteCatalog {
         let isCurrent = topics?.activeTopic == row.id
         let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
         let age = age(.topic(row.id))
-        let trailing = window == nil ? ["Reopen", age].compactMap { $0 }.joined(separator: " · ") : isCurrent ? "Active" : age ?? ""
+        let trailing = window == nil ? [row.isDormant ? "Reopen" : "Empty", age].compactMap { $0 }.joined(separator: " · ") : isCurrent ? "Active" : age ?? ""
         return PickCandidate(
-            id: row.id.accessibilityID, symbol: row.isDormant ? "◇" : "◆", title: row.title,
-            fields: topicFields(row, type: row.isDormant ? "dormant" : "topic"),
+            id: row.id.accessibilityID, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
+            fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
             trailing: trailing, mark: row.mark,
             lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, isPinned: row.isPinned,
             pick: .available(PaletteItem(kind: .topic, ref: .topic(id: id, window: window))), snooze: id)
@@ -278,8 +278,8 @@ struct PaletteCatalog {
                   let record = records.first(where: { $0.id == id }) else { return nil }
             let occupied = scope == .session && TopicMembershipPlan.occupant(of: record, project: project, windows: windows, projects: projects) != nil
             return PickCandidate(
-                id: row.id.accessibilityID, symbol: row.isDormant ? "◇" : "◆", title: row.title,
-                fields: topicFields(row, type: row.isDormant ? "dormant" : "topic"),
+                id: row.id.accessibilityID, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
+                fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
                 trailing: age(.topic(row.id)) ?? "", mark: row.mark,
                 lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned,
                 pick: occupied ? .blocked(reason: "has a \(project.displayName) Session")

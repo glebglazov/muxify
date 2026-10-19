@@ -14,6 +14,9 @@ enum PaletteCommand: String, CaseIterable {
     case snoozeTopic = "Snooze Topic"
     case snoozeTopics = "Snooze Topics…"
     case settleTopic = "Settle Topic"
+    case removeSessionFromTopic = "Remove Session from Topic"
+    case forgetTopic = "Forget Topic"
+    case renameTopic = "Rename Topic"
     case lockSession = "Lock Session"
     case unlockSession = "Unlock Session"
     case zen = "Zen"
@@ -66,6 +69,9 @@ enum PaletteCommand: String, CaseIterable {
         case .snoozeTopic: .snoozeTopic
         case .snoozeTopics: .snoozeTopics
         case .settleTopic: .settleTopic
+        case .removeSessionFromTopic: .removeSessionFromTopic
+        case .forgetTopic: .forgetTopic
+        case .renameTopic: .renameTopic
         case .zen, .endZen: .toggleZen
         case .lockSession, .unlockSession: .toggleLock
         case .newAppWindow: .newAppWindow
@@ -81,6 +87,14 @@ enum PaletteCommand: String, CaseIterable {
         case .previousSession: .selectPrevSession
         case .nextTopic: .selectNextTopic
         case .previousTopic: .selectPrevTopic
+        default: nil
+        }
+    }
+
+    /// What ⌘↩ on the row does in place of ↩, for a Command whose stronger form stops processes (ADR 0014).
+    var commandReturnTitle: String? {
+        switch self {
+        case .removeSessionFromTopic: "Remove and Kill…"
         default: nil
         }
     }
@@ -110,6 +124,10 @@ extension CommandPalette {
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
             case .addProject, .snoozeTopic, .settleTopic: return canChangeTopics && hasOpenTopic
+            case .forgetTopic, .renameTopic: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+            case .removeSessionFromTopic:
+                return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+                    && store.selectedWindow?.topicID == store.activeTopicID
             case .snoozeTopics: return canChangeTopics && store.topicWatcher.records.contains { $0.settledAt == nil }
             case .lockSession, .unlockSession:
                 guard canChangeTopics, let id = store.selectedWindow?.sessionID, let locked = store.lockState(ofSession: id) else { return false }
@@ -167,7 +185,8 @@ extension CommandPalette {
             return
         }
         switch command {
-        case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addProject, .snoozeTopic, .snoozeTopics, .settleTopic, .zen: break
+        case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addProject, .snoozeTopic, .snoozeTopics, .settleTopic, .zen,
+             .forgetTopic, .renameTopic: break
         default: close(restoringFocus: false)
         }
         switch command {
@@ -183,6 +202,9 @@ extension CommandPalette {
         case .snoozeTopic: if let id = store.activeTopicID { store.presentSnooze([id], from: .until, keepingHistory: true) }
         case .snoozeTopics: store.presentSnooze([store.activeTopicID].compactMap { $0 }, from: .choose, keepingHistory: true)
         case .settleTopic: store.presentSettleTopic(keepingHistory: true)
+        case .removeSessionFromTopic: if let window = store.selectedWindow { store.removeFromTopic(window) }
+        case .forgetTopic: if let id = store.activeTopicID { store.presentForgetTopic(id, keepingHistory: true) }
+        case .renameTopic: store.presentRenameTopic(keepingHistory: true)
         case .zen: store.toggleZenOfActiveTopic(keepingHistory: true)
         case .endZen: store.endZen()
         case .lockSession, .unlockSession: store.toggleLockOfCurrentSession()
@@ -207,6 +229,16 @@ extension CommandPalette {
         case .developerTools: store.currentBrowser?.activeTab?.showDeveloperTools()
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser,
              .showSidebar, .hideSidebar, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: break
+        }
+    }
+
+    /// ⌘↩ on a Command row: its `commandReturnTitle` form.
+    func runCommandReturn(_ command: PaletteCommand) {
+        guard let store, commands.contains(command) else { return }
+        switch command {
+        case .removeSessionFromTopic:
+            if let window = store.selectedWindow { begin(.confirm(PaletteConfirmation(.removeAndKill(window))), keepingHistory: true) }
+        default: break
         }
     }
 }

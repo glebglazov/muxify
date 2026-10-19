@@ -230,10 +230,17 @@ struct TopicsModel {
         let isPinned: Bool
         let sessions: [Session]
         let isExpanded: Bool
-        var isDormant: Bool {
+        /// The record remembers Sessions that Reopen can make again.
+        var remembersSessions = true
+        /// An open Topic with no live Session. The card shows dimmed.
+        var hasNoLiveSession: Bool {
             if case .settled = kind { return false }
             return sessions.isEmpty
         }
+        /// No live Session, and Reopen makes the remembered ones again.
+        var isDormant: Bool { hasNoLiveSession && remembersSessions }
+        /// "Dormant", or "Empty" for an open Topic that remembers no Session and offers Add a Project.
+        var idleLabel: String? { hasNoLiveSession ? (remembersSessions ? "Dormant" : "Empty") : nil }
     }
 
     /// A group row and the Topic rows it shows. Absent from `groups` when it holds no Topic.
@@ -384,7 +391,8 @@ struct TopicsModel {
             let kind: Row.Kind = (record.isSnoozed(at: now) ? record.snoozeDeadline : nil).map { .snoozed(wake: $0.wakeLabel) } ?? .open
             let agents = isQuiet(id) ? [] : agentsByGroup[id] ?? []
             return Row(id: id, title: title, kind: kind, mark: isQuiet(id) ? nil : RowMark(unread: record.isUnread, agent: mark(agents)), isPinned: record.isPinned,
-                       sessions: sessions(of: id, members: grouped[id] ?? [], record: record), isExpanded: openTopics.contains(id))
+                       sessions: sessions(of: id, members: grouped[id] ?? [], record: record), isExpanded: openTopics.contains(id),
+                       remembersSessions: !record.sessions.isEmpty)
         }
         /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
         func lockedRow(_ lock: SessionLock) -> Row {

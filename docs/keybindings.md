@@ -17,6 +17,9 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `snooze_topics` | Unbound | Open Snooze Topics, with the Active Topic marked |
 | `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic or a Locked Session, or in Sessions mode, it only ends Zen |
 | `settle_topic` | Unbound | Settle the Active Topic, then open the Next Topic |
+| `remove_session_from_topic` | Unbound | Remove the current Session from the Active Topic. The Session stays live, and the Topic forgets it |
+| `forget_topic` | Unbound | Open Forget for the Active Topic |
+| `rename_topic` | Unbound | Open Rename for the Active Topic |
 | `mark_read` | ⌘⇧R | Clear Unread for the Active Topic, or the current Session when there is no Active Topic |
 | `mark_unread` | ⌘⇧U | Mark the Active Topic Unread, or eligible Agents in the current Session when there is no Active Topic |
 | `mark_all_read` | Unbound | Clear Unread in the Active Environment |
@@ -132,6 +135,9 @@ keybindings:
   snooze_topics: []
   toggle_zen: shift+alt+cmd+s
   settle_topic: []
+  remove_session_from_topic: []
+  forget_topic: []
+  rename_topic: []
   toggle_lock: []
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
   toggle_terminal: cmd+j
@@ -272,6 +278,7 @@ conflict with the actions above:
 | `pin_topic` | Unbound | Pin the highlighted Topic |
 | `unpin_topic` | Unbound | Unpin the highlighted Topic |
 | `remove_from_topic` | Unbound | Remove the highlighted Session or Window from its Topic |
+| `remove_from_topic_and_kill` | Unbound | Confirm a removal of the highlighted Session from its Topic and a kill of it |
 | `new_window` | Unbound | Create a Window in the highlighted Session |
 | `reveal_folder` | Unbound | Show the result's folder in Finder |
 | `kill_window` | Unbound | Confirm a kill of the highlighted Window |

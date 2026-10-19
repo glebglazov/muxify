@@ -80,6 +80,8 @@ final class TopicWireTests: XCTestCase {
                             #"{"command":{"settle":{"choices":[{"disposition":"kill","id":"$1","name":"game/fix","remove_worktree":true,"worktree":{"branch":"fix","path":"/trees/fix","project_path":"/work/game"}}],"outcome":"merged"}},"target":{"pane":"%12"},"version":1}"#)
         try assertRoundTrip(TopicRequest(.removeFromTopic, target: .pane(pane)),
                             #"{"command":{"remove_from_topic":{}},"target":{"pane":"%12"},"version":1}"#)
+        try assertRoundTrip(TopicRequest(.removeAndKill(worktrees: ["/w/app/ship"]), target: .session(try XCTUnwrap(SessionID(rawValue: "$3")))),
+                            #"{"command":{"remove_and_kill":{"worktrees":["/w/app/ship"]}},"target":{"session":"$3"},"version":1}"#)
         try assertRoundTrip(TopicRequest(.reopen, target: .topic(.id("fix"))),
                             #"{"command":{"reopen":{}},"target":{"topic":{"id":"fix"}},"version":1}"#)
         try assertRoundTrip(TopicRequest(.show, target: .topic(.named("Fix"))),

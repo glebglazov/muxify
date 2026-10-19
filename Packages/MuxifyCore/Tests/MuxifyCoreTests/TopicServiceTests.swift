@@ -634,6 +634,97 @@ final class TopicServiceTests: XCTestCase {
         }
     }
 
+    /// A Topic whose Session the user took out remembers no Session: it is Empty, and Reopen does not make it again.
+    private func assertEmpty(_ id: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let record = try XCTUnwrap(records().first { $0.id == id }, file: file, line: line)
+        XCTAssertEqual(record.sessions, [], file: file, line: line)
+        XCTAssertNil(record.settledAt, file: file, line: line)
+        XCTAssertFalse(server.snapshot().windows.contains { $0.topicID == id }, file: file, line: line)
+    }
+
+    func testRemovingTheOnlySessionLeavesTheTopicEmptyAndTheSessionLive() throws {
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Only", project: project.folder.path)))).topicID)
+        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        try assertThrowawayServer()
+        _ = try change(service().handle(TopicRequest(.removeFromTopic, target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
+        try assertEmpty(id)
+        XCTAssertEqual(try records().first { $0.id == id }?.title, "Only")
+        XCTAssertTrue(server.snapshot().windows.contains { $0.sessionID == session.sessionID && $0.topicID == nil })
+    }
+
+    func testRemovingTheLastWindowLeavesTheTopicEmpty() throws {
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Last window", project: project.folder.path)))).topicID)
+        let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        try assertThrowawayServer()
+        _ = try change(service().handle(TopicRequest(.removeFromTopic, target: .window(try XCTUnwrap(WindowID(rawValue: window.id))))))
+        try assertEmpty(id)
+        XCTAssertNil(server.snapshot().windows.first { $0.id == window.id }?.topicID)
+    }
+
+    func testMovingTheOnlySessionLeavesTheSourceEmptyAndTheDestinationRemembersIt() throws {
+        let source = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "From", project: project.folder.path)))).topicID)
+        let destination = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "To", project: nil)))).topicID)
+        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == source })
+        try assertThrowawayServer()
+        _ = try change(service().handle(TopicRequest(.move(to: .topic(.id(destination))),
+                                                     target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
+        try assertEmpty(source)
+        XCTAssertEqual(try records().first { $0.id == destination }?.sessions.compactMap { $0["project_path"]?.string }, [project.folder.path])
+        XCTAssertEqual(server.snapshot().windows.first { $0.sessionID == session.sessionID }?.topicID, destination)
+    }
+
+    func testRemovingOneOfTwoSessionsForgetsItInTheSameEdit() throws {
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Two", project: project.folder.path)))).topicID)
+        _ = try change(service().handle(TopicRequest(.addProject(project: tools.folder.path, workingCopy: .project), target: .topic(.id(id)))))
+        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id && $0.sessionName.hasPrefix(tools.name + "/") })
+        try assertThrowawayServer()
+        _ = try change(service().handle(TopicRequest(.removeFromTopic, target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
+        XCTAssertEqual(try records().first { $0.id == id }?.sessions.compactMap { $0["project_path"]?.string }, [project.folder.path])
+    }
+
+    func testRemoveAndKillStopsTheOnlySessionAndShowsTheEmptyTopic() throws {
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Stop", project: project.folder.path)))).topicID)
+        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        try assertThrowawayServer()
+        let removed = try change(service().handle(TopicRequest(.removeAndKill(worktrees: []),
+                                                               target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
+        try assertEmpty(id)
+        XCTAssertFalse(server.snapshot().windows.contains { $0.sessionID == session.sessionID })
+        XCTAssertEqual(removed.shown, .emptyTopic(id: id))
+    }
+
+    func testRemoveAndKillOfOneOfTwoSessionsShowsTheOtherSession() throws {
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Stop one", project: project.folder.path)))).topicID)
+        _ = try change(service().handle(TopicRequest(.addProject(project: tools.folder.path, workingCopy: .project), target: .topic(.id(id)))))
+        let windows = server.snapshot().windows.filter { $0.topicID == id }
+        let killed = try XCTUnwrap(windows.first { $0.sessionName.hasPrefix(tools.name + "/") })
+        let other = try XCTUnwrap(windows.first { $0.sessionID != killed.sessionID })
+        try assertThrowawayServer()
+        let removed = try change(service().handle(TopicRequest(.removeAndKill(worktrees: []),
+                                                               target: .session(try XCTUnwrap(SessionID(rawValue: killed.sessionID))))))
+        XCTAssertFalse(server.snapshot().windows.contains { $0.sessionID == killed.sessionID })
+        XCTAssertEqual(try records().first { $0.id == id }?.sessions.compactMap { $0["project_path"]?.string }, [project.folder.path])
+        XCTAssertEqual(removed.shown, .window(try XCTUnwrap(WindowID(rawValue: other.id))))
+    }
+
+    func testRemoveAndKillRemovesTheCleanWorktreeOnlyWhenTheRequestNamesIt() throws {
+        let app = try repository()
+        let service = TopicService(paths: paths, server: server, projects: [project, app])
+        for remove in [false, true] {
+            let title = remove ? "Remove tree" : "Keep tree"
+            let session = try addNewWorktree(of: app, base: nil, title: title)
+            let id = try XCTUnwrap(records().first { $0.title == title }?.id)
+            let worktree = try XCTUnwrap(session["worktree_path"]?.string)
+            let live = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+            try assertThrowawayServer()
+            _ = try change(service.handle(TopicRequest(.removeAndKill(worktrees: remove ? [worktree] : []),
+                                                       target: .session(try XCTUnwrap(SessionID(rawValue: live.sessionID))))))
+            try assertEmpty(id)
+            XCTAssertEqual(FileManager.default.fileExists(atPath: worktree), !remove)
+            XCTAssertNoThrow(try git(["rev-parse", "--verify", "refs/heads/" + (session["branch"]?.string ?? "")], in: app.folder.path))
+        }
+    }
+
     @discardableResult
     private func git(_ arguments: [String], in directory: String) throws -> String {
         try Shell.run("/usr/bin/git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"] + arguments, directory: directory)

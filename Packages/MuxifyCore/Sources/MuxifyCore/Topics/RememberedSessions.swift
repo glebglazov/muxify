@@ -54,6 +54,15 @@ extension TopicRecord {
         return updated
     }
 
+    /// The record without the remembered Session of `window`'s Project, or nil when it remembers none. A Topic has one
+    /// Session per Project, so the Project names the entry.
+    func forgetting(_ window: TmuxWindow, projects: [Project]) -> TopicRecord? {
+        let project = TopicLocation(of: window, record: self, projects: projects).project.folder
+        var updated = self
+        updated.sessions.removeAll { $0["project_path"]?.string.map(Folder.local) == project }
+        return updated.sessions == sessions ? nil : updated
+    }
+
     /// The first remembered Session of each folder that its `field` names, such as `project_path`, resolved on this Mac.
     func rememberedSessions(by field: String) -> [Folder: JSONValue] {
         Dictionary(sessions.compactMap { session in session[field]?.string.map { (Folder.local($0), session) } },

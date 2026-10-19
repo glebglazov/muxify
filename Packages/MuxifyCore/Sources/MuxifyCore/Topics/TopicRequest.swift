@@ -183,8 +183,11 @@ public enum TopicCommand: Codable, Hashable, Sendable {
     case forget(choices: [TopicSettleSession], worktrees: [String])
     /// Moves the target Session, Window or Pane. A Pane in a shared Window leaves the other Panes there.
     case move(to: TopicDestination)
-    /// Takes the target's Session out of its Topic.
+    /// Takes the target's Session out of its Topic. The Topic forgets it, so Reopen does not make it again.
     case removeFromTopic
+    /// Takes the target Session out of its Topic and kills it. Of the Worktrees in `worktrees`, it removes the clean
+    /// one that the Topic made for that Session, as Forget does.
+    case removeAndKill(worktrees: [String])
     case rename(title: String)
     /// Creates the remembered Sessions, Windows, Tabs and Agents of a Dormant or Settled Topic again.
     case reopen
@@ -213,6 +216,7 @@ public enum TopicCommand: Codable, Hashable, Sendable {
         case sortSessions = "sort_sessions"
         case addProject = "add_project"
         case removeFromTopic = "remove_from_topic"
+        case removeAndKill = "remove_and_kill"
     }
 
     private enum AddProjectCodingKeys: String, CodingKey {

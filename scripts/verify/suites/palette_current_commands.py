@@ -82,9 +82,12 @@ class PaletteCurrentCommands(unittest.TestCase):
         path = self.topic('current-commands')
         before = path.read_text()
         for title, step in [('Add a Project', 'Add a Project'), ('Snooze Topic', 'Snooze'),
-                            ('Settle Topic', 'Settle'), ('Zen', 'Zen')]:
+                            ('Settle Topic', 'Settle'), ('Zen', 'Zen'), ('Forget Topic', 'Forget'), ('Rename Topic', 'Rename')]:
             self.run_command(title)
             self.s.wait_rows(lambda rs: step in self.breadcrumb(rs), title + ' did not open its step')
+            if title == 'Rename Topic':
+                # Rename starts with the title in the field, and Back works only in an empty field.
+                self.s.act('set', 'palette-search', '')
             if title == 'Snooze Topic':
                 self.s.act('action', 'palette-search', 'Back')
                 self.s.wait_rows(lambda rs: 'Snooze Topics › choose' in self.breadcrumb(rs), 'Back did not go to the choose step')
@@ -95,8 +98,46 @@ class PaletteCurrentCommands(unittest.TestCase):
             self.assertEqual(after.get(key), original.get(key), key + ' changed on Cancel')
         self.assertFalse((self.s.root/'state/muxify/zen.json').exists())
 
+    def remembered(self, path):
+        """Waits until the app records the Topic's live Session, so that a removal has something to forget."""
+        wait(lambda: json.loads(path.read_text()).get('sessions'), 'the Topic did not remember its Session')
+
+    def assert_empty_topic(self, name, path, sessions):
+        self.assertEqual(json.loads(path.read_text()).get('sessions'), [], 'the Topic still remembers the Session')
+        card = self.s.wait_rows(lambda rs: 'Empty' in self.s.row('topic-' + name, rs).get('accessibilityValue', ''),
+                                'the Topic card does not show Empty')
+        self.assertNotIn('Dormant', self.s.row('topic-' + name, card).get('accessibilityValue', ''))
+        self.s.act('press', 'topic-' + name)
+        self.s.wait_rows(lambda rs: self.s.has('empty-topic-add-project', rs), 'going to the Topic did not offer Add a Project')
+        self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}').split(), sessions, 'going to the Topic made a Session')
+
+    def test_remove_session_from_topic_leaves_the_topic_empty_and_the_session_live(self):
+        path = self.topic('remove-empty')
+        self.remembered(path)
+        self.run_command('Remove Session from Topic')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Remove Session from Topic did not close Commands')
+        wait(lambda: self.s.tmux('show-options', '-qv', '-t', 'remove-empty', '@muxify_topic') == '',
+             'the Session is still in the Topic')
+        self.assert_empty_topic('remove-empty', path, self.s.tmux('list-sessions', '-F', '#{session_name}').split())
+
+    def test_command_return_on_remove_session_from_topic_kills_the_session_after_a_confirm_step(self):
+        path = self.topic('remove-kill')
+        self.remembered(path)
+        self.search('Remove Session from Topic')
+        self.s.wait_rows(lambda rs: 'Remove and Kill' in (self.s.row('palette-note', rs).get('accessibilityLabel', '')
+                                                         + self.s.row('palette-note', rs).get('accessibilityValue', '')),
+                         'the note does not show the ⌘↩ variant')
+        self.s.act('action', 'palette-search', 'Confirm')
+        self.s.wait_rows(lambda rs: 'Remove from Topic and Kill' in self.breadcrumb(rs) and self.s.has('palette-row-kill-session', rs),
+                         '⌘↩ did not open the Kill confirm step')
+        self.assertEqual(self.s.tmux_ok('has-session', '-t', '=remove-kill').returncode, 0, 'the confirm step killed the Session')
+        self.s.act('action', 'palette-search', 'Confirm')
+        wait(lambda: self.s.tmux_ok('has-session', '-t', '=remove-kill').returncode != 0, 'Remove and Kill did not kill the Session')
+        self.assert_empty_topic('remove-kill', path, self.s.tmux('list-sessions', '-F', '#{session_name}').split())
+
     def test_commands_omit_unavailable_topic_and_tab_actions(self):
-        for title in ['Add a Project', 'Snooze Topic', 'Settle Topic', 'Zen', 'Move Pane with Active Tab']:
+        for title in ['Add a Project', 'Snooze Topic', 'Settle Topic', 'Zen', 'Move Pane with Active Tab',
+                      'Remove Session from Topic', 'Forget Topic', 'Rename Topic']:
             self.search(title)
             self.assertFalse(self.s.has('palette-row-command-' + title), title + ' had no target')
             self.s.act('action', 'palette-search', 'Close')
