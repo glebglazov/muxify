@@ -21,7 +21,7 @@ class PaletteActions(unittest.TestCase):
         cls.project.mkdir(parents=True)
         cls.topics = s.root/'state/muxify/topics'
         cls.topics.mkdir(parents=True, exist_ok=True)
-        (s.root/'config/muxify/config.yaml').write_text('projects:\n  paths:\n    - path: ' + str(cls.project) + '\n'
+        (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n'
             'command_palettes:\n  - name: Commands\n    keybinding: cmd+shift+p\n    sources: [commands]\n'
             '  - name: Go to…\n    keybinding: cmd+p\n    sources: [topics, sessions]\n'
             '  - name: Verify Windows\n    keybinding: cmd+shift+w\n    sources: [windows]\n')

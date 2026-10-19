@@ -38,7 +38,7 @@ muxify session open "my project"
 A Session groups tmux Windows, usually for one Project or Worktree. Open
 **Go to…** (⇧⌘P by default) to go to a Topic, switch Sessions or start one in a Project.
 
-Configure [`projects.paths`](docs/configuration.md#projects) with the folders
+Configure [`sessions.paths`](docs/configuration.md#projects) with the folders
 that hold your repositories. A repository is one Project, and Muxify asks Git
 for its Worktrees, wherever they live. Choosing a Project reuses its Session or
 creates one; a Worktree's Session is named `project/worktree-folder`.

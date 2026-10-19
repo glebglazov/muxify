@@ -1,6 +1,6 @@
 import Foundation
 
-/// Finds the Projects of `projects.paths` on one machine, with one script that runs here or over a Remote
+/// Finds the Projects of `sessions.paths` on one machine, with one script that runs here or over a Remote
 /// Environment's SSH master. Each repository it finds comes with its Worktrees, read from git's layout.
 public enum ProjectDiscovery {
     /// Takes the wanted folders, one per line, then each root's path and depth as a pair of arguments. Prints `H`

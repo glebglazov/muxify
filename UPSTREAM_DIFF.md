@@ -13,8 +13,8 @@ This file is about what changes for upstream's own features.
 
 ### Session Path becomes Project
 
-- `projects.paths` replaces `sessions.paths` (ADR 0011). One list of folders
-  now serves the Command Palette, Topics and the CLI.
+- `sessions.paths` keeps its name, and now finds Projects (ADR 0011). One list
+  of folders serves the Command Palette, Topics and the CLI.
 - `ProjectDiscovery.swift` replaces `SessionPaths.swift`. One shell script finds
   the folders. It runs on this Mac, or over the Remote Environment's SSH master.
 - A repository is one Project. Its Worktrees are rows of that Project, read
@@ -61,15 +61,16 @@ Sidebar's Session header is replaced by Topic cards.
 | Upstream | This branch | Note |
 | --- | --- | --- |
 | `keybindings.focus_terminal` (⌃`, keyboard to the terminal) | `move_keyboard_to_terminal` (⌃`) | `focus_terminal` now means Focus on the Terminal (⌥⌘T): the Terminal alone, with the Sidebar hidden. |
-| `projects_aliases` | `projects.aliases` | The old key gets a problem. |
 | `SidebarTypography` in the app | `SidebarTypography` in MuxifyCore | The app keeps the roles. Behavior is the same. |
 
 ## Extended
 
-- `projects.paths` takes upstream's `path` and `depth`, and adds:
+- `sessions.paths` takes upstream's `path` and `depth`, and adds:
   - a glob in `path`
   - a path relative to the Config file's folder
   - `display_depth`, the number of folder levels in the Project's name
+- `sessions.aliases` gives a Project a name to show in the lists and the
+  Sidebar. tmux Sessions keep the folder name.
 - The palette has a fourth Source, `topics`. It has rows only in a Local App
   Window with Topics on.
 - The `sessions` Source has one row for each Project and Worktree, which holds
@@ -110,23 +111,19 @@ Sidebar's Session header is replaced by Topic cards.
 1. **`focus_terminal` does a different thing, with no warning.** An upstream
    Config that binds `focus_terminal` now binds Focus on the Terminal. If that
    key is ⌃`, `move_keyboard_to_terminal` also loses its default key.
-2. **An upstream Config loads with problems.** `sessions.paths`, a list-shaped
-   `projects` and `projects_aliases` show in the problems banner, and their
-   folders are not used until the Config moves them to `projects.paths`. The
-   rest of the Config applies.
-3. **Go to… opens with other chips.** Without `command_palettes`, Go to… opens
+2. **Go to… opens with other chips.** Without `command_palettes`, Go to… opens
    with `topics` and `sessions`. Upstream opened with `agents`, `sessions` and
    `windows`. In a custom palette the chip order changes too, for example ⌘2
    moves from Sessions to Topics.
-4. **New default keybindings can take keys from the terminal.** For example
+3. **New default keybindings can take keys from the terminal.** For example
    ⇧⌘↩ is also Ghostty's `toggle_split_zoom`, and ⌘J and ⌘⇧T are now taken.
-5. **The empty palette puts the current row first.** Upstream put the current
+4. **The empty palette puts the current row first.** Upstream put the current
    Session last, so that ↩ went to the one before it. Section headers always
    show.
-6. **The same Agent can have two colours.** A failed Agent is red in the
+5. **The same Agent can have two colours.** A failed Agent is red in the
    Sidebar and orange in the palette. A done Agent is green in the Sidebar and
    blue (Unread) in the palette.
-7. **Some new sections ignore a remote Config.** In a Remote App Window,
+6. **Some new sections ignore a remote Config.** In a Remote App Window,
    `ui.pulse`, `notifications`, `topics` and `sidebar` come from the local
    Config, not from the remote one. ADR 0010 says that only `ghostty` and
    `remote_environments` are skipped. This is a known gap on the branch.

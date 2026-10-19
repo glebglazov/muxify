@@ -277,7 +277,7 @@ extension TopicInvocation {
         if command == .list {
             response = TopicService(paths: paths).handle(TopicRequest(.list))
         } else {
-            // Finding every Project runs git in each repository under projects.paths, so a command that shows a
+            // Finding every Project runs git in each repository under sessions.paths, so a command that shows a
             // Topic finds the Topic first and then looks only at its folders.
             let showsTopic = command.showsTopic
             var config = try await ConfigProjects.load(paths.configFile, within: command.findsAllProjects ? nil : [])

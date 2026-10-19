@@ -24,7 +24,7 @@ class TopicsCli(unittest.TestCase):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
         cls.projects = s.root/'projects'
-        (s.root/'config/muxify/config.yaml').write_text('projects:\n  paths:\n    - path: ' + str(cls.projects) + '/*\n')
+        (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.projects) + '/*\n')
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(s.root))
 
     def muxify(self, *args, pane, env=None):

@@ -6,9 +6,9 @@ final class ProjectDiscoveryTests: XCTestCase {
         try Config.load(path: path) { _ in text }.get()
     }
 
-    func testProjectsPathsTakeAGlobADepthAndADisplayDepth() throws {
+    func testSessionsPathsTakeAGlobADepthAndADisplayDepth() throws {
         let config = try load("""
-        projects:
+        sessions:
           paths:
             - path: ~/Dev/*/*
               display_depth: 2
@@ -27,33 +27,26 @@ final class ProjectDiscoveryTests: XCTestCase {
         XCTAssertEqual(config.projects, [], "loading never looks on disk")
     }
 
-    func testTheOldProjectsListAndSessionsPathsAreProblemsThatNameTheirNewPlace() throws {
-        let config = try load("""
-        projects:
-          - path: ~/Dev/*
-        projects_aliases:
-          - ~/Dev/x: X
-        sessions:
-          paths: [{path: ~/src}]
-        """)
-        XCTAssertEqual(config.problems.map(\.message), [
-            "projects: the list moved to projects.paths",
-            "projects_aliases moved to projects.aliases",
-            "sessions.paths moved to projects.paths",
-        ])
-        XCTAssertEqual(config.projectRoots, [])
+    func testTheOldProjectsSectionsAreProblemsThatNameTheirNewPlace() throws {
+        for (text, message) in [("projects:\n  - path: ~/Dev/*", "projects: the list moved to sessions.paths"),
+                                ("projects:\n  paths: [{path: ~/src}]", "projects moved to sessions"),
+                                ("projects_aliases:\n  - ~/Dev/x: X", "projects_aliases moved to sessions.aliases")] {
+            let config = try load(text)
+            XCTAssertEqual(config.problems.map(\.message), [message], text)
+            XCTAssertEqual(config.projectRoots, [], text)
+        }
     }
 
-    func testWrongProjectsPathsShapesAreProblemsAndSkipTheirEntry() throws {
+    func testWrongSessionsPathsShapesAreProblemsAndSkipTheirEntry() throws {
         for entry in ["wrong", "{display_depth: 2}", "{path: 42}", "{path: true}", "{path: ''}",
                       "{path: /tmp, display_depth: 0}", "{path: /tmp, display_depth: -1}", "{path: /tmp, display_depth: '2'}",
                       "{path: /tmp, depth: -1}", "{path: /tmp, depth: 1.5}", "{path: /tmp, color: red}"] {
-            let config = try load("projects:\n  paths: [\(entry)]")
+            let config = try load("sessions:\n  paths: [\(entry)]")
             XCTAssertEqual(config.problems.count, 1, entry)
             XCTAssertEqual(config.problems.first?.line, 2, entry)
             XCTAssertEqual(config.projectRoots, [], entry)
         }
-        for text in ["projects: 42", "projects:\n  paths: {}", "projects:\n  folders: []"] {
+        for text in ["sessions: 42", "sessions: [{path: /tmp}]", "sessions:\n  paths: {}", "sessions:\n  folders: []"] {
             XCTAssertFalse(try load(text).problems.isEmpty, text)
         }
     }

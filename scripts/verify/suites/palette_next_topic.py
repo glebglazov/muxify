@@ -17,7 +17,7 @@ class PaletteNextTopic(unittest.TestCase):
         cls.project.mkdir(parents=True)
         cls.topics = s.root/'state/muxify/topics'
         cls.topics.mkdir(parents=True, exist_ok=True)
-        (s.root/'config/muxify/config.yaml').write_text('projects:\n  paths:\n    - path: ' + str(cls.project) + '\n')
+        (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n')
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', 'base', '-c', str(cls.project), SHELL)
         s.tmux('set-option', '-g', 'detach-on-destroy', 'off')
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])

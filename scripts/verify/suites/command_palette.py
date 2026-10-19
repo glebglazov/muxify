@@ -47,7 +47,7 @@ class CommandPalette(unittest.TestCase):
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'main'), 'main'], check=True)
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'release'), '-b', 'release-line'],
                        check=True)
-        (s.root/'config/muxify/config.yaml').write_text('projects:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
+        (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
                                                        '  aliases:\n    - ' + str(cls.delta) + ': Delta Notes\n')
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'base', '-c', str(cls.beta), SHELL)
         cls.base_window = s.tmux('display-message', '-p', '-t', cls.base + ':', '#{window_id}')

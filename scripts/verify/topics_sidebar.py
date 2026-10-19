@@ -77,7 +77,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
         # The base of the Worktrees that the New Worktree checks create; no check opens a Session in it.
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'base'), '-b', 'base-line'], check=True)
         cls.config = s.root/'config/muxify/config.yaml'
-        cls.config_text = ('projects:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
+        cls.config_text = ('sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
                            'topics:\n  title_command_fallbacks: /bin/sh ' + str(title_model) + '\n')
         cls.config.write_text(cls.config_text)
         # A running tmux server at launch, as a user has; no check uses this Session.

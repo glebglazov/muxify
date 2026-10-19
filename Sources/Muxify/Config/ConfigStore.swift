@@ -42,7 +42,7 @@ final class ConfigStore {
         filesStamp = stampFiles()
     }
 
-    /// Takes the Projects found for `source`'s `projects`, unless that section changed while they were found.
+    /// Takes the Projects found for `source`'s `sessions`, unless that section changed while they were found.
     func updateProjects(_ projects: [Project], foundFor source: Config) {
         guard config.projectRoots == source.projectRoots, config.projectAliases == source.projectAliases,
               config.projects != projects else { return }

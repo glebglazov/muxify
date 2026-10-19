@@ -23,7 +23,7 @@ class HoverLabelsSidebar(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         project = s.root/'projects/alpha'
         project.mkdir(parents=True)
-        (s.root/'config/muxify/config.yaml').write_text('projects:\n  paths:\n    - path: ' + str(project) + '\n')
+        (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(project) + '\n')
         s.tmux('new-session', '-d', '-s', 'base', '-n', LONG, '-c', str(project), SHELL)
         s.tmux('new-window', '-d', '-t', 'base:', '-n', 'short', '-c', str(project), SHELL)
         cls.long, cls.short = s.tmux('list-windows', '-t', 'base:', '-F', '#{window_id}').split()

@@ -1092,10 +1092,10 @@ final class CLIIntegrationTests: XCTestCase {
     func testProjectListGoesOnPastAConfigProblemAndPrintsItOnStderr() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
-        try Data("projects:\n  paths:\n    - path: \(sandbox.root.path)/work/*\n  colour: red\n".utf8).write(to: sandbox.config)
+        try Data("sessions:\n  paths:\n    - path: \(sandbox.root.path)/work/*\n  colour: red\n".utf8).write(to: sandbox.config)
         let result = try await run(cli, arguments: ["project", "list"], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(result.status, 0, result.output)
-        XCTAssertEqual(result.stderr, "muxify: \(sandbox.config.path):4: unknown key \"projects.colour\"\n")
+        XCTAssertEqual(result.stderr, "muxify: \(sandbox.config.path):4: unknown key \"sessions.colour\"\n")
         XCTAssertEqual(result.stdout.split(separator: "\n").map { $0.split(separator: "\t").first.map(String.init) },
                        [sandbox.game.path, sandbox.tools.path])
     }
@@ -1104,7 +1104,7 @@ final class CLIIntegrationTests: XCTestCase {
     func testATopicEditStopsWithTheConfigSyntaxError() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
-        try Data("projects: [\n".utf8).write(to: sandbox.config)
+        try Data("sessions: [\n".utf8).write(to: sandbox.config)
         let result = try await run(cli, arguments: ["topic", "new", "Ship", "--project", sandbox.game.path],
                                    environment: sandbox.cliEnvironment(pane: try sandbox.pane(of: "main")))
         XCTAssertEqual(result.status, 1, result.output)
@@ -1235,7 +1235,7 @@ private final class TopicSandbox {
         tools = root.appendingPathComponent("work/tools", isDirectory: true)
         config = root.appendingPathComponent("config.yaml")
         for folder in [game, tools] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        try Data("projects:\n  paths:\n    - path: \(root.path)/work/*\n".utf8).write(to: config)
+        try Data("sessions:\n  paths:\n    - path: \(root.path)/work/*\n".utf8).write(to: config)
         let socketFolder = root.appendingPathComponent("tmux-\(getuid())", isDirectory: true)
         try FileManager.default.createDirectory(at: socketFolder, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])

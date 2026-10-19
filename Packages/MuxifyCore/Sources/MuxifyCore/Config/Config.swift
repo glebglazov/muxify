@@ -28,9 +28,9 @@ public struct Config: Equatable {
     public var sidebar = Sidebar()
     /// What `ProjectDiscovery` found for `projectRoots` last. Loading a Config never fills it.
     public var projects: [Project] = []
-    /// `projects.paths`, in Config order.
+    /// `sessions.paths`, in Config order.
     public var projectRoots: [ProjectRoot] = []
-    /// A Project path as the Config wrote it, `~` included, to its alias, from `projects.aliases`.
+    /// A Project path as the Config wrote it, `~` included, to its alias, from `sessions.aliases`.
     public var projectAliases: [String: String] = [:]
     public var topics = Topics()
     public var notifications = Notifications()
@@ -194,7 +194,7 @@ public struct Config: Equatable {
         #     # system, or an installed macOS font family (case-insensitive).
         #     font_family: system
         #
-        # projects:
+        # sessions:
         #   # Folders where you open Sessions. A path may be a glob, and each
         #   # folder it matches is a root. depth 0 (the default) is the root
         #   # itself; 1 lists its subfolders, 2 goes two levels deep. Hidden
@@ -432,8 +432,8 @@ private struct ConfigReader {
     }
 
     static let sections: [String: (inout ConfigReader, Node) -> Void] = [
-        "projects": { $0.readProjects($1) },
-        "projects_aliases": { $0.problem(at: $1, "projects_aliases moved to projects.aliases") },
+        "projects": { $0.problem(at: $1, $1.sequence == nil ? "projects moved to sessions" : "projects: the list moved to sessions.paths") },
+        "projects_aliases": { $0.problem(at: $1, "projects_aliases moved to sessions.aliases") },
         "topics": { $0.readTopics($1) },
         "notifications": { $0.readNotifications($1) },
         "hints": { $0.readHints($1) },
@@ -443,7 +443,7 @@ private struct ConfigReader {
         "ui": { $0.readUI($1) },
         "keybindings": { $0.readKeybindings($1) },
         "command_palettes": { $0.readCommandPalettes($1) },
-        "sessions": { $0.problem(at: $1, "sessions.paths moved to projects.paths") },
+        "sessions": { $0.readSessions($1) },
         "remote_environments": { $0.readRemoteEnvironments($1) },
     ]
 
@@ -467,45 +467,41 @@ private struct ConfigReader {
     }
 
     /// A folder missing on this machine is not a problem: the Config may be shared by several Macs.
-    public mutating func readProjects(_ node: Node) {
-        guard node.sequence == nil else {
-            problem(at: node, "projects: the list moved to projects.paths")
-            return
-        }
-        for (name, key, value) in entries(of: node, "projects") {
+    public mutating func readSessions(_ node: Node) {
+        for (name, key, value) in entries(of: node, "sessions") {
             switch name {
             case "paths": readProjectPaths(value)
             case "aliases": readProjectAliases(value)
-            default: problem(at: key, "unknown key \"projects.\(name)\"")
+            default: problem(at: key, "unknown key \"sessions.\(name)\"")
             }
         }
     }
 
     mutating func readProjectPaths(_ node: Node) {
         guard let sequence = node.sequence else {
-            problem(at: node, "projects.paths: expected a list")
+            problem(at: node, "sessions.paths: expected a list")
             return
         }
         for item in sequence {
             guard item.mapping != nil else {
-                problem(at: item, "projects.paths: expected a mapping with a path")
+                problem(at: item, "sessions.paths: expected a mapping with a path")
                 continue
             }
             let problemCount = config.problems.count
             var values: [String: Node] = [:]
-            for (name, key, value) in entries(of: item, "a projects.paths entry") {
+            for (name, key, value) in entries(of: item, "a sessions.paths entry") {
                 guard ["path", "depth", "display_depth"].contains(name) else {
-                    problem(at: key, "unknown key \"projects.paths.\(name)\"")
+                    problem(at: key, "unknown key \"sessions.paths.\(name)\"")
                     continue
                 }
                 values[name] = value
             }
             let path = values["path"].flatMap { $0.tag == Tag(.str) ? string($0) : nil }?.trimmingCharacters(in: .whitespacesAndNewlines)
             if path?.isEmpty != false || path?.rangeOfCharacter(from: .controlCharacters) != nil {
-                problem(at: values["path"] ?? item, "projects.paths.path: expected a path or a path glob")
+                problem(at: values["path"] ?? item, "sessions.paths.path: expected a path or a path glob")
             }
-            let depth = count(values["depth"], "projects.paths.depth", atLeast: 0) ?? 0
-            let displayDepth = count(values["display_depth"], "projects.paths.display_depth", atLeast: 1) ?? 1
+            let depth = count(values["depth"], "sessions.paths.depth", atLeast: 0) ?? 0
+            let displayDepth = count(values["display_depth"], "sessions.paths.display_depth", atLeast: 1) ?? 1
             guard config.problems.count == problemCount, let path else { continue }
             config.projectRoots.append(ProjectRoot(path: written(path), depth: depth, displayDepth: displayDepth))
         }
@@ -529,27 +525,27 @@ private struct ConfigReader {
 
     mutating func readProjectAliases(_ node: Node) {
         guard let sequence = node.sequence else {
-            problem(at: node, "projects.aliases: expected a list")
+            problem(at: node, "sessions.aliases: expected a list")
             return
         }
         for entry in sequence {
             guard let pair = entry.mapping, pair.count == 1, let (key, value) = pair.first else {
-                problem(at: entry, "projects.aliases: expected one Project path mapped to its alias")
+                problem(at: entry, "sessions.aliases: expected one Project path mapped to its alias")
                 continue
             }
             guard key.tag == Tag(.str), let pattern = key.string, !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                problem(at: key, "projects.aliases: expected a Project path")
+                problem(at: key, "sessions.aliases: expected a Project path")
                 continue
             }
             guard value.tag == Tag(.str), let alias = value.string?.trimmingCharacters(in: .whitespaces), !alias.isEmpty,
                   alias.rangeOfCharacter(from: .controlCharacters) == nil else {
-                problem(at: value, "projects.aliases.\(pattern): expected a nonempty one-line alias")
+                problem(at: value, "sessions.aliases.\(pattern): expected a nonempty one-line alias")
                 continue
             }
             let projectPath = written(pattern.trimmingCharacters(in: .whitespacesAndNewlines))
             let written = projectPath.hasPrefix("~/") ? "~/" + (String(projectPath.dropFirst(2)) as NSString).standardizingPath : projectPath
             guard config.projectAliases[written] == nil else {
-                problem(at: key, "projects.aliases: \(pattern) already has an alias")
+                problem(at: key, "sessions.aliases: \(pattern) already has an alias")
                 continue
             }
             config.projectAliases[written] = alias

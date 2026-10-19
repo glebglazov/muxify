@@ -60,7 +60,7 @@ Projects are the folders where you open Sessions. The New Topic and Add Project
 lists and the Command Palette offer them:
 
 ```yaml
-projects:
+sessions:
   paths:
     - path: ~/Dev/*/*
       display_depth: 2
@@ -98,8 +98,8 @@ changing an alias does not rename a Session. Typing the alias or the name finds
 the Project. An alias for a path that is not a Project does nothing.
 
 An entry that cannot apply appears in the Config problems banner. So does the
-old `projects:` list, `projects_aliases` and `sessions.paths`, with the key that
-replaces them. Muxify does not read them.
+old `projects` section and `projects_aliases`, with the key that replaces
+them. Muxify does not read them.
 
 ## Position of new and returning Topics
 

@@ -43,7 +43,7 @@ class SidebarLayout(unittest.TestCase):
 
     @classmethod
     def write_config(cls, sidebar):
-        cls.config.write_text('projects:\n  paths:\n    - path: ' + str(cls.project) + '\n' + sidebar)
+        cls.config.write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n' + sidebar)
 
     def test_snoozed_and_settled_groups_sit_at_the_bottom_of_the_panel(self):
         rs = self.s.wait_rows(lambda rs: all(self.s.has(key, rs) for key in

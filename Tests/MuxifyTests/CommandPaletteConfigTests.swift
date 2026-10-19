@@ -49,7 +49,7 @@ final class CommandPaletteConfigTests: XCTestCase {
             copy_folder: cmd+c
             jump_to: enter
 
-        projects:
+        sessions:
           paths:
             - path: ~/projects
               depth: 1
@@ -252,7 +252,7 @@ final class CommandPaletteConfigTests: XCTestCase {
             username: me
         ui:
           header_height: 40
-        projects:
+        sessions:
           paths:
             - path: ~/src
               depth: 1

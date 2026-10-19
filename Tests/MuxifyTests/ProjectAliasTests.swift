@@ -29,7 +29,7 @@ final class ProjectAliasTests: XCTestCase {
             try FileManager.default.createDirectory(at: root.url.appendingPathComponent("work/" + name), withIntermediateDirectories: true)
         }
         let text = """
-        projects:
+        sessions:
           aliases:
             - \(root.url.path)/work/alpha/: My Alpha
             - work/beta: Beta Notes
@@ -49,28 +49,28 @@ final class ProjectAliasTests: XCTestCase {
 
     func testConfigReportsAliasEntriesItCannotApply() throws {
         let cases: [(String, String)] = [
-            ("{/tmp: x}", "projects.aliases: expected a list"),
-            ("[wrong]", "projects.aliases: expected one Project path mapped to its alias"),
-            ("[{/tmp: x, /var: y}]", "projects.aliases: expected one Project path mapped to its alias"),
-            ("[{}]", "projects.aliases: expected one Project path mapped to its alias"),
-            ("[{42: x}]", "projects.aliases: expected a Project path"),
-            ("[{/tmp: ''}]", "projects.aliases./tmp: expected a nonempty one-line alias"),
-            ("[{/tmp: '  '}]", "projects.aliases./tmp: expected a nonempty one-line alias"),
-            ("[{/tmp: 42}]", "projects.aliases./tmp: expected a nonempty one-line alias"),
-            ("[{/tmp: null}]", "projects.aliases./tmp: expected a nonempty one-line alias"),
-            ("[{/tmp: [x]}]", "projects.aliases./tmp: expected a nonempty one-line alias"),
-            ("[{/tmp: \"a\\nb\"}]", "projects.aliases./tmp: expected a nonempty one-line alias"),
+            ("{/tmp: x}", "sessions.aliases: expected a list"),
+            ("[wrong]", "sessions.aliases: expected one Project path mapped to its alias"),
+            ("[{/tmp: x, /var: y}]", "sessions.aliases: expected one Project path mapped to its alias"),
+            ("[{}]", "sessions.aliases: expected one Project path mapped to its alias"),
+            ("[{42: x}]", "sessions.aliases: expected a Project path"),
+            ("[{/tmp: ''}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
+            ("[{/tmp: '  '}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
+            ("[{/tmp: 42}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
+            ("[{/tmp: null}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
+            ("[{/tmp: [x]}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
+            ("[{/tmp: \"a\\nb\"}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
         ]
         for (aliases, message) in cases {
-            let config = try Config.load(path: "/cfg/config.yaml") { _ in "projects:\n  paths: [{path: /tmp}]\n  aliases: " + aliases }.get()
+            let config = try Config.load(path: "/cfg/config.yaml") { _ in "sessions:\n  paths: [{path: /tmp}]\n  aliases: " + aliases }.get()
             XCTAssertEqual(config.problems.map(\.message), [message], aliases)
             XCTAssertEqual(config.problems.first?.line, 3, aliases)
             XCTAssertEqual(discovered(config).map(\.displayName), ["tmp"], aliases)
         }
         let twice = try Config.load(path: "/cfg/config.yaml") { _ in
-            "projects:\n  paths: [{path: /tmp}]\n  aliases:\n    - /tmp: First\n    - /tmp/: Second"
+            "sessions:\n  paths: [{path: /tmp}]\n  aliases:\n    - /tmp: First\n    - /tmp/: Second"
         }.get()
-        XCTAssertEqual(twice.problems.map(\.message), ["projects.aliases: /tmp/ already has an alias"])
+        XCTAssertEqual(twice.problems.map(\.message), ["sessions.aliases: /tmp/ already has an alias"])
         XCTAssertEqual(discovered(twice).map(\.displayName), ["First"], "the first alias in the file stays")
     }
 

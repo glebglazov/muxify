@@ -4,7 +4,7 @@ public struct Project: Equatable, Identifiable, Sendable {
     public let folder: Folder
     /// Names the Project's tmux Sessions and Topic records, so it never changes with the alias.
     public let name: String
-    /// What the user calls the Project in the Config's `projects_aliases`. It may hold spaces, so it is only shown.
+    /// What the user calls the Project in the Config's `sessions.aliases`. It may hold spaces, so it is only shown.
     public var alias: String?
     /// What git says the directory is. The Config gives `.directory`; the Workspace fills it in.
     public var layout: ProjectLayout = .directory
@@ -58,7 +58,7 @@ public struct Project: Equatable, Identifiable, Sendable {
     }
 }
 
-/// One `projects.paths` entry of the Config: the folders `path` matches, and every folder under each of them
+/// One `sessions.paths` entry of the Config: the folders `path` matches, and every folder under each of them
 /// down to `depth` levels. It is looked for again each time Muxify lists Projects, so a folder made after the
 /// Config loaded is a Project too.
 public struct ProjectRoot: Equatable, Sendable {
