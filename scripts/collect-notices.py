@@ -21,8 +21,10 @@ def is_notice(path):
 def archive_notices(path, label):
     # Zig 0.16 stores fetched packages as archives rather than directories.
     # Read notices in place: do not extract untrusted paths or symlinks.
+    # Not "r|gz": Python 3.15's stream reader spins forever on these archives,
+    # which end without tar's end-of-archive blocks.
     sections = []
-    with tarfile.open(path, mode="r|gz") as archive:
+    with tarfile.open(path, mode="r:gz") as archive:
         for member in archive:
             relative = PurePosixPath(member.name)
             if not member.isfile() or relative.is_absolute() or ".." in relative.parts:

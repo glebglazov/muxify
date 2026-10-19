@@ -1,3 +1,4 @@
+import gzip
 import importlib.util
 import io
 import json
@@ -145,12 +146,16 @@ class ReleaseTests(unittest.TestCase):
     def test_collects_licenses_from_zig_016_package_archives(self):
         packages = self.root / "packages"
         packages.mkdir()
-        with tarfile.open(packages / "package-hash.tar.gz", "w:gz") as archive:
+        tar = io.BytesIO()
+        with tarfile.open(fileobj=tar, mode="w") as archive:
             for name, text in [("LICENSE", "Archive license"), ("README.md", "Not a license"), ("../LICENSE", "Unsafe path")]:
                 member = tarfile.TarInfo(name)
                 content = text.encode()
                 member.size = len(content)
                 archive.addfile(member, io.BytesIO(content))
+            end = archive.offset
+        # Like Zig's archives, end without the end-of-archive blocks.
+        (packages / "package-hash.tar.gz").write_bytes(gzip.compress(tar.getvalue()[:end]))
         text = NOTICES.collect([("Dependencies", packages)])
         self.assertIn("Dependencies/package-hash.tar.gz/LICENSE", text)
         self.assertIn("Archive license", text)
