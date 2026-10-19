@@ -377,6 +377,22 @@ class TopicsCardsSidebar(TopicsSidebar):
              'Go to Session did not go to its active Window %s: client on %s' % (second, self.client_windows()),
              seconds=10)
 
+    def test_a_click_on_another_session_card_goes_to_the_sessions_active_window(self):
+        s = self.s
+        self.addCleanup(self.show_view, 'topics')
+        sid = self.new_session('card-session-click', self.beta)
+        first, second = self.windows(sid, 2)
+        s.tmux('select-window', '-t', second)
+        base = s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
+        self.select_window(base)
+        wait(lambda: base in self.client_windows(), 'the client did not move to ' + base, seconds=10)
+        self.show_view('sessions')
+        self.find('session-' + sid)
+        s.act('click', 'session-' + sid)
+        wait(lambda: second in self.client_windows(),
+             'a click on the Session card did not go to its active Window %s: client on %s' % (second, self.client_windows()),
+             seconds=10)
+
     def grouped(self, key, group, rs):
         """Whether the Topic row sits in the group: the groups end the list, so the row follows the group row."""
         ids = self.s.ids(rs)

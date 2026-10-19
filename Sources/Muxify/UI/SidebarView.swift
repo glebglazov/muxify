@@ -966,7 +966,7 @@ private struct SessionCard<Row: View>: View {
         let isSnoozed = session.windows.first?.topicID.map { model.snoozedTopicIDs.contains($0) } ?? false
         let mark = model.sessionMarks[session.id].map(RowMark.agent)
         let isLocked = model.lockedSessionIDs.contains(session.id)
-        SidebarCard(isOpen: isOpen, holdsSelection: session.windows.contains { $0.id == store.selectedWindowID }, mark: mark,
+        SidebarCard(isOpen: isOpen, holdsSelection: holdsSelection, mark: mark,
                     viewport: viewport, restingOpacity: isSnoozed ? 0.45 : 1) {
             CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, hintTarget: .session(session.id),
                        notes: (isSnoozed ? ["snoozed"] : []) + (isLocked ? ["Locked"] : []),
@@ -979,9 +979,9 @@ private struct SessionCard<Row: View>: View {
                     BellMark()
                 }
             }
-            .onTapGesture(perform: toggle)
+            .onTapGesture(perform: press)
             .takesFirstClick()
-            .accessibilityAction(.default, toggle)
+            .accessibilityAction(.default, press)
             .accessibilityIdentifier(identifier)
             .accessibilityActions {
                 Button("Go to Session") { store.goToSession(session.id) }
@@ -1017,6 +1017,16 @@ private struct SessionCard<Row: View>: View {
             Button(locked ? "Unlock Session" : "Lock Session") { store.setLock(ofSession: session.id, !locked) }
                 .disabled(store.changingTopic)
         }
+    }
+
+    private var holdsSelection: Bool { session.windows.contains { $0.id == store.selectedWindowID } }
+
+    /// As on a Topic card: a press on the card of the selected Window's Session opens or closes it; on another card
+    /// it goes to that Session, whose card then opens.
+    private func press() {
+        guard !holdsSelection else { return toggle() }
+        withAnimation(.easeOut(duration: 0.15)) { _ = store.openSessionCards.insert(session.name) }
+        store.goToSession(session.id)
     }
 
     private func toggle() {
