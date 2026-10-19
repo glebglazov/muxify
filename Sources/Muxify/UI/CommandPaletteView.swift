@@ -164,7 +164,9 @@ private struct SpotlightPalette: View {
             }
             if case .addProject = palette.flow,
                case .choice(.project(let project)) = selected?.pick.payload?.ref, project.worktree != nil {
-                Button(controlTitle((palette.newWorktree ? "✓ " : "＋ ") + "New Worktree", .toggleNewWorktree)) { palette.newWorktree.toggle() }
+                Button(controlTitle((palette.newWorktree ? "✓ " : "") + "New Worktree", .toggleNewWorktree)) { palette.newWorktree.toggle() }
+                    .buttonStyle(.bordered)
+                    .tint(palette.newWorktree ? .accentColor : .secondary)
                     .accessibilityIdentifier("palette-new-worktree")
                     .accessibilityValue(palette.newWorktree ? "on" : "off")
             }

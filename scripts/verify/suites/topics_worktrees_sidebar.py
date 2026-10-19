@@ -234,6 +234,30 @@ class TopicsWorktreesSidebar(TopicsSidebar):
                             and session.get('worktree_created') is True for session in sessions), json.dumps(sessions))
         s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Project palette did not close')
 
+    def test_add_project_opens_with_new_worktree_off_after_a_project_added_with_it(self):
+        s = self.s
+        self.write_topic('add-reset', 'Add reset proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0,
+                         sessions=[dict(project_path=str(self.beta))])
+        self.new_session('beta/add-reset', self.beta, topic='add-reset')
+        s.wait_rows(lambda rs: s.has('topic-add-reset', rs), 'no row for Topic add-reset')
+        self.addCleanup(lambda: s.has('palette-accept') and s.act('press', 'palette-cancel'))
+        s.act('action', 'topic-add-reset', 'Add a Project…')
+        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Project palette did not open')
+        self.pick_project(self.acme/'base', worktree=True)
+        s.act('press', 'palette-accept')
+        self.wait_session('acme/add-reset')
+        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Project palette did not close')
+        s.act('action', 'topic-add-reset', 'Add a Project…')
+        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Project palette did not open again')
+        # The Topic has a Session in acme now, so the list offers it no more; another repository shows the option.
+        s.act('focus', 'palette-search')
+        s.act('set', 'palette-search', str(self.gamma/'main'))
+        key = self.project_row(self.gamma/'main')
+        s.wait_rows(lambda rs: s.row(key, rs).get('accessibilityValue') == 'selected', 'the gamma/main row is not selected')
+        rs = s.wait_rows(lambda rs: s.has('palette-new-worktree', rs), 'no New Worktree option for the repository row')
+        self.assertEqual(s.row('palette-new-worktree', rs).get('accessibilityValue'), 'off',
+                         'New Worktree stayed on after the Project that used it')
+
     def test_git_error_in_add_project_with_new_worktree_records_no_session_in_the_topic(self):
         s = self.s
         error = "a branch named 'add-clash' already exists"

@@ -19,9 +19,8 @@ final class CommandPalette {
     private(set) var presentation: Presentation?
     var history: [PreviousStep] = []
     var invocation = UUID()
-    var newWorktree = UserDefaults.standard.bool(forKey: "newTopicWorktree") {
-        didSet { UserDefaults.standard.set(newWorktree, forKey: "newTopicWorktree") }
-    }
+    /// Add a Project's New Worktree option. Each step starts with it off, so one Project's choice never carries to the next.
+    var newWorktree = false
     var current: CommandPaletteConfig? {
         if case .search(let config) = presentation { return config }
         return nil
@@ -251,6 +250,7 @@ final class CommandPalette {
         presentation = .flow(flow)
         query = text
         selectedID = nil
+        newWorktree = false
         loadFlow()
     }
 
