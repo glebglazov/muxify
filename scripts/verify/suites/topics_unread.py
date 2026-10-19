@@ -137,6 +137,23 @@ class TopicsUnread(TopicsSidebar):
         self.assert_unread(topic, False)
         self.assertNotEqual(self.s.tmux_ok('list-sessions').returncode, 0)
 
+    def test_empty_topic_view_stays_when_the_tmux_server_stops(self):
+        topic = 'offline-stays-target'
+        self.write_empty_topic(topic)
+        # The app must show a Window that goes away with the server. After an earlier check stopped the server, the
+        # app waits for a press on Reattach or Reconnect.
+        for button in ['Reattach', 'Reconnect']:
+            self.s.driver('press', button)
+        self.s.wait_shown('base:')
+        self.enter_empty(topic)
+        socket = self.s.tmux('display-message', '-p', '#{socket_path}')
+        self.assertTrue(Path(socket).resolve().is_relative_to(self.s.root.resolve()))
+        self.addCleanup(self.s.tmux, 'new-session', '-d', '-s', 'base', '-c', str(self.beta), '/bin/zsh -f')
+        self.s.tmux('kill-server')
+        # The app reads tmux once per second; after two reads it has seen that the server stopped.
+        time.sleep(2.2)
+        self.assertIn(topic, self.describe('empty-topic-title', self.s.rows()), 'the Empty Topic view closed with the server')
+
     def test_automatic_empty_topic_reads_only_on_next_visit(self):
         self.configure('notifications:\n  manual_read: false\n')
         for topic in ['empty-auto-target', 'empty-auto-away']:

@@ -863,7 +863,8 @@ final class WorkspaceStore {
     private(set) var serverRunning = true
     private(set) var selectedWindowID: String? {
         didSet {
-            if selectedWindowID != oldValue { topicSelection.emptyTopicID = nil }
+            // A selected Window ends the Empty Topic; a Window that goes away, as when the tmux server stops, does not.
+            if selectedWindowID != nil, selectedWindowID != oldValue { topicSelection.emptyTopicID = nil }
             if selectedWindowID != nil { topicSelection.showsEmptyNoTopic = false }
             windowRecovery.selected(selectedWindowID)
             rememberSelection()
