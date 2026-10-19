@@ -14,7 +14,7 @@ import json
 import subprocess
 import unittest
 
-from scripts.verify.sandbox import DEBUG_APP, Sandbox, wait
+from scripts.verify.sandbox import DEBUG_APP, Sandbox, frame, wait
 
 CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
 
@@ -232,6 +232,23 @@ class PaletteSnoozeTopics(unittest.TestCase):
         s.wait_rows(lambda rs: s.has('topic-cli-a', rs) and s.has('topic-cli-b', rs) and not s.has('unsnooze-topic-cli-a', rs)
                     and not s.has('unsnooze-topic-cli-b', rs), 'the Topics did not move back to the open Topics')
         self.assertIsNone(self.record('cli-a').get('snoozed_until'), 'Unsnooze left the Snooze in the record')
+
+    def test_topics_whose_snooze_ends_at_its_time_come_back_at_the_bottom_in_their_earlier_order(self):
+        s = self.s
+        past = '2000-01-01T00:00:00Z'
+        self.topic('wake-b', 50, snoozed_until=past)
+        self.topic('wake-a', 51, snoozed_until=past)
+        self.topic('wake-c', 52)
+        wait(lambda: all(self.record(name).get('snoozed_until') is None for name in ('wake-a', 'wake-b')),
+             'the app did not wake the due Topics')
+        orders = {name: self.record(name).get('order') for name in ('wake-a', 'wake-b', 'wake-c')}
+        self.assertLess(orders['wake-c'], orders['wake-b'], orders)
+        self.assertLess(orders['wake-b'], orders['wake-a'], orders)
+        names = ['wake-a', 'wake-b', 'wake-c']
+        def shown(rs):
+            return all(s.has('topic-' + name, rs) for name in names) and \
+                sorted(names, key=lambda name: -frame(s.row('topic-' + name, rs))[1]) == ['wake-c', 'wake-b', 'wake-a']
+        s.wait_rows(shown, 'the Topics list did not show the woken Topics below wake-c in their earlier order')
 
 if __name__ == '__main__':
     unittest.main()

@@ -458,18 +458,25 @@ final class WorkspaceStore {
         palette.begin(.snooze(SnoozeDraft(topicIDs: open, step: step)), keepingHistory: keepingHistory)
     }
 
+    /// One write for all of `ids`, so Topics whose Snooze ends together keep their order. Returns the open Topics
+    /// among them.
     @discardableResult
-    func clearSnooze(_ id: String) -> Bool {
-        guard !changingTopic else { return false }
+    private func clearSnoozes(_ ids: [String]) -> [String] {
+        guard !changingTopic, !ids.isEmpty else { return [] }
         do {
-            return try topicWatcher.write { transaction in
-                guard transaction.records.contains(where: { $0.id == id && $0.settledAt == nil }) else { return false }
-                try transaction.update(id) { $0.snoozedUntil = nil }
-                return true
+            let (cleared, moved) = try topicWatcher.write(locks: liveLocks) { transaction -> ([String], [SessionLock]) in
+                let saves = transaction.records.filter { ids.contains($0.id) && $0.settledAt == nil }.map { record in
+                    var save = record
+                    save.snoozedUntil = nil
+                    return save
+                }
+                return (saves.map(\.id), try transaction.setSnoozes(saves, insertPosition: topicConfig.insertPosition))
             }
+            writeLocks(moved)
+            return cleared
         } catch {
             showTopicFailure(error)
-            return false
+            return []
         }
     }
 
@@ -480,7 +487,7 @@ final class WorkspaceStore {
         do {
             let snoozed = try topicWatcher.write { transaction -> Bool in
                 let saves = SnoozeSet(ids, until: deadline, records: transaction.records).saves
-                for record in saves { try transaction.update(record.id) { $0.snoozedUntil = record.snoozedUntil } }
+                try transaction.setSnoozes(saves)
                 return !saves.isEmpty
             }
             guard snoozed else { return }
@@ -492,7 +499,7 @@ final class WorkspaceStore {
     /// The Sidebar's Unsnooze: back to the Topics list, and to its Window when it has one. A Dormant
     /// Topic stays Dormant, because Unsnooze changes nothing in tmux.
     func unsnoozeTopic(_ id: String) {
-        guard clearSnooze(id) else { return }
+        guard !clearSnoozes([id]).isEmpty else { return }
         if let window = entryWindow(of: .topic(id)) { select(window) }
     }
 
@@ -524,7 +531,7 @@ final class WorkspaceStore {
                 guard transaction.zen == nil else { return false }
                 let (zen, saves) = ZenRecord.start(keeping: id, until: deadline, records: transaction.records)
                 transaction.zen = zen
-                for record in saves { try transaction.update(record.id) { $0.snoozedUntil = record.snoozedUntil } }
+                try transaction.setSnoozes(saves)
                 return true
             }
             if started { palette.close() }
@@ -535,13 +542,13 @@ final class WorkspaceStore {
     func endZen() {
         guard !changingTopic else { return }
         do {
-            try topicWatcher.write { transaction in
-                guard let zen = transaction.zen else { return }
-                for record in zen.end(records: transaction.records, now: Date()) {
-                    try transaction.update(record.id) { $0.snoozedUntil = record.snoozedUntil }
-                }
+            writeLocks(try topicWatcher.write(locks: liveLocks) { transaction -> [SessionLock] in
+                guard let zen = transaction.zen else { return [] }
+                let moved = try transaction.setSnoozes(zen.end(records: transaction.records, now: Date()),
+                                                       insertPosition: topicConfig.insertPosition)
                 transaction.zen = nil
-            }
+                return moved
+            })
         } catch { showTopicFailure(error) }
     }
 
@@ -555,9 +562,10 @@ final class WorkspaceStore {
         let endingZen = topicWatcher.zen.flatMap { $0.deadline?.isDue(at: Date()) == true ? $0 : nil }
         let zenTopicIDs = Set(endingZen?.changes.map(\.topicID) ?? [])
         let wakes = topics.dueWakes
+        let woken = Set(clearSnoozes(wakes.map(\.id)))
         var messages: [String] = []
         var zenWoken = 0
-        for wake in wakes where clearSnooze(wake.id) {
+        for wake in wakes where woken.contains(wake.id) {
             if zenTopicIDs.contains(wake.id) { zenWoken += 1 } else { messages.append(wake.message) }
         }
         if endingZen != nil {

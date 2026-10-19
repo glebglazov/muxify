@@ -131,6 +131,7 @@ public struct TopicService: Sendable {
 
     /// A nil `deadline` is an Unsnooze. Every Topic resolves before the one write, so a bad ref changes nothing.
     private func snooze(_ request: TopicRequest, _ topics: [TopicRef], until deadline: SnoozeDeadline?, client: String?) -> TopicResponse {
+        var phase = TopicFailure.Phase.nothingChanged
         do {
             if !topics.isEmpty, request.target != nil { throw TopicRequestError.targetAndTopics }
             let records = try store.read().records
@@ -139,27 +140,30 @@ public struct TopicService: Sendable {
                 : try topics.map { try $0.resolve(in: records) }
             var ids: [String] = []
             for topic in resolved where !ids.contains(topic.id) { ids.append(topic.id) }
-            let shortened = try store.write { transaction -> [String] in
+            let locks = SessionLock.locks(in: server.snapshot().windows, records: records)
+            let (shortened, moved) = try store.write(locks: locks) { transaction -> ([String], [SessionLock]) in
                 guard let deadline else {
-                    for id in ids {
-                        guard transaction.records.contains(where: { $0.id == id && $0.settledAt == nil }) else {
+                    let saves = try ids.map { id in
+                        guard var record = transaction.records.first(where: { $0.id == id && $0.settledAt == nil }) else {
                             throw TopicRequestError.topicUnavailable(id)
                         }
+                        record.snoozedUntil = nil
+                        return record
                     }
-                    for id in ids { try transaction.update(id) { $0.snoozedUntil = nil } }
-                    return []
+                    return ([], try transaction.setSnoozes(saves, insertPosition: insertPosition))
                 }
                 let set = SnoozeSet(ids, until: deadline, records: transaction.records)
                 // A Topic that was Settled after the read has no save.
                 if let settled = ids.first(where: { id in !set.saves.contains { $0.id == id } }) {
                     throw TopicRequestError.topicUnavailable(settled)
                 }
-                for save in set.saves { try transaction.update(save.id) { $0.snoozedUntil = save.snoozedUntil } }
-                return set.shortened
+                return (set.shortened, try transaction.setSnoozes(set.saves, insertPosition: insertPosition))
             }
+            phase = .changesStarted
+            try executor.run(moved.map { .tmux($0.setOption) }, client: client)
             return .snoozeChanged(TopicSnoozeChange(topicIDs: ids, shortened: shortened))
         } catch {
-            return .failed(failure(error, phase: .nothingChanged))
+            return .failed(failure(error, phase: phase))
         }
     }
 
@@ -207,7 +211,9 @@ public struct TopicService: Sendable {
                 }
                 try executor.run(moved.map { .tmux($0.setOption) }, client: client)
             case .forget(let id):
-                try store.write { try $0.forget(id) }
+                let locks = SessionLock.locks(in: server.snapshot().windows, records: try store.read().records)
+                let moved = try store.write(locks: locks) { try $0.forget(id, insertPosition: insertPosition) }
+                try executor.run(moved.map { .tmux($0.setOption) }, client: client)
             case nil: break
             }
             phase = .selectionFailed

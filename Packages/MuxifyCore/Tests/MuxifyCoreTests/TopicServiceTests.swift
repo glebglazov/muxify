@@ -298,6 +298,21 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try snoozes(), [first: nil, second: tomorrow.stored])
     }
 
+    func testUnsnoozePutsTheTopicBelowTheLocksAtTheConfiguredEnd() throws {
+        try server.run(["new-session", "-d", "-s", "notes", "-c", project.folder.path])
+        let first = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "First", project: nil)))).topicID)
+        _ = try change(service().handle(TopicRequest(.create(title: "Second", project: nil))))
+        _ = try change(service().handle(TopicRequest(.lock, target: .sessionName("notes"))))
+        _ = service().handle(TopicRequest(.snooze(until: .never, topics: [.id(first)])))
+        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"], "a Snoozed Topic keeps its stored order")
+        XCTAssertEqual(service().handle(TopicRequest(.unsnooze(topics: [.id(first)]))), .snoozeChanged(TopicSnoozeChange(topicIDs: [first])))
+        XCTAssertEqual(try topicList(), ["Second", "lock:notes", "First"])
+        let top = TopicService(paths: paths, server: server, projects: [project], insertPosition: .top)
+        _ = top.handle(TopicRequest(.snooze(until: .never, topics: [.id(first)])))
+        _ = top.handle(TopicRequest(.unsnooze(topics: [.id(first)])))
+        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"])
+    }
+
     func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
         try server.run(["new-session", "-d", "-s", "notes", "-c", project.folder.path])
         try server.run(["new-session", "-d", "-s", "chores", "-c", tools.folder.path])

@@ -448,6 +448,84 @@ final class TopicStoreTests: XCTestCase {
         try store.write { $0.zen = nil }
     }
 
+    private func snoozes(_ ids: [String], until: String?, in transaction: TopicTransaction) -> [TopicRecord] {
+        ids.map { id in
+            var record = transaction.records.first { $0.id == id }!
+            record.snoozedUntil = until
+            return record
+        }
+    }
+
+    func testTopicsWhoseSnoozeEndsGoToTheEndAndKeepTheirOrderAmongThemselves() throws {
+        let store = TopicStore(paths: paths)
+        try seed(record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3), record("e", order: 4))
+        try store.write { try $0.setSnoozes(snoozes(["d", "b"], until: "never", in: $0)) }
+        XCTAssertEqual(try records(store).map(\.order), [0, 1, 2, 3, 4], "a Snooze keeps the stored order")
+        try store.write { try $0.create(record("new", order: nil)) }
+        try store.write { try $0.setSnoozes(snoozes(["d", "b"], until: nil, in: $0)) }
+        XCTAssertEqual(try shown(store), ["a", "c", "e", "new", "b", "d"])
+        try store.write { try $0.setSnoozes(snoozes(["a"], until: "never", in: $0)) }
+        try store.write { try $0.setSnoozes(snoozes(["a"], until: nil, in: $0)) }
+        XCTAssertEqual(try shown(store), ["c", "e", "new", "b", "d", "a"])
+        try store.write { try $0.setSnoozes(snoozes(["c"], until: nil, in: $0)) }
+        XCTAssertEqual(try shown(store), ["c", "e", "new", "b", "d", "a"], "a Topic that was not Snoozed keeps its place")
+    }
+
+    func testTopicsWhoseSnoozeEndsGoToTheTopWithTheirPin() throws {
+        let store = TopicStore(paths: paths)
+        var first = record("p1", order: 0), second = record("p2", order: 1)
+        first.isPinned = true
+        second.isPinned = true
+        try seed(first, second, record("a", order: 0), record("b", order: 1), record("c", order: 2))
+        try store.write { try $0.setSnoozes(snoozes(["p2", "b", "c"], until: "never", in: $0)) }
+        try store.write { try $0.setSnoozes(snoozes(["c", "p2", "b"], until: nil, in: $0), insertPosition: .top) }
+        XCTAssertEqual(try shown(store), ["p2", "p1", "b", "c", "a"])
+        try store.write { try $0.setSnoozes(snoozes(["p2"], until: "never", in: $0)) }
+        try store.write { try $0.setSnoozes(snoozes(["p2"], until: nil, in: $0)) }
+        XCTAssertEqual(try shown(store), ["p1", "p2", "b", "c", "a"], "a Pinned Topic goes to the end of the Pinned Topics")
+    }
+
+    func testTheTopicsThatZenSnoozedKeepTheirPlacesWhenZenEnds() throws {
+        let past = SnoozeDeadline.at(Date(timeIntervalSince1970: 0)).stored
+        for endsAtItsTime in [false, true] {
+            try? FileManager.default.removeItem(at: root)
+            let store = TopicStore(paths: paths)
+            var earlier = record("earlier", order: 2)
+            earlier.snoozedUntil = past
+            try seed(record("kept", order: 0), record("a", order: 1), earlier, record("b", order: 3))
+            try store.write { transaction in
+                let started = ZenRecord.start(keeping: "kept", until: .never, records: transaction.records)
+                transaction.zen = started.zen
+                try transaction.setSnoozes(started.saves)
+            }
+            try store.write { try $0.create(record("new", order: nil)) }
+            try store.write { transaction in
+                let zen = try XCTUnwrap(transaction.zen)
+                let ends = endsAtItsTime
+                    ? snoozes(zen.changes.map(\.topicID), until: nil, in: transaction)
+                    : zen.end(records: transaction.records, now: Date())
+                try transaction.setSnoozes(ends)
+                transaction.zen = nil
+            }
+            XCTAssertEqual(try shown(store), ["kept", "a", "b", "new", "earlier"],
+                           "a Topic whose earlier Snooze ended during Zen goes to the end (Zen ends at its time: \(endsAtItsTime))")
+            XCTAssertTrue(try records(store).allSatisfy { $0.snoozedUntil == nil })
+        }
+    }
+
+    func testAZenSnoozedTopicGoesBackToItsPlaceWhenTheKeptTopicIsForgotten() throws {
+        let store = TopicStore(paths: paths)
+        try seed(record("kept", order: 0), record("a", order: 1), record("b", order: 2))
+        try store.write { transaction in
+            let started = ZenRecord.start(keeping: "kept", until: .never, records: transaction.records)
+            transaction.zen = started.zen
+            try transaction.setSnoozes(started.saves)
+        }
+        try store.write { try $0.create(record("new", order: nil)) }
+        try store.write { try $0.forget("kept") }
+        XCTAssertEqual(try shown(store), ["a", "b", "new"])
+    }
+
     func testZenIsWrittenBeforeTheSnoozesItMakes() throws {
         let store = TopicStore(paths: paths)
         try seed(TopicRecord(id: "a"), TopicRecord(id: "b"), TopicRecord(id: "c"))

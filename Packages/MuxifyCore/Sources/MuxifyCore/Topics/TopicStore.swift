@@ -251,15 +251,40 @@ public struct TopicTransaction {
         return put([.topic(record)])
     }
 
-    public mutating func forget(_ id: String, now: Date = Date()) throws {
+    /// Gives each Topic of `saves` the Snooze time in `saves`, and changes nothing else in it. A Topic whose Snooze ends
+    /// goes to the `insertPosition` end of the Topics with its Pin; Topics whose Snooze ends in one call go there as one
+    /// block, in their earlier order. A Topic that the current Zen Snoozed keeps its place, so set the Snoozes before
+    /// the Zen record is removed.
+    @discardableResult
+    public mutating func setSnoozes(_ saves: [TopicRecord], insertPosition: TopicInsertPosition = .bottom) throws -> [SessionLock] {
+        var returning: [TopicListEntry] = []
+        for save in saves {
+            guard let index = records.firstIndex(where: { $0.id == save.id }) else { throw Failure.topicUnavailable(save.id) }
+            let wasSnoozed = records[index].snoozedUntil != nil
+            records[index].snoozedUntil = save.snoozedUntil
+            let zenSnoozed = zen?.changes.contains { $0.topicID == save.id && $0.previous == nil } == true
+            if wasSnoozed, save.snoozedUntil == nil, !zenSnoozed { returning.append(.topic(records[index])) }
+        }
+        let block = TopicOrder.sorted(returning).records
+        var moved: Set<String> = []
+        for record in insertPosition == .top ? block.reversed() : block {
+            moved.formUnion(put(TopicOrder.inserting(record, at: insertPosition, in: entries)).map(\.sessionID))
+        }
+        return locks.filter { moved.contains($0.sessionID) }
+    }
+
+    @discardableResult
+    public mutating func forget(_ id: String, insertPosition: TopicInsertPosition = .bottom, now: Date = Date()) throws -> [SessionLock] {
         guard records.contains(where: { $0.id == id }) else { throw Failure.topicUnavailable(id) }
+        var moved: [SessionLock] = []
         if let currentZen = zen, currentZen.keptTopicID == id {
-            put(currentZen.end(records: records, now: now).map(TopicListEntry.topic))
+            moved = try setSnoozes(currentZen.end(records: records, now: now), insertPosition: insertPosition)
             zen = nil
         } else {
             zen?.changes.removeAll { $0.topicID == id }
         }
         records.removeAll { $0.id == id }
+        return moved
     }
 
     @discardableResult

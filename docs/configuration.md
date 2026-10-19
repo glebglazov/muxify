@@ -111,7 +111,11 @@ topics:
 `bottom` (the default) puts a new Topic below all Topics and Locked Sessions
 that are not Pinned. `top` puts it first below the Pinned Topics.
 Reopen and Start Fresh use this position when a Settled Topic returns.
-A Pinned Settled Topic returns at the chosen end of the Pinned Topics.
+Unsnooze and a Snooze that ends at its time also use it. Topics whose Snooze
+ends at the same time go there together, in their earlier order.
+The Topics that Zen Snoozed go back to their earlier places when Zen ends.
+A Topic whose own earlier Snooze ended during Zen uses this position.
+A Pinned Topic returns at the chosen end of the Pinned Topics.
 A Dormant Topic keeps its place, including when it is Pinned.
 A Topic made from a Locked Session takes that Lock's place.
 An unknown value uses `bottom` and appears in the Config problems banner.
