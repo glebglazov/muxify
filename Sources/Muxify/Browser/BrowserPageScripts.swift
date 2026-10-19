@@ -1,7 +1,7 @@
 import WebKit
 
-/// The scripts Muxify puts into every frame of every Tab's page: Find in Page
-/// and Vim Keys. They run in a content world of their own, so the page cannot
+/// The scripts Muxify puts into every frame of every Tab's page: Find in Page,
+/// Escape to leave a text field, and Vim Keys. They run in a content world of their own, so the page cannot
 /// see or replace them, and they cannot see the page's globals.
 enum BrowserPageScripts {
     static let world = WKContentWorld.world(name: "muxify")
@@ -46,6 +46,8 @@ enum BrowserPageScripts {
     private static func install(in controller: WKUserContentController) {
         controller.removeAllUserScripts()
         controller.addUserScript(WKUserScript(source: findSource, injectionTime: .atDocumentEnd,
+                                              forMainFrameOnly: false, in: world))
+        controller.addUserScript(WKUserScript(source: leaveFieldSource, injectionTime: .atDocumentStart,
                                               forMainFrameOnly: false, in: world))
         if vimKeysEnabled {
             controller.addUserScript(WKUserScript(source: vimKeysSource, injectionTime: .atDocumentStart,
@@ -342,6 +344,22 @@ enum BrowserPageScripts {
         if (area > largestArea) { largest = frame; largestArea = area; }
       }
       if (largest && largestArea > own) largest.focus();
+    })();
+    """#
+
+    /// Escape leaves a text field, which WebKit does not do, so the arrow keys,
+    /// Space and Vim Keys scroll the page again. A page that uses Escape keeps it.
+    static let leaveFieldSource = #"""
+    (() => {
+      if (globalThis.muxifyLeaveField) return;
+      globalThis.muxifyLeaveField = true;
+      addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing
+            || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+        const target = event.composedPath()[0] || event.target;
+        if (!(target instanceof Element) || typeof target.blur !== 'function') return;
+        if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) target.blur();
+      });
     })();
     """#
 

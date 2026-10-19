@@ -2220,9 +2220,10 @@ extension WorkspaceStore {
 
 extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
     func ghosttyOpenURL(_ url: URL) {
-        // Cmd+click on a link in the terminal opens it as a Tab in this Window's Browser.
+        // Cmd+click on a link in the terminal opens it as a Tab in this Window's Browser, with Focus on the page.
         if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
             openInBrowser(url)
+            currentBrowser?.requestFocus()
         } else {
             NSWorkspace.shared.open(url)
         }

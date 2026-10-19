@@ -197,7 +197,11 @@ final class Browser {
     }
 
     private func bind(_ tab: BrowserTab) {
-        tab.onOpenInNewTab = { [weak self] in self?.open($0) }
+        // A click on a link is a request to read the page, so the new Tab takes Focus.
+        tab.onOpenInNewTab = { [weak self] in
+            self?.open($0)
+            self?.requestFocus()
+        }
         tab.onURLChange = { [weak self] in self?.changed() }
         tab.onCopyURL = { [weak self] in self?.onCopyURL?($0) }
     }

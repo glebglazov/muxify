@@ -54,6 +54,16 @@ PAGE = '''<!doctype html>
       }
     }
   };
+  // Holds each key as a person does. Just after a focus change, WebKit drops an arrow key whose key up comes in the same tick.
+  const hold = async (keys) => {
+    for (const key of keys) {
+      const target = document.activeElement || document.body;
+      for (const type of ['keydown', 'keyup']) {
+        target.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true, composed: true }));
+        await new Promise((done) => setTimeout(done, 100));
+      }
+    }
+  };
   if (params.has('frame')) {
     const frame = document.createElement('iframe');
     frame.sandbox = 'allow-scripts';
@@ -80,9 +90,10 @@ PAGE = '''<!doctype html>
   addEventListener('load', () => setTimeout(async () => {
     if (params.has('focus')) field.focus();
     if (params.has('pagekeys')) document.addEventListener('keydown', (event) => event.preventDefault());
+    if (params.has('escape')) field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     if (params.has('every')) setInterval(() => send(params.get('every')), 200);
     for (const group of (params.get('keys') || '').split(',').filter(Boolean)) {
-      send(group);
+      if (params.has('held')) await hold(group); else send(group);
       await new Promise((done) => setTimeout(done, 1500));
       steps.push(position());
     }
@@ -263,6 +274,25 @@ class Browser(unittest.TestCase):
         page = self.page_state()
         self.assertEqual((page['passed'], page['y'], page['inner']), ('3', '0', '0'),
                          'Vim Keys took j from a text field: (keys passed to the page, scrollY, inner scrollTop)')
+
+    def test_escape_in_a_text_field_gives_up_its_focus(self):
+        self.open_page('focus&escape&held&keys=jjj')
+        page = self.wait_sent()
+        self.assertEqual(page['active'], 'BODY', 'Escape did not take focus from the text field')
+        self.assertNotEqual(page['steps'], 'top', 'j did not scroll the page after Escape left the text field')
+
+    def test_escape_the_page_uses_keeps_focus_in_the_text_field(self):
+        self.open_page('focus&pagekeys&escape&case=escape-used')
+        self.wait_sent()
+        time.sleep(1)
+        self.assertEqual(self.page_state()['active'], 'INPUT', 'Escape left a text field although the page used the key')
+
+    def test_escape_leaves_a_text_field_with_vim_keys_off(self):
+        self.addCleanup(self.reload_config, '')
+        self.reload_config('browser:\n  vim_keys: false\n')
+        self.open_page('focus&escape&config=off')
+        self.wait_sent()
+        self.assertEqual(self.page_state()['active'], 'BODY', 'Escape did not take focus from the text field with browser.vim_keys off')
 
     def test_a_key_the_page_uses_does_not_scroll(self):
         self.open_page('pagekeys&keys=jjj')
