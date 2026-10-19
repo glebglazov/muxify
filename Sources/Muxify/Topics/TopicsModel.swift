@@ -232,6 +232,8 @@ struct TopicsModel {
         let isExpanded: Bool
         /// The record remembers Sessions that Reopen can make again.
         var remembersSessions = true
+        /// A→Z. A Locked Session has none.
+        var tags: [Tag] = []
         /// An open Topic with no live Session. The card shows dimmed.
         var hasNoLiveSession: Bool {
             if case .settled = kind { return false }
@@ -392,7 +394,7 @@ struct TopicsModel {
             let agents = isQuiet(id) ? [] : agentsByGroup[id] ?? []
             return Row(id: id, title: title, kind: kind, mark: isQuiet(id) ? nil : RowMark(unread: record.isUnread, agent: mark(agents)), isPinned: record.isPinned,
                        sessions: sessions(of: id, members: grouped[id] ?? [], record: record), isExpanded: openTopics.contains(id),
-                       remembersSessions: !record.sessions.isEmpty)
+                       remembersSessions: !record.sessions.isEmpty, tags: record.tags.sorted())
         }
         /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
         func lockedRow(_ lock: SessionLock) -> Row {
@@ -531,7 +533,8 @@ struct TopicsModel {
                            branch: label.branch, contents: .remembered(windows))
         }
         return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
-                   mark: RowMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id))
+                   mark: RowMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id),
+                   tags: record.tags.sorted())
     }
 
     /// A Session in a Worktree is named as the Project names that Worktree. Its branch badge shows only

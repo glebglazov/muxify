@@ -76,7 +76,7 @@ public struct WorktreeOccupancy {
             } else {
                 // A Session with no Worktree lives in the Project folder, which is the main checkout of a plain repository.
                 let folder = location.worktree ?? location.project.folder
-                let summary = titles[id].map { TopicSummary(id: id, label: $0) } ?? TopicSummary(record: record)
+                let summary = titles[id].map { TopicSummary(id: id, label: $0, tags: record.tags.sorted()) } ?? TopicSummary(record: record)
                 alsoIn[folder, default: []].insert(summary)
             }
         }

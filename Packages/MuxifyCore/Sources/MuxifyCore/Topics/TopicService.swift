@@ -41,6 +41,7 @@ public struct TopicService: Sendable {
         // A Snooze writes one key of each record, so it takes only the record lock, as the app's Snooze does.
         if case .snooze(let deadline, let topics) = request.command { return snooze(request, topics, until: deadline, client: client) }
         if case .unsnooze(let topics) = request.command { return snooze(request, topics, until: nil, client: client) }
+        if case .tags(let change) = request.command { return changeTags(request, change, client: client) }
         do {
             return try FileLock.withLock(paths.editLock, .exclusive, rank: .edit, timeout: editLockTimeout) {
                 switch request.command {
@@ -167,6 +168,18 @@ public struct TopicService: Sendable {
         }
     }
 
+    /// Tags are one key of one record, so a Tag change also takes only the record lock.
+    private func changeTags(_ request: TopicRequest, _ change: TopicTagChange, client: String?) -> TopicResponse {
+        do {
+            let records = try store.read().records
+            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: server.snapshot(), client: client)
+            try store.write { try $0.changeTags(of: topic.id, change) }
+            return .changed(TopicChange(topicID: topic.id))
+        } catch {
+            return .failed(failure(error, phase: .nothingChanged))
+        }
+    }
+
     /// A plan with what the host shows when the plan itself selects nothing.
     private struct Planned {
         var edit: TopicEdit
@@ -232,9 +245,10 @@ public struct TopicService: Sendable {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show, .lock, .unlock, .snooze, .unsnooze:
+        case .list, .show, .lock, .unlock, .snooze, .unsnooze, .tags:
             throw TopicRequestError.noTarget
-        case .create(let title, let projectPath):
+        case .create(let title, let projectPath, let tags):
+            let tags = Set(tags ?? [])
             let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             let home: Project
             if let projectPath {
@@ -244,12 +258,15 @@ public struct TopicService: Sendable {
                 home = TopicLocation(of: pane.window, record: TopicMembershipPlan.sourceRecord(for: pane.window, records: records), projects: projects).project
             } else {
                 let slug = TopicNaming.slug(title: title, project: nil, records: records, sessionNames: [])
-                let record = TopicRecord(newTopic: UUID().uuidString.lowercased(), title: title, slug: slug, now: Date())
+                var record = TopicRecord(newTopic: UUID().uuidString.lowercased(), title: title, slug: slug, now: Date())
+                record.tags = tags
                 return Planned(edit: TopicEdit(record: record, commands: [], selection: .emptyTopic(record.id)))
             }
             let plan = TopicPlan(title: title, project: home, records: records,
                                  sessionNames: Set(snapshot.windows.map(\.sessionName)), clientTTY: client)
-            return Planned(edit: TopicEdit(record: plan.record, commands: plan.commands, selection: .sessionName(plan.sessionName)))
+            var record = plan.record
+            record.tags = tags
+            return Planned(edit: TopicEdit(record: record, commands: plan.commands, selection: .sessionName(plan.sessionName)))
         case .extract(let projectPath, let title):
             let (pane, fresh) = try source()
             let home = try projectPath.map { try project(at: $0) }

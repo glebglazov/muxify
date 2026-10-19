@@ -124,6 +124,9 @@ private struct SpotlightPalette: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 22))
                 .foregroundStyle(.secondary)
+            ForEach(palette.fieldChips) { chip in
+                FieldChipView(chip: chip, theme: palette.theme)
+            }
             ZStack(alignment: .leading) {
                 if !palette.acceptsText { ghost(selected) }
                 TextField("", text: $palette.query, prompt: Text(palette.placeholder).foregroundColor(.secondary))
@@ -136,7 +139,15 @@ private struct SpotlightPalette: View {
                     .accessibilityAction(named: "Accept") { palette.acceptSelected() }
                     .accessibilityAction(named: "Confirm") { palette.acceptSelected(commandReturn: true) }
                     .accessibilityAction(named: "Toggle Choice") { palette.toggleSelected() }
-                    .accessibilityAction(named: "Mark Shown") { palette.chooseRows(.markShown) }
+                    .accessibilityAction(named: "Space") { _ = palette.handleFlow(KeyTrigger(modifiers: [], key: .character(" "))) }
+                    // ← with the caret at the start of the text, →, and ⌫ and ⌦ on a chip.
+                    .accessibilityAction(named: "Select Previous Chip") { palette.receiveChipKey(.left(caretAtStart: true)) }
+                    .accessibilityAction(named: "Select Next Chip") { palette.receiveChipKey(.right) }
+                    .accessibilityAction(named: "Select Next Row") { palette.move(1, in: palette.results) }
+                    .accessibilityAction(named: "Remove Selected Chip Backward") {
+                        if palette.fieldChips.contains(where: \.isSelected) { palette.receiveChipKey(.deleteBackward(textIsEmpty: palette.query.isEmpty)) }
+                    }
+                    .accessibilityAction(named: "Remove Selected Chip Forward") { palette.receiveChipKey(.deleteForward) }
             }
         }
         .padding(.horizontal, 20)
@@ -170,10 +181,6 @@ private struct SpotlightPalette: View {
                     .accessibilityIdentifier("palette-new-worktree")
                     .accessibilityValue(palette.newWorktree ? "on" : "off")
             }
-            if palette.flow?.markedIDs != nil {
-                Button("Mark all shown ⌘A") { palette.chooseRows(.markShown) }
-                    .accessibilityIdentifier("palette-mark-shown")
-            }
             if palette.canSuggestTitle {
                 Button(controlTitle("Suggest title", .suggestTopicTitle)) { palette.suggestTitle() }
                     .accessibilityIdentifier("palette-suggest-title")
@@ -186,10 +193,9 @@ private struct SpotlightPalette: View {
     private var flowFooter: some View {
         HStack(spacing: 12) {
             if case .confirm = palette.flow { Text("Empty field: Space changes a row").foregroundStyle(.secondary) }
-            if palette.flow?.markedIDs != nil { Text("Empty field: Space or ⇥ marks a row").foregroundStyle(.secondary) }
             Spacer()
             Button("Cancel · esc") { palette.close() }.accessibilityIdentifier("palette-cancel")
-            Button(palette.requiresCommandReturn ? "Confirm · ⌘↩" : palette.flow?.markedIDs != nil ? "Next · ↩" : "Accept · ↩") {
+            Button(palette.requiresCommandReturn ? "Confirm · ⌘↩" : "Accept · ↩") {
                 palette.acceptSelected(commandReturn: palette.requiresCommandReturn)
             }
             .accessibilityIdentifier("palette-accept")
@@ -289,13 +295,8 @@ private struct SpotlightPalette: View {
 
     private func row(_ row: PickRow<PaletteItem>, isSelected: Bool, theme: PaletteTheme) -> some View {
         let item = row.pick.payload
-        let marked = palette.isMarked(row)
+        let isCovered = palette.isCovered(row)
         return HStack(spacing: 12) {
-            if let marked {
-                Image(systemName: marked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 17))
-                    .foregroundStyle(marked ? Color.accentColor : Color.secondary)
-            }
             if let item { PaletteIcon(source: .item(item), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.title.attributed).font(.system(size: 15)).lineLimit(1)
@@ -316,7 +317,7 @@ private struct SpotlightPalette: View {
         }
         .padding(.horizontal, 12)
         .frame(height: rowHeight)
-        .opacity(item == nil ? 0.45 : 1)
+        .opacity(item == nil || isCovered ? 0.45 : 1)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(isSelected ? 0.09 : 0)))
         .contentShape(Rectangle())
         .anchorPreference(key: SelectedRowBounds.self, value: .bounds) { isSelected ? $0 : nil }
@@ -324,7 +325,7 @@ private struct SpotlightPalette: View {
         .accessibilityIdentifier("palette-row-" + row.id)
         .accessibilityLabel([row.mark?.rawValue ?? "", row.title.text, row.detail.text, row.trailing].filter { !$0.isEmpty }
                                 .joined(separator: ", "))
-        .accessibilityValue(row.pick.reason ?? [marked == true ? "marked" : nil, isSelected ? "selected" : nil]
+        .accessibilityValue(row.pick.reason ?? [isCovered ? "covered" : nil, isSelected ? "selected" : nil]
                                 .compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default) { palette.perform(.jumpTo, on: row) }
@@ -405,6 +406,11 @@ struct PaletteIcon: View {
             Image(systemName: item.kind == .worktree ? "arrow.triangle.branch" : "folder")
                 .font(.system(size: size * (item.kind == .worktree ? 0.6 : 0.72)))
                 .foregroundStyle(theme.cyan)
+                .frame(width: size, height: size)
+        case .item(let item) where item.kind == .tag:
+            Image(systemName: "number")
+                .font(.system(size: size * 0.5, weight: .semibold))
+                .foregroundStyle(theme.magenta)
                 .frame(width: size, height: size)
         case .item(let item) where [.topic, .snoozedTopic, .settledTopic].contains(item.kind):
             Image(systemName: topicSymbol(item))
@@ -524,6 +530,34 @@ private struct CopiedPill: View {
         } else {
             image.transition(.scale(scale: 0.4).combined(with: .opacity))
         }
+    }
+}
+
+/// A chip in the search field: a Tag in magenta, a Topic in blue. ⌫ in the empty field removes the last one, and ←
+/// selects one.
+private struct FieldChipView: View {
+    let chip: FieldChip
+    let theme: PaletteTheme
+
+    var body: some View {
+        let color = chip.kind == .tag ? theme.magenta : theme.blue
+        HStack(spacing: 5) {
+            Text(chip.title).lineLimit(1)
+            if let count = chip.count { Text("\(count)").font(.system(size: 12, weight: .semibold)).opacity(0.7) }
+        }
+        .font(.system(size: 17, weight: .medium))
+        .foregroundStyle(chip.isSelected ? theme.background : color)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 3)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(chip.isSelected ? color : color.opacity(0.16)))
+        .fixedSize(horizontal: chip.kind == .tag, vertical: true)
+        .frame(maxWidth: chip.kind == .topic ? 180 : nil)
+        .accessibilityElement(children: .ignore)
+        // A static text element carries its value into the accessibility tree, where a check reads the selection.
+        .accessibilityAddTraits(.isStaticText)
+        .accessibilityLabel(chip.title)
+        .accessibilityValue(chip.isSelected ? "selected" : "")
+        .accessibilityIdentifier(chip.id)
     }
 }
 

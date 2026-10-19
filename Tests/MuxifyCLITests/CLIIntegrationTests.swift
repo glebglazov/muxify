@@ -100,7 +100,7 @@ final class CLIIntegrationTests: XCTestCase {
             #"{"id":"f-both-empty","title":"","slug":""}"#,
             #"{"id":"g-none"}"#,
             #"{"id":"h-slug-only","slug":"untitled-3"}"#,
-            #"{"id":"Upper","title":"Sorts before lower case"}"#,
+            #"{"id":"Upper","title":"Sorts before lower case","tags":["release","backend"]}"#,
             #"{"id":"café","title":"Crème brûlée"}"#,
             #"{"id":"日本","title":"東京 🚀","order":2,"snoozed_until":"never","sessions":[{"project_path":"/p"}],"extra":{"k":1}}"#,
         ]
@@ -112,16 +112,16 @@ final class CLIIntegrationTests: XCTestCase {
         let result = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(Array(result.output.utf8), Array("""
-            Upper\tSorts before lower case
-            a-null\tSettled null
-            b-absent\tNo settled field
-            café\tCrème brûlée
-            d-tabs\tFix reward flow\r now
-            e-empty\tfix-login
-            f-both-empty\tUntitled Topic
-            g-none\tUntitled Topic
-            h-slug-only\tuntitled-3
-            日本\t東京 🚀
+            Upper\tSorts before lower case\t#backend #release
+            a-null\tSettled null\t
+            b-absent\tNo settled field\t
+            café\tCrème brûlée\t
+            d-tabs\tFix reward flow\r now\t
+            e-empty\tfix-login\t
+            f-both-empty\tUntitled Topic\t
+            g-none\tUntitled Topic\t
+            h-slug-only\tuntitled-3\t
+            日本\t東京 🚀\t
 
             """.utf8))
     }
@@ -147,7 +147,7 @@ final class CLIIntegrationTests: XCTestCase {
         for (name, text) in files { try Data(text.utf8).write(to: topics.appendingPathComponent(name)) }
         let result = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
         XCTAssertEqual(result.status, 0, result.output)
-        XCTAssertEqual(result.output, "a\tValid\n")
+        XCTAssertEqual(result.output, "a\tValid\t\n")
     }
 
     func testTopicListExitsWithAnErrorWhenItCannotReadTheRecords() async throws {
@@ -390,6 +390,25 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(date.timeIntervalSince(start), 2 * 60 * 60, accuracy: 30)
         XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"], "a Snooze changes nothing in tmux")
         XCTAssertEqual(try sandbox.topicOption(of: "game/ship"), id)
+    }
+
+    func testTopicTagAddsRemovesAndSetsTheTagsOfTheTopicInTheRecord() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let add = try await run(cli, arguments: ["topic", "tag", "add", "Release", "#backend"],
+                                environment: sandbox.cliEnvironment(pane: try sandbox.pane(of: "game/ship")))
+        XCTAssertEqual(add.status, 0, add.output)
+        XCTAssertEqual(add.stdout, id + "\n", "a write prints the id of the Topic it changed")
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["backend", "release"])
+        let remove = try await run(cli, arguments: ["topic", "tag", "remove", "release", "--topic", "Ship"], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(remove.status, 0, remove.output)
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["backend"])
+        let set = try await run(cli, arguments: ["topic", "tag", "set", "--topic", id, "--json"], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(set.status, 0, set.output)
+        XCTAssertEqual(try XCTUnwrap(try jsonLine(set.stdout)["changed"] as? [String: Any], set.stdout)["topic_id"] as? String, id)
+        XCTAssertNil(try XCTUnwrap(sandbox.records().only)["tags"], "set with no Tag removes the key")
+        XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"], "a Tag change changes nothing in tmux")
     }
 
     func testTopicSnoozeWithATopicIdReplacesALaterSnoozeFromOutsideTmux() async throws {
@@ -656,6 +675,8 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(added.status, 0, added.output)
         let agent = try sandbox.fakeAgent(in: "game/ship", status: "blocked", unread: true)
         let shell = try sandbox.pane(of: "tools/ship")
+        let tagged = try await run(cli, arguments: ["topic", "tag", "add", "#backend", "--topic", id], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(tagged.status, 0, tagged.output)
 
         let result = try await run(cli, arguments: ["topic", "show", "--topic", "Ship", "--json"], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(result.status, 0, result.output)
@@ -663,6 +684,7 @@ final class CLIIntegrationTests: XCTestCase {
         let topic = try XCTUnwrap(try jsonLine(result.stdout)["topic"] as? [String: Any], result.stdout)
         XCTAssertEqual(topic["id"] as? String, id)
         XCTAssertEqual(topic["label"] as? String, "Ship")
+        XCTAssertEqual(topic["tags"] as? [String], ["backend"])
         let sessions = try XCTUnwrap(topic["sessions"] as? [[String: Any]], result.stdout)
         XCTAssertEqual(sessions.map { $0["name"] as? String }, ["game/ship", "tools/ship"])
         XCTAssertEqual(sessions.map { ($0["project"] as? [String: Any])?["label"] as? String }, ["game", "tools"])
@@ -680,12 +702,15 @@ final class CLIIntegrationTests: XCTestCase {
         let added = try await run(cli, arguments: ["topic", "add-project", sandbox.tools.path, "--topic", id],
                                   environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(added.status, 0, added.output)
+        let tagged = try await run(cli, arguments: ["topic", "tag", "set", "release", "backend", "--topic", id],
+                                   environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(tagged.status, 0, tagged.output)
         let agent = try sandbox.fakeAgent(in: "tools/ship", status: nil, unread: false)
         let result = try await run(cli, arguments: ["topic", "show"], environment: sandbox.cliEnvironment(pane: agent))
         XCTAssertEqual(result.status, 0, result.output)
         // The Config's glob spells /private/tmp as /tmp.
         let work = sandbox.root.path + "/work"
-        XCTAssertEqual(result.stdout, "\(id)\tShip\ngame/ship\tgame\t\(work)/game\t\ntools/ship\ttools\t\(work)/tools\t\n")
+        XCTAssertEqual(result.stdout, "\(id)\tShip\t#backend #release\ngame/ship\tgame\t\(work)/game\t\ntools/ship\ttools\t\(work)/tools\t\n")
     }
 
     func testTopicShowGivesTheWorktreeOfASessionAndTheBranchItHasNow() async throws {
@@ -911,7 +936,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(inTopic.status, 0, inTopic.output)
         let rows = try XCTUnwrap(try jsonLine(inTopic.stdout)["agents"] as? [[String: Any]], inTopic.stdout)
         XCTAssertEqual(rows.map { $0["pane_id"] as? String }, [blocked.rawValue])
-        XCTAssertEqual(rows.first?["topic"] as? NSDictionary, ["id": id, "label": "Ship"] as NSDictionary)
+        XCTAssertEqual(rows.first?["topic"] as? NSDictionary, ["id": id, "label": "Ship", "tags": [String]()] as NSDictionary)
         XCTAssertEqual(rows.first?["agent"] as? NSDictionary, ["kind": "claude", "status": "blocked", "unread": true, "conversation": NSNull()] as NSDictionary)
 
         for (filter, expected) in [(["--status", "working"], [working]), (["--unread"], [blocked])] {
@@ -1053,9 +1078,11 @@ final class CLIIntegrationTests: XCTestCase {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let tagged = try await run(cli, arguments: ["topic", "tag", "add", "backend", "--topic", id], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(tagged.status, 0, tagged.output)
         let result = try await run(cli, arguments: ["topic", "list", "--json"], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(result.status, 0, result.output)
-        XCTAssertEqual(result.stdout, #"{"topics":[{"id":""# + id + #"","label":"Ship"}]}"# + "\n")
+        XCTAssertEqual(result.stdout, #"{"topics":[{"id":""# + id + #"","label":"Ship","tags":["backend"]}]}"# + "\n")
     }
 
     func testProjectListPrintsEachRowOfTheNewTopicListWithTheOpenTopicsThatUseIt() async throws {
@@ -1086,7 +1113,7 @@ final class CLIIntegrationTests: XCTestCase {
             + #"{"directory":"\#(server)/release","label":"server/release","name":"server/release","project":"\#(server)","topics":[],"#
             + #""worktree":{"branch":"release","path":"\#(server)/release"}},"#
             + #"{"directory":"\#(work)/tools","label":"tools","name":"tools","project":"\#(work)/tools","#
-            + #""topics":[{"id":"\#(id)","label":"Ship\tit"}],"worktree":null}]}"# + "\n")
+            + #""topics":[{"id":"\#(id)","label":"Ship\tit","tags":[]}],"worktree":null}]}"# + "\n")
     }
 
     func testProjectListGoesOnPastAConfigProblemAndPrintsItOnStderr() async throws {

@@ -137,6 +137,10 @@ struct CardHeader<Details: View>: View {
     let summary: String
     /// The card shows an action in its bottom-right corner, so the summary stops before it.
     var reservesCorner = false
+    /// The Active Topic's Tags badge. The header keeps its room in the title line, before the pin, and the card draws
+    /// it there through `CardTitleBadgeBounds`, outside the header's accessibility element, so the badge stays a
+    /// button of its own.
+    var titleBadge: TagsBadge? = nil
     @ViewBuilder var details: () -> Details
     @Environment(\.sidebarTypography) private var typography
     /// The title line's frame in the header, where a click tool such as Homerow clicks in place of the header's centre.
@@ -146,12 +150,20 @@ struct CardHeader<Details: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(title)
-                    .font(typography.font(for: .session))
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .titleLine, spacing: 5) {
+                ZStack(alignment: .topLeading) {
+                    Text(title)
+                        .font(typography.font(for: .session))
+                        .fixedSize(horizontal: false, vertical: true)
+                    // One line of the title's font: its centre is the centre of the title's first line.
+                    Text(" ").font(typography.font(for: .session)).hidden()
+                        .alignmentGuide(.titleLine) { $0[VerticalAlignment.center] }
+                }
                 if let hintTarget { CardHintSlot(target: hintTarget) }
                 Spacer(minLength: 0)
+                if let titleBadge {
+                    titleBadge.hidden().anchorPreference(key: CardTitleBadgeBounds.self, value: .bounds) { $0 }
+                }
                 // The Hint badge takes the mark's place while it shows.
                 let markOpacity: Double = hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1
                 if isPinned { PinMark().opacity(markOpacity) } else if isLocked { LockMark().opacity(markOpacity) }
@@ -177,6 +189,35 @@ struct CardHeader<Details: View>: View {
         .accessibilityHint(isOpen ? "" : summary)
         .accessibilityActivationPoint(CGPoint(x: titleLine.midX, y: titleLine.midY))
         .accessibilityValue(([isOpen ? "expanded" : "collapsed"] + notes + [mark?.rawValue].compactMap { $0 }).joined(separator: ", "))
+    }
+}
+
+extension VerticalAlignment {
+    private enum TitleLine: AlignmentID {
+        static func defaultValue(in context: ViewDimensions) -> CGFloat { context[VerticalAlignment.center] }
+    }
+
+    /// The centre of a card title's first line, so the marks after a wrapped title stay on that line.
+    static let titleLine = VerticalAlignment(TitleLine.self)
+}
+
+/// Where the title line keeps the room of the card's title badge.
+struct CardTitleBadgeBounds: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = value ?? nextValue() }
+}
+
+extension View {
+    /// Draws `badge` in the room that the card header keeps for it.
+    func cardTitleBadge(_ badge: TagsBadge?) -> some View {
+        overlayPreferenceValue(CardTitleBadgeBounds.self) { anchor in
+            if let anchor, let badge {
+                GeometryReader { proxy in
+                    let bounds = proxy[anchor]
+                    badge.frame(width: bounds.width, height: bounds.height).offset(x: bounds.minX, y: bounds.minY)
+                }
+            }
+        }
     }
 }
 

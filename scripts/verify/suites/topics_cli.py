@@ -65,7 +65,7 @@ class TopicsCli(unittest.TestCase):
 
         listed = self.muxify('topic', 'list', pane=pane)
         self.assertEqual(listed.returncode, 0, listed.stderr)
-        self.assertIn(topic_id + '\tCLI check', listed.stdout.splitlines(), 'topic list does not show the new Topic')
+        self.assertIn(topic_id + '\tCLI check\t', listed.stdout.splitlines(), 'topic list does not show the new Topic')
 
     def fake_agent(self, session, status, unread=False, conversation=None):
         """A Pane that runs a program, as an Agent does, with the pane options its Extension and Muxify write."""
@@ -111,7 +111,7 @@ class TopicsCli(unittest.TestCase):
         row = next((r for r in json.loads(listed.stdout)['agents'] if r['pane_id'] == agent), None)
         self.assertIsNotNone(row, 'agent list --unread does not show the Unread Agent: %s' % listed.stdout)
         self.assertEqual(row['agent'], {'kind': 'claude', 'status': 'done', 'unread': True, 'conversation': None}, row)
-        self.assertEqual(row['topic'], {'id': topic_id, 'label': 'Agents check'}, row)
+        self.assertEqual(row['topic'], {'id': topic_id, 'label': 'Agents check', 'tags': []}, row)
 
         text = self.muxify('agent', 'list', '--topic', 'Agents check', pane=pane)
         self.assertEqual(text.returncode, 0, text.stderr)

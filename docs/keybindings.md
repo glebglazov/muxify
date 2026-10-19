@@ -14,7 +14,7 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `move_session` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
 | `add_project_to_topic` | ⌘⇧A | Open Add a Project for the Active Topic in the palette |
 | `snooze_topic` | ⌥⌘S | Snooze the Active Topic, then open the Next Topic |
-| `snooze_topics` | Unbound | Open Snooze Topics, with the Active Topic marked |
+| `snooze_topics` | Unbound | Open Snooze Topics, with no Topic picked |
 | `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic or a Locked Session, or in Sessions mode, it only ends Zen |
 | `settle_topic` | Unbound | Settle the Active Topic, then open the Next Topic |
 | `remove_session_from_topic` | Unbound | Remove the current Session from the Active Topic. The Session stays live, and the Topic forgets it |
@@ -69,15 +69,46 @@ current item and appear when that item is available. Back returns from an input
 step to the Commands search.
 
 Commands also lists Snooze Topics…, which Snoozes several Topics until one time.
-Its first step lists the Topics in the Topics list under Visible, and the
-Snoozed Topics under Already Snoozed. The Active Topic starts marked. Space in an
-empty field or ⇥ marks the highlighted Topic, and ⌘A marks every Topic that the
-filter shows, or unmarks them when all of them are marked. ↩ goes on with the
-marked Topics, or with the highlighted Topic when none is marked. The time that
-you choose replaces the time of each marked Topic, also a later time, and the
-step note names each Snooze that becomes shorter. Snooze Topic is the same flow
-with only its Topic marked, and it starts at the time step: ⌫ in the empty field
-goes back to the first step to mark more Topics.
+Its first step is the pick step. The rows are suggestions: the Tags of the
+Topics under Tags, A→Z, the Topics in the Topics list under Topics, and the
+Snoozed Topics under Already Snoozed. No Topic starts picked, also not the Active
+Topic. ↩ on a row picks it: the Topic or Tag becomes a chip in the field, the row
+leaves the list, and the query clears. A Tag chip picks every Topic that has the
+Tag, and these Topics stay in the list, dim, with "in #tag". A Snooze by Tag is a
+usual Snooze of those Topics: a Topic that gets the Tag later is not Snoozed.
+With a query, the last row, "＋ All N matches for “query”", picks every Topic that
+the query matches. With an empty query and one or more chips, the first row is
+"→ Snooze N Topics…": ↩ on it opens the time step. In the pick step, ↩ only
+picks. The time that you choose replaces the time of each Topic of the set, also
+a later time, and the step note names each Snooze that becomes shorter. ⌫ in the
+empty time field goes back to the pick step with the chips kept. Snooze Topic
+is the same flow with its Topic as the only chip, and it starts at the time step.
+
+In a field with chips (the pick step, New Topic and Edit Tags), ← at the start
+of the text selects the last chip, and ← and → move the selection. → after the
+last chip puts the caret back in the text. ⌫ removes the selected chip and
+selects the chip to its left, and ⌦ removes it and selects the chip to its
+right. A letter puts the caret back and types. ⌫ in an empty field removes the
+last chip.
+
+A word that starts with `#` in the query of Snooze Topics or of a palette with
+the topics Source, such as Go to…, matches the Tags of the Topics, not the words
+in their titles. Each Topic row shows its Tags, also with no query. With a
+query, Go to… also lists the Tags after the Topics. ↩ on
+a Tag row makes it a filter chip, "Go to… › #backend", and the list then shows
+only the Topics with the Tag: open, Snoozed and Settled. ⌫ in the empty field
+removes the chip. ⌘K on a Tag row offers Snooze its Topics…, which opens the
+pick step with the Tag as a chip.
+
+In New Topic, a word that starts with `#` is a Tag, not a part of the title.
+While you type it, the rows show the Tags of the Topic records that match it,
+A→Z, and New Tag when no record has it. ⇥ or ↩ on a row makes the Tag a chip.
+A space after a complete Tag also makes it a chip, so you can type `#backend `
+and go on. ⌫ in an empty field removes the last chip. Commands also lists Edit Tags…
+for the Active Topic, and the actions menu of a Topic row has it too. Its field
+holds the Topic's Tags as chips. Type a Tag, with or without `#`, to add it.
+↩ writes the Tags, and an empty field removes all of them. A click on the
+Tags badge of the Active Topic's card in the Sidebar also opens Edit Tags.
 
 Commands also lists Show Next Session, Show Previous Session, Show Next Topic
 and Show Previous Topic. They do what `select_next_session`,
@@ -268,6 +299,7 @@ conflict with the actions above:
 | `move` | Unbound | Open Move for the highlighted result |
 | `add_project_to_topic` | Unbound | Add a Project to the highlighted Topic |
 | `rename` | Unbound | Rename the highlighted Topic, Session or Window |
+| `edit_tags` | Unbound | Open Edit Tags for the highlighted Topic |
 | `suggest_topic_title` | ⌥S | In Rename or New Topic, type a title that the Agents suggest. On a highlighted Topic, rename it to that title |
 | `start_zen` | Unbound | Start Zen for the highlighted Topic. While Zen is on, end it |
 | `settle_topic` | Unbound | Settle the highlighted Topic |

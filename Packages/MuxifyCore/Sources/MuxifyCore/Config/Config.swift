@@ -496,7 +496,7 @@ private struct ConfigReader {
                 }
                 values[name] = value
             }
-            let path = values["path"].flatMap { $0.tag == Tag(.str) ? string($0) : nil }?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let path = values["path"].flatMap { $0.tag == Yams.Tag(.str) ? string($0) : nil }?.trimmingCharacters(in: .whitespacesAndNewlines)
             if path?.isEmpty != false || path?.rangeOfCharacter(from: .controlCharacters) != nil {
                 problem(at: values["path"] ?? item, "sessions.paths.path: expected a path or a path glob")
             }
@@ -510,7 +510,7 @@ private struct ConfigReader {
     /// A whole number of at least `minimum`; nil when the key is missing or the value is wrong.
     private mutating func count(_ node: Node?, _ place: String, atLeast minimum: Int) -> Int? {
         guard let node, node.null == nil else { return nil }
-        guard node.tag == Tag(.int), let number = node.int, number >= minimum else {
+        guard node.tag == Yams.Tag(.int), let number = node.int, number >= minimum else {
             problem(at: node, "\(place): expected a whole number of \(minimum) or more")
             return nil
         }
@@ -533,11 +533,11 @@ private struct ConfigReader {
                 problem(at: entry, "sessions.aliases: expected one Project path mapped to its alias")
                 continue
             }
-            guard key.tag == Tag(.str), let pattern = key.string, !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            guard key.tag == Yams.Tag(.str), let pattern = key.string, !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 problem(at: key, "sessions.aliases: expected a Project path")
                 continue
             }
-            guard value.tag == Tag(.str), let alias = value.string?.trimmingCharacters(in: .whitespaces), !alias.isEmpty,
+            guard value.tag == Yams.Tag(.str), let alias = value.string?.trimmingCharacters(in: .whitespaces), !alias.isEmpty,
                   alias.rangeOfCharacter(from: .controlCharacters) == nil else {
                 problem(at: value, "sessions.aliases.\(pattern): expected a nonempty one-line alias")
                 continue
@@ -558,13 +558,13 @@ private struct ConfigReader {
             case "snooze_presets": readSnoozePresets(value)
             case "title_command_fallbacks": readTitleCommands(value)
             case "insert_position":
-                guard value.tag == Tag(.str), let position = value.string.flatMap(TopicInsertPosition.init(rawValue:)) else {
+                guard value.tag == Yams.Tag(.str), let position = value.string.flatMap(TopicInsertPosition.init(rawValue:)) else {
                     problem(at: value, "topics.insert_position: expected bottom or top")
                     continue
                 }
                 config.topics.insertPosition = position
             case "session_order":
-                guard value.tag == Tag(.str), let order = value.string.flatMap(SessionOrder.init(rawValue:)) else {
+                guard value.tag == Yams.Tag(.str), let order = value.string.flatMap(SessionOrder.init(rawValue:)) else {
                     problem(at: value, "topics.session_order: expected oldest_first or newest_first")
                     continue
                 }
@@ -575,7 +575,7 @@ private struct ConfigReader {
     }
 
     public mutating func readTitleCommands(_ node: Node) {
-        if node.tag == Tag(.str), let command = node.string,
+        if node.tag == Yams.Tag(.str), let command = node.string,
            !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             config.topics.titleCommandFallbacks = [command]
             return
@@ -586,7 +586,7 @@ private struct ConfigReader {
         }
         config.topics.titleCommandFallbacks = []
         for item in sequence {
-            guard item.tag == Tag(.str), let command = item.string,
+            guard item.tag == Yams.Tag(.str), let command = item.string,
                   !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 problem(at: item, "topics.title_command_fallbacks: expected a nonempty string")
                 continue
@@ -598,9 +598,9 @@ private struct ConfigReader {
     mutating func readHints(_ node: Node) {
         for (name, key, value) in entries(of: node, "hints") {
             if name == "hold_delay" {
-                if value.tag == Tag(.bool), value.bool == false {
+                if value.tag == Yams.Tag(.bool), value.bool == false {
                     config.hints.holdDelay = nil
-                } else if (value.tag == Tag(.int) || value.tag == Tag(.float)),
+                } else if (value.tag == Yams.Tag(.int) || value.tag == Yams.Tag(.float)),
                           let delay = value.float, delay.isFinite, delay >= 0 {
                     config.hints.holdDelay = delay
                 } else {
@@ -617,7 +617,7 @@ private struct ConfigReader {
                     problem(at: settingKey, "unknown key \"hints.\(name).\(setting)\"")
                     continue
                 }
-                guard settingValue.tag == Tag(.bool), let enabled = settingValue.bool else {
+                guard settingValue.tag == Yams.Tag(.bool), let enabled = settingValue.bool else {
                     problem(at: settingValue, "hints.\(name).\(setting): expected a boolean")
                     continue
                 }
@@ -640,7 +640,7 @@ private struct ConfigReader {
                 problem(at: key, "unknown key \"notifications.\(name)\"")
                 continue
             }
-            guard value.tag == Tag(.bool), let enabled = value.bool else {
+            guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
                 problem(at: value, "notifications.\(name): expected a boolean")
                 continue
             }
@@ -659,7 +659,7 @@ private struct ConfigReader {
                 problem(at: key, "unknown key \"browser.\(name)\"")
                 continue
             }
-            guard value.tag == Tag(.bool), let enabled = value.bool else {
+            guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
                 problem(at: value, "browser.\(name): expected a boolean")
                 continue
             }
@@ -695,7 +695,7 @@ private struct ConfigReader {
         for (name, key, value) in entries(of: node, "sidebar") {
             switch name {
             case "topics", "sessions", "panes":
-                guard value.tag == Tag(.bool), let enabled = value.bool else {
+                guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
                     problem(at: value, "sidebar.\(name): expected a boolean")
                     continue
                 }
@@ -706,7 +706,7 @@ private struct ConfigReader {
                 }
             case "agents":
                 config.sidebar.agents = perMode(value, "sidebar.agents", config.sidebar.agents, expected: "a boolean") {
-                    guard $0.tag == Tag(.bool), let enabled = $0.bool else { return Bool??.none }
+                    guard $0.tag == Yams.Tag(.bool), let enabled = $0.bool else { return Bool??.none }
                     return enabled
                 }
             case "formats":
@@ -734,7 +734,7 @@ private struct ConfigReader {
                     let current = part == "left" ? config.sidebar.formats.windowParts.left : config.sidebar.formats.windowParts.right
                     let parsed = perMode(value, place, current, expected: "a Format string or null") { node -> SidebarPartFormat?? in
                         if node.null != nil { return .some(nil) }
-                        guard node.tag == Tag(.str), let source = node.string else { return nil }
+                        guard node.tag == Yams.Tag(.str), let source = node.string else { return nil }
                         let format = try SidebarPartFormat(source)
                         for name in format.symbolNames {
                             guard NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil else {
@@ -754,7 +754,7 @@ private struct ConfigReader {
                 let defaults = SidebarFormats.defaults[object]
                 let fallback = part == "title" ? defaults.title : defaults.summary
                 let parsed = perMode(value, place, fallback, expected: "a Format string") { node in
-                    guard node.tag == Tag(.str), let source = node.string else { return nil }
+                    guard node.tag == Yams.Tag(.str), let source = node.string else { return nil }
                     return try SidebarFormat(source)
                 }
                 if part == "title" { config.sidebar.formats[object].title = parsed }
@@ -865,7 +865,7 @@ private struct ConfigReader {
                 }
                 config.headerHeight = height
             case "pulse":
-                guard value.tag == Tag(.bool), let pulse = value.bool else {
+                guard value.tag == Yams.Tag(.bool), let pulse = value.bool else {
                     problem(at: value, "ui.pulse: expected a boolean")
                     continue
                 }
@@ -887,7 +887,7 @@ private struct ConfigReader {
                 continue
             }
             // An unquoted #RRGGBB is a YAML comment, so it arrives here as null.
-            guard value.tag == Tag(.str), let text = string(value), let color = AgentColor(text) else {
+            guard value.tag == Yams.Tag(.str), let text = string(value), let color = AgentColor(text) else {
                 let names = SystemColorName.allCases.map(\.rawValue).joined(separator: ", ")
                 problem(at: value, "ui.agent_colors.\(name): expected one of \(names), or a quoted '#RRGGBB'")
                 continue
@@ -900,14 +900,14 @@ private struct ConfigReader {
         for (name, key, value) in entries(of: node, "ui.sidebar") {
             switch name {
             case "font_size":
-                guard value.tag == Tag(.int) || value.tag == Tag(.float),
+                guard value.tag == Yams.Tag(.int) || value.tag == Yams.Tag(.float),
                       let size = value.float, size.isFinite, size > 0 else {
                     problem(at: value, "ui.sidebar.font_size: expected a finite number greater than zero points")
                     continue
                 }
                 config.sidebarTypography.fontSize = size
             case "font_family":
-                guard value.tag == Tag(.str), let name = value.string,
+                guard value.tag == Yams.Tag(.str), let name = value.string,
                       !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       name.rangeOfCharacter(from: .controlCharacters) == nil else {
                     problem(at: value, "ui.sidebar.font_family: expected a nonempty font family name")

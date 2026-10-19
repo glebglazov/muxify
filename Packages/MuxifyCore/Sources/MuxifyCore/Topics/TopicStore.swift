@@ -273,6 +273,13 @@ public struct TopicTransaction {
         return locks.filter { moved.contains($0.sessionID) }
     }
 
+    /// Changes the Tags of the open Topic `id`, and nothing else in it. The app and the CLI both change Tags here,
+    /// so an `add` or a `remove` applies to the Tags as they are on disk now.
+    public mutating func changeTags(of id: String, _ change: TopicTagChange) throws {
+        guard let index = records.firstIndex(where: { $0.id == id && $0.settledAt == nil }) else { throw Failure.topicUnavailable(id) }
+        records[index].tags = change.applied(to: records[index].tags)
+    }
+
     @discardableResult
     public mutating func forget(_ id: String, insertPosition: TopicInsertPosition = .bottom, now: Date = Date()) throws -> [SessionLock] {
         guard records.contains(where: { $0.id == id }) else { throw Failure.topicUnavailable(id) }

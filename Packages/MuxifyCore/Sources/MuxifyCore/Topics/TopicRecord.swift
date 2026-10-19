@@ -63,6 +63,12 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     /// The Topic stays above every Topic that is not Pinned (`pinned: true`).
     public var isPinned = false
     public var isUnread = false
+    /// The record keeps them in `tags` as an array of names, A→Z, and leaves the key out when it has nothing to keep.
+    public var tags: Set<Tag> = []
+    /// What `tags` holds that is not a Tag: the array of those entries, or a `tags` value that is not an array. A
+    /// write puts the entries back after the Tags, and the value back while the Topic has no Tags, as it keeps
+    /// unknown fields.
+    var unreadableTags: JSONValue?
     public var unknownFields: [String: JSONValue] = [:]
 
     public func isSnoozed(at now: Date) -> Bool {
@@ -82,7 +88,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id, title, slug, outcome, order, sessions
         case homeProject = "home_project", createdAt = "created_at", settledAt = "settled_at"
-        case snoozedUntil = "snoozed_until", sessionOrder = "session_order", pinned, unread
+        case snoozedUntil = "snoozed_until", sessionOrder = "session_order", pinned, unread, tags
     }
 
     private struct FieldKey: CodingKey {
@@ -110,6 +116,16 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         hasManualSessionOrder = (try? values.decodeIfPresent(String.self, forKey: .sessionOrder)) == "manual"
         isPinned = (try? values.decodeIfPresent(Bool.self, forKey: .pinned)) == true
         isUnread = (try? values.decodeIfPresent(Bool.self, forKey: .unread)) == true
+        switch try values.decodeIfPresent(JSONValue.self, forKey: .tags) {
+        case .array(let entries)?:
+            // An entry is read as the user types a Tag, so `Backend` and `#backend` are the Tag `backend`.
+            let read = entries.map { ($0, $0.string.flatMap(Tag.init(typed:))) }
+            tags = Set(read.compactMap(\.1))
+            let rest = read.filter { $0.1 == nil }.map(\.0)
+            unreadableTags = rest.isEmpty ? nil : .array(rest)
+        case let value?: unreadableTags = value
+        case nil: break
+        }
         let known = Set(CodingKeys.allCases.map(\.rawValue))
         let fields = try decoder.container(keyedBy: FieldKey.self)
         unknownFields = Dictionary(uniqueKeysWithValues: try fields.allKeys.filter { !known.contains($0.stringValue) }.map {
@@ -133,5 +149,11 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         if hasManualSessionOrder { try values.encode("manual", forKey: .sessionOrder) }
         if isUnread { try values.encode(true, forKey: .unread) }
         if isPinned { try values.encode(true, forKey: .pinned) }
+        let names = tags.sorted().map { JSONValue.string($0.name) }
+        switch unreadableTags {
+        case .array(let rest)?: try values.encode(names + rest, forKey: .tags)
+        case let value? where tags.isEmpty: try values.encode(value, forKey: .tags)
+        default: if !tags.isEmpty { try values.encode(names, forKey: .tags) }
+        }
     }
 }

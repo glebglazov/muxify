@@ -8,7 +8,7 @@ extension PaletteItem {
         case .session(let session): return .session(session.id)
         case .window(let window): return .window(window.id)
         case .agent(let agent): return .pane(agent.paneID)
-        case .project, .choice, .command: return nil
+        case .project, .choice, .command, .tag: return nil
         }
     }
 }
@@ -21,16 +21,21 @@ extension CommandPalette {
             store.changeRead(action == .markRead ? .read : .unread, in: item.readTarget)
             return
         }
+        if case .tag(let tag) = item.ref, action == .snoozeTopic {
+            store.presentSnooze([.tag(tag)], from: .pick, keepingHistory: true)
+            return
+        }
         if case .topic(let id, _) = item.ref,
            let topic = store.topicWatcher.records.first(where: { $0.id == id }) {
             switch action {
-            case .snoozeTopic: store.presentSnooze([id], from: .until, keepingHistory: true)
+            case .snoozeTopic: store.presentSnooze([.topic(id)], from: .until, keepingHistory: true)
             case .startZen:
                 if store.topicWatcher.zen == nil { begin(.zen(id), keepingHistory: true) }
                 else { close(); store.endZen() }
             case .settleTopic: begin(.confirm(PaletteConfirmation(.settle(topic))), keepingHistory: true)
             case .forgetTopic: begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: true)
             case .rename: begin(.text(.renameTopic(topic)), text: topic.title ?? "", keepingHistory: true)
+            case .editTags: store.presentEditTags(of: id, keepingHistory: true)
             case .addProjectToTopic: store.refreshProjects(); begin(.addProject(topic), keepingHistory: true)
             case .suggestTopicTitle:
                 close()

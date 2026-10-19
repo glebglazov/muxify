@@ -17,6 +17,7 @@ enum PaletteCommand: String, CaseIterable {
     case removeSessionFromTopic = "Remove Session from Topic"
     case forgetTopic = "Forget Topic"
     case renameTopic = "Rename Topic"
+    case editTags = "Edit Tags…"
     case lockSession = "Lock Session"
     case unlockSession = "Unlock Session"
     case zen = "Zen"
@@ -123,7 +124,7 @@ extension CommandPalette {
             case .newTopic: return !store.isRemote && !store.changingTopic
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
-            case .addProject, .snoozeTopic, .settleTopic: return canChangeTopics && hasOpenTopic
+            case .addProject, .snoozeTopic, .settleTopic, .editTags: return canChangeTopics && hasOpenTopic
             case .forgetTopic, .renameTopic: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
             case .removeSessionFromTopic:
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
@@ -186,7 +187,7 @@ extension CommandPalette {
         }
         switch command {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addProject, .snoozeTopic, .snoozeTopics, .settleTopic, .zen,
-             .forgetTopic, .renameTopic: break
+             .forgetTopic, .renameTopic, .editTags: break
         default: close(restoringFocus: false)
         }
         switch command {
@@ -199,12 +200,13 @@ extension CommandPalette {
         case .moveWindow: store.presentMoveWindow(keepingHistory: true)
         case .moveSession: store.presentMoveSession(keepingHistory: true)
         case .addProject: store.presentAddProject(keepingHistory: true)
-        case .snoozeTopic: if let id = store.activeTopicID { store.presentSnooze([id], from: .until, keepingHistory: true) }
-        case .snoozeTopics: store.presentSnooze([store.activeTopicID].compactMap { $0 }, from: .choose, keepingHistory: true)
+        case .snoozeTopic: if let id = store.activeTopicID { store.presentSnooze([.topic(id)], from: .until, keepingHistory: true) }
+        case .snoozeTopics: store.presentSnooze([], from: .pick, keepingHistory: true)
         case .settleTopic: store.presentSettleTopic(keepingHistory: true)
         case .removeSessionFromTopic: if let window = store.selectedWindow { store.removeFromTopic(window) }
         case .forgetTopic: if let id = store.activeTopicID { store.presentForgetTopic(id, keepingHistory: true) }
         case .renameTopic: store.presentRenameTopic(keepingHistory: true)
+        case .editTags: if let id = store.activeTopicID { store.presentEditTags(of: id, keepingHistory: true) }
         case .zen: store.toggleZenOfActiveTopic(keepingHistory: true)
         case .endZen: store.endZen()
         case .lockSession, .unlockSession: store.toggleLockOfCurrentSession()

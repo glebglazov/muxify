@@ -89,11 +89,13 @@ public struct TopicDetail: Codable, Hashable, Sendable {
     public var homeProject: String?
     public var createdAt: String?
     public var snoozedUntil: String?
+    /// A→Z.
+    public var tags: [Tag]
     /// The Sessions whose `@muxify_topic` names this Topic, in tmux order. Empty for a Dormant Topic.
     public var sessions: [Session]
 
     public init(id: String, label: String, title: String?, slug: String?, homeProject: String?, createdAt: String?,
-                snoozedUntil: String?, sessions: [Session]) {
+                snoozedUntil: String?, tags: [Tag] = [], sessions: [Session]) {
         self.id = id
         self.label = label
         self.title = title
@@ -101,6 +103,7 @@ public struct TopicDetail: Codable, Hashable, Sendable {
         self.homeProject = homeProject
         self.createdAt = createdAt
         self.snoozedUntil = snoozedUntil
+        self.tags = tags
         self.sessions = sessions
     }
 
@@ -130,7 +133,7 @@ public struct TopicDetail: Codable, Hashable, Sendable {
         }
         self.init(id: record.id, label: TopicSummary(record: record).label, title: record.title, slug: record.slug,
                   homeProject: record.homeProject, createdAt: record.createdAt, snoozedUntil: record.snoozedUntil,
-                  sessions: sessions)
+                  tags: record.tags.sorted(), sessions: sessions)
     }
 
     // Synthesized encoding leaves out a nil key. A reader gets every key, with null for a field the record does not have.
@@ -143,11 +146,12 @@ public struct TopicDetail: Codable, Hashable, Sendable {
         try values.encode(homeProject, forKey: .homeProject)
         try values.encode(createdAt, forKey: .createdAt)
         try values.encode(snoozedUntil, forKey: .snoozedUntil)
+        try values.encode(tags, forKey: .tags)
         try values.encode(sessions, forKey: .sessions)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, label, title, slug, sessions
+        case id, label, title, slug, tags, sessions
         case homeProject = "home_project", createdAt = "created_at", snoozedUntil = "snoozed_until"
     }
 }

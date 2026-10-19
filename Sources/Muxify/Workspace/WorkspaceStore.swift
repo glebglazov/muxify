@@ -75,12 +75,24 @@ final class WorkspaceStore {
     func presentNewTopic(keepingHistory: Bool = false) {
         guard !isRemote, !changingTopic else { return }
         newTopicFailure = nil
-        palette.begin(.text(.newTopic), keepingHistory: keepingHistory)
+        palette.begin(.text(.tags(TagField(mode: .newTopic))), keepingHistory: keepingHistory)
     }
 
     /// Makes an open Topic with no Session and shows it, so the user adds its first Project from there.
-    func createTopic(title: String) {
-        perform(TopicRequest(.create(title: title, project: nil)), presenting: .newTopic)
+    func createTopic(title: String, tags: [Tag] = []) {
+        perform(TopicRequest(.create(title: title, project: nil, tags: tags.isEmpty ? nil : tags)), presenting: .newTopic)
+    }
+
+    /// Edit Tags for an open Topic: one field with its Tags as chips.
+    func presentEditTags(of id: String, keepingHistory: Bool = false) {
+        topicWatcher.reload()
+        guard !changingTopic, !isRemote, let topic = topicWatcher.records.first(where: { $0.id == id && $0.settledAt == nil }) else { return }
+        palette.begin(.text(.tags(TagField(mode: .editTags(topic), chips: topic.tags.sorted()))), keepingHistory: keepingHistory)
+    }
+
+    /// Tags go through the Topic service, as `muxify topic tag` does (ADR 0010).
+    func setTags(of id: String, _ tags: [Tag]) {
+        perform(TopicRequest(.tags(.set(tags)), target: .topic(.id(id))))
     }
 
     /// Puts a Topic with no live Session in place of the terminal and makes it the Active Topic: an empty Topic
@@ -449,13 +461,16 @@ final class WorkspaceStore {
         }
     }
 
-    /// Every Snooze goes through this flow: Snooze Topic starts at the "until" step with a set of one Topic, and
-    /// Snooze Topics starts at the choose step with the Active Topic marked.
-    func presentSnooze(_ ids: [String], from step: SnoozeDraft.Step, keepingHistory: Bool = false) {
+    /// Every Snooze goes through this flow: Snooze Topic starts at the "until" step with one Topic chip, and Snooze
+    /// Topics starts at the pick step with no chip, or with the Tag chip of "Snooze its Topics…".
+    func presentSnooze(_ chips: [PickChip], from step: SnoozeDraft.Step, keepingHistory: Bool = false) {
         topicWatcher.reload()
-        let open = ids.filter { id in topicWatcher.records.contains { $0.id == id && $0.settledAt == nil } }
-        guard step == .choose || !open.isEmpty else { return }
-        palette.begin(.snooze(SnoozeDraft(topicIDs: open, step: step)), keepingHistory: keepingHistory)
+        let open = chips.filter { chip in
+            guard case .topic(let id) = chip else { return true }
+            return topicWatcher.records.contains { $0.id == id && $0.settledAt == nil }
+        }
+        guard step == .pick || !open.isEmpty else { return }
+        palette.begin(.snooze(SnoozeDraft(chipField: ChipField(chips: open), step: step)), keepingHistory: keepingHistory)
     }
 
     /// One write for all of `ids`, so Topics whose Snooze ends together keep their order. Returns the open Topics
@@ -2102,8 +2117,8 @@ final class WorkspaceStore {
         case .moveWindow: presentMoveWindow()
         case .moveSession: if !isRemote { presentMoveSession() }
         case .addProjectToTopic: if !isRemote { presentAddProject() }
-        case .snoozeTopic: if !isRemote, let id = activeTopicID { presentSnooze([id], from: .until) }
-        case .snoozeTopics: if !isRemote { presentSnooze([activeTopicID].compactMap { $0 }, from: .choose) }
+        case .snoozeTopic: if !isRemote, let id = activeTopicID { presentSnooze([.topic(id)], from: .until) }
+        case .snoozeTopics: if !isRemote { presentSnooze([], from: .pick) }
         case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
         case .removeSessionFromTopic:

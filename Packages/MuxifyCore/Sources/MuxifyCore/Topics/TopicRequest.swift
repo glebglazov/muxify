@@ -173,7 +173,7 @@ public enum TopicCommand: Codable, Hashable, Sendable {
     case show
     /// A new Topic. With a Project, it starts a Session there. Without one, it uses the target's Project, and
     /// with no target it has no Session.
-    case create(title: String, project: String?)
+    case create(title: String, project: String?, tags: [Tag]? = nil)
     /// Moves the target Pane into a new Topic, with a Session in `project` or in the Pane's Project.
     case extract(project: String?, title: String? = nil)
     /// Adds a Session for `project` to the target's Topic.
@@ -208,9 +208,11 @@ public enum TopicCommand: Codable, Hashable, Sendable {
     case snooze(until: SnoozeDeadline, topics: [TopicRef] = [])
     /// Ends the Snooze of each open Topic in `topics`, as `snooze` names them. A Topic that is not Snoozed does not change.
     case unsnooze(topics: [TopicRef] = [])
+    /// Changes the Tags of the target's open Topic. It changes nothing in tmux.
+    case tags(TopicTagChange)
 
     private enum CodingKeys: String, CodingKey {
-        case list, show, create, extract, settle, forget, move, rename, reopen, lock, unlock, snooze, unsnooze
+        case list, show, create, extract, settle, forget, move, rename, reopen, lock, unlock, snooze, unsnooze, tags
         case startFresh = "start_fresh"
         case moveSession = "move_session"
         case sortSessions = "sort_sessions"
@@ -223,6 +225,8 @@ public enum TopicCommand: Codable, Hashable, Sendable {
         case project
         case workingCopy = "working_copy"
     }
+
+    private enum TagsCodingKeys: String, CodingKey { case _0 = "change" }
 }
 
 public struct TopicRequest: Codable, Hashable, Sendable {
@@ -256,14 +260,18 @@ public struct TopicSummary: Codable, Hashable, Sendable {
     public var id: String
     /// The title, else the slug, else "Untitled Topic".
     public var label: String
+    /// A→Z.
+    public var tags: [Tag]
 
-    public init(id: String, label: String) {
+    public init(id: String, label: String, tags: [Tag] = []) {
         self.id = id
         self.label = label
+        self.tags = tags
     }
 
     public init(record: TopicRecord) {
-        self.init(id: record.id, label: [record.title, record.slug].compactMap { $0 }.first { !$0.isEmpty } ?? "Untitled Topic")
+        self.init(id: record.id, label: [record.title, record.slug].compactMap { $0 }.first { !$0.isEmpty } ?? "Untitled Topic",
+                  tags: record.tags.sorted())
     }
 }
 

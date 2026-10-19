@@ -34,6 +34,17 @@ final class TopicWireTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(TopicCommand.self, from: Data(#"{"snooze":{"topics":[],"until":"soon"}}"#.utf8)))
     }
 
+    func testTagsAreSentAsNamesAndANewTopicCanHaveTags() throws {
+        let tags = [Tag(name: "backend")!, Tag(name: "release")!]
+        try assertRoundTrip(TopicRequest(.tags(.set(tags)), target: .topic(.id("fix"))),
+                            #"{"command":{"tags":{"change":{"set":{"tags":["backend","release"]}}}},"target":{"topic":{"id":"fix"}},"version":1}"#)
+        try assertRoundTrip(TopicCommand.tags(.add([tags[0]])), #"{"tags":{"change":{"add":{"tags":["backend"]}}}}"#)
+        try assertRoundTrip(TopicCommand.tags(.remove([])), #"{"tags":{"change":{"remove":{"tags":[]}}}}"#)
+        try assertRoundTrip(TopicCommand.create(title: "Fix", project: nil, tags: tags), #"{"create":{"tags":["backend","release"],"title":"Fix"}}"#)
+        XCTAssertThrowsError(try JSONDecoder().decode(TopicCommand.self, from: Data(#"{"tags":{"change":{"add":{"tags":["Backend"]}}}}"#.utf8)),
+                             "a request with a name that is not a Tag does not load")
+    }
+
     func testExtractKeepsOldRequestsAndAddsAnOptionalTitle() throws {
         try assertRoundTrip(TopicCommand.extract(project: nil), #"{"extract":{}}"#)
         try assertRoundTrip(TopicCommand.extract(project: "/work/game"), #"{"extract":{"project":"/work/game"}}"#)
@@ -95,7 +106,8 @@ final class TopicWireTests: XCTestCase {
     }
 
     func testResponses() throws {
-        try assertRoundTrip(TopicResponse.topics([TopicSummary(id: "a", label: "Fix")]), #"{"topics":[{"id":"a","label":"Fix"}]}"#)
+        try assertRoundTrip(TopicResponse.topics([TopicSummary(id: "a", label: "Fix", tags: [Tag(name: "backend")!])]),
+                            #"{"topics":[{"id":"a","label":"Fix","tags":["backend"]}]}"#)
         try assertRoundTrip(TopicResponse.changed(TopicChange(topicID: "a", created: true, shown: .window(WindowID(rawValue: "@3")!))),
                             #"{"changed":{"created":true,"shown":{"window":{"id":"@3"}},"topic_id":"a"}}"#)
         try assertRoundTrip(TopicResponse.changed(TopicChange(topicID: "a", shown: .emptyTopic(id: "a"))),
@@ -108,12 +120,12 @@ final class TopicWireTests: XCTestCase {
         let session = TopicDetail.Session(id: "$2", name: "game/fix", project: .init(label: "game", path: "/work/game"),
                                           worktree: .init(path: "/trees/fix", branch: nil), windows: [window])
         try assertRoundTrip(TopicResponse.topic(TopicDetail(id: "a", label: "Fix", title: "Fix", slug: nil, homeProject: "/work/game",
-                                                            createdAt: nil, snoozedUntil: nil, sessions: [session])),
+                                                            createdAt: nil, snoozedUntil: nil, tags: [Tag(name: "backend")!], sessions: [session])),
                             #"{"topic":{"created_at":null,"home_project":"/work/game","id":"a","label":"Fix","sessions":[{"id":"$2","name":"game/fix","#
                             + #""project":{"label":"game","path":"/work/game"},"windows":[{"active":true,"id":"@3","index":1,"name":"zsh","panes":["#
                             + #"{"active":false,"agent":{"conversation":null,"kind":"claude","status":null,"unread":false},"command":"2.1.289","id":"%4","index":1,"label":"claude","path":"/work/game","window_id":"@3"},"#
                             + #"{"active":true,"agent":null,"command":"zsh","id":"%5","index":2,"label":"/w/game","path":"/work/game","window_id":"@3"}]}],"#
-                            + #""worktree":{"base":null,"branch":null,"path":"/trees/fix"}}],"slug":null,"snoozed_until":null,"title":"Fix"}}"#)
+                            + #""worktree":{"base":null,"branch":null,"path":"/trees/fix"}}],"slug":null,"snoozed_until":null,"tags":["backend"],"title":"Fix"}}"#)
         try assertRoundTrip(TopicResponse.failed(TopicFailure(kind: .storeBusy, phase: .recordSaved, message: "busy")),
                             #"{"failed":{"kind":"store_busy","message":"busy","phase":"record_saved"}}"#)
     }

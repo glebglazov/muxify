@@ -298,6 +298,32 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try snoozes(), [first: nil, second: tomorrow.stored])
     }
 
+    func testTagsChangeOnlyTheTagsOfTheTargetsOpenTopicAndANewTopicGetsItsTags() throws {
+        let backend = Tag(name: "backend")!, release = Tag(name: "release")!
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Fix", project: nil, tags: [release])))).topicID)
+        func current() throws -> TopicRecord { try XCTUnwrap(records().first { $0.id == id }) }
+        XCTAssertEqual(try current().tags, [release])
+        let before = try current()
+        XCTAssertEqual(try change(service().handle(TopicRequest(.tags(.add([backend])), target: .topic(.named("Fix"))))).topicID, id)
+        XCTAssertEqual(try current().tags, [backend, release])
+        _ = try change(service().handle(TopicRequest(.tags(.remove([release])), target: .topic(.id(id)))))
+        var expected = before
+        expected.tags = [backend]
+        XCTAssertEqual(try current(), expected, "a Tag change changes nothing else in the record")
+        _ = try change(service().handle(TopicRequest(.tags(.set([])), target: .topic(.id(id)))))
+        XCTAssertEqual(try current().tags, [])
+
+        let withSession = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Live", project: project.folder.path,
+                                                                                         tags: [backend])))).topicID)
+        XCTAssertEqual(try records().first { $0.id == withSession }?.tags, [backend], "a new Topic with a Session gets its Tags too")
+
+        let missing = try failure(service().handle(TopicRequest(.tags(.add([backend])), target: .topic(.id("nope")))))
+        XCTAssertEqual(missing.kind, .topicUnavailable)
+        XCTAssertEqual(missing.phase, .nothingChanged)
+        let noTarget = try failure(service().handle(TopicRequest(.tags(.add([backend])))))
+        XCTAssertEqual(noTarget.kind, .noTarget)
+    }
+
     func testUnsnoozePutsTheTopicBelowTheLocksAtTheConfiguredEnd() throws {
         try server.run(["new-session", "-d", "-s", "notes", "-c", project.folder.path])
         let first = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "First", project: nil)))).topicID)

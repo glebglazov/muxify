@@ -29,6 +29,7 @@ enum CLICommand: Equatable {
            muxify topic settle [--remove-worktrees] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic snooze <time> [--topic <id|label>... | --window <id> | --pane <id>] [--json]
            muxify topic unsnooze [--topic <id|label>... | --window <id> | --pane <id>] [--json]
+           muxify topic tag (add | remove | set) [<tag>...] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic list [--json]
            muxify topic show [--conversations] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic status [--project <dir>] [--topic <id|label> | --window <id> | --pane <id>] [--json]
@@ -75,8 +76,12 @@ enum CLICommand: Equatable {
                    is not an open Topic, nothing changes.
     topic unsnooze Unsnoozes this Pane's Topic, or each --topic. A Topic that is not
                    Snoozed does not change. It changes nothing in tmux.
-    topic list     Prints each open Topic's id and label without starting Muxify.
-    topic show     Prints this Pane's Topic: its id and label, then a line for each live
+    topic tag      Adds Tags to this Pane's Topic, removes them, or sets them, so that the
+                   Topic has exactly these Tags: set with no Tag removes every Tag. A Tag has
+                   lower case letters, digits and - only, such as backend; upper case becomes
+                   lower case. The # is optional, and the shell reads an unquoted # as a comment.
+    topic list     Prints each open Topic's id, label and Tags without starting Muxify.
+    topic show     Prints this Pane's Topic: its id, label and Tags, then a line for each live
                    Session: its name, Project, folder and branch. With --json, also its
                    Windows and Panes, and the Agent, Status, Unread and conversation of each Pane.
                      --conversations      also a line for the conversation of each Agent that

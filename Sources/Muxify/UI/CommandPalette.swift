@@ -7,7 +7,8 @@ import MuxifyCore
 @MainActor @Observable
 final class CommandPalette {
     enum Presentation {
-        case search(CommandPaletteConfig)
+        /// A Tag filter shows only the Topics with that Tag.
+        case search(CommandPaletteConfig, tagFilter: Tag? = nil)
         case flow(PaletteFlow)
     }
     struct PreviousStep {
@@ -22,7 +23,11 @@ final class CommandPalette {
     /// Add a Project's New Worktree option. Each step starts with it off, so one Project's choice never carries to the next.
     var newWorktree = false
     var current: CommandPaletteConfig? {
-        if case .search(let config) = presentation { return config }
+        if case .search(let config, _) = presentation { return config }
+        return nil
+    }
+    var tagFilter: Tag? {
+        if case .search(_, let tag) = presentation { return tag }
         return nil
     }
     var flow: PaletteFlow? {
@@ -38,6 +43,8 @@ final class CommandPalette {
             if query != oldValue {
                 selectedID = nil
                 queryRevision += 1
+                // Any change of the text, also one that is not a key press, puts the caret back in the text.
+                if let flow = flow?.receiving(.toText) { presentation = .flow(flow) }
             }
         }
     }
@@ -71,6 +78,7 @@ final class CommandPalette {
 
     var placeholder: String {
         if let flow { return flow.placeholder }
+        if let tagFilter { return "Topics with \(tagFilter)" }
         return current?.placeholder ?? ""
     }
 
@@ -113,7 +121,7 @@ final class CommandPalette {
     var results: PickList<PaletteItem> {
         guard let catalog else { return .empty }
         if let flow { return flowResults(flow) }
-        return catalog.list(sourceButtons.filter(selection.contains), query: query)
+        return catalog.list(sourceButtons.filter(selection.contains), query: query, tagFilter: tagFilter)
     }
 
     func selected(in list: PickList<PaletteItem>) -> PickRow<PaletteItem>? {
@@ -124,6 +132,7 @@ final class CommandPalette {
     func actions(for row: PickRow<PaletteItem>) -> [PaletteAction] {
         guard let item = row.pick.payload else { return [] }
         if flow != nil || item.kind == .command { return [.jumpTo] }
+        if case .tag = item.ref { return [.jumpTo, .snoozeTopic] }
         var actions: [PaletteAction] = [.jumpTo]
         if store?.canChangeRead(.read, in: item.readTarget) == true { actions.append(.markRead) }
         if store?.canChangeRead(.unread, in: item.readTarget) == true { actions.append(.markUnread) }
@@ -134,7 +143,7 @@ final class CommandPalette {
                 actions += topic.snoozedUntil == nil ? [.snoozeTopic] : [.unsnoozeTopic]
                 // Zen starts only in Topics mode; while it is on, the action ends it.
                 actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
-                actions += [.settleTopic, .addProjectToTopic, .rename, .suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
+                actions += [.settleTopic, .addProjectToTopic, .rename, .editTags, .suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
                 actions += [.reopenTopic, .startTopicFresh]
@@ -153,7 +162,7 @@ final class CommandPalette {
         case .agent:
             if store?.isRemote == false { actions += [.move] }
         case .project: actions += [.newSession]
-        case .choice, .command: break
+        case .choice, .command, .tag: break
         }
         if !item.path.isEmpty { actions += [.copyFolder]; if store?.isRemote == false { actions += [.revealFolder] } }
         if item.target != nil { actions += [.copyTmuxTarget] }
@@ -172,6 +181,7 @@ final class CommandPalette {
                       store?.topicWatcher.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
                 return "Reopen Topic"
             case .settledTopic: return "Reopen Topic"
+            case .tag: return flow == nil ? "Show its Topics" : "Choose Tag"
             case .session: return "Switch to Session"
             // A Project row's target is the Session ↩ goes to; without one, ↩ starts it.
             case .project, .worktree: return item.target == nil ? "Open as Session" : "Switch to Session"
@@ -185,10 +195,11 @@ final class CommandPalette {
         case .copyFolder: return "Copy Path"
         case .copyTmuxTarget: return item.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"
         case .pasteFolder: return "Paste Path"
-        case .snoozeTopic: return "Snooze Topic"
+        case .snoozeTopic: return item.kind == .tag ? "Snooze its Topics…" : "Snooze Topic"
         case .move: return "Move to…"
         case .addProjectToTopic: return "Add a Project"
         case .rename: return "Rename"
+        case .editTags: return "Edit Tags…"
         case .suggestTopicTitle: return "Suggest title from Agents"
         case .startZen: return store?.topicWatcher.zen == nil ? "Zen" : "End Zen"
         case .settleTopic: return "Settle"
@@ -257,6 +268,8 @@ final class CommandPalette {
     func back() {
         guard query.isEmpty else { return }
         if showsActions { showsActions = false; return }
+        if receiveChipKey(.deleteBackward(textIsEmpty: true)) { return }
+        if case .search(let config, _?) = presentation { presentation = .search(config); selectedID = nil; return }
         invocation = UUID()
         if let earlier = flow?.earlierStep { replaceFlow(earlier); return }
         guard let previous = history.popLast() else { close(); return }
@@ -307,6 +320,12 @@ final class CommandPalette {
             if choice == .accept { acceptSelected() } else { accept(choice) }
             return
         }
+        if action == .jumpTo, case .tag(let tag) = item.ref, let current {
+            presentation = .search(current, tagFilter: tag)
+            query = ""
+            selectedID = nil
+            return
+        }
         switch action {
         case .jumpTo:
             if case .command(let command) = item.ref {
@@ -322,6 +341,7 @@ final class CommandPalette {
             case .session(let session):
                 if let window = EntryWindow.ofSession(session.windows) { store.select(window) }
             case .project(let target): store.openDirectory(target)
+            case .tag: break
             case .choice: break
             case .command: break
             }
@@ -378,6 +398,7 @@ final class CommandPalette {
             return false
         }
         if trigger == Self.escape { close(); return true }
+        if let editor = event.window?.firstResponder as? NSTextView, handleChipKey(trigger, editor: editor) { return true }
         if trigger == KeyTrigger(modifiers: [], key: .special(.backspace)), query.isEmpty {
             back()
             return true
@@ -436,6 +457,7 @@ final class CommandPalette {
     func move(_ delta: Int, in list: PickList<PaletteItem>) {
         let rows = list.rows.filter { $0.pick.payload != nil }
         guard !rows.isEmpty else { return }
+        if let flow = flow?.receiving(.toText) { presentation = .flow(flow) }
         let current = rows.firstIndex { $0.id == selected(in: list)?.id } ?? 0
         selectedID = rows[(current + delta + rows.count) % rows.count].id
         showsActions = false

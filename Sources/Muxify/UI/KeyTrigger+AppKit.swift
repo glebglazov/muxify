@@ -90,6 +90,7 @@ private extension KeyTrigger.SpecialKey {
         case .tab: [0x30]
         case .escape: [0x35]
         case .backspace: [0x33]
+        case .delete: [0x75]
         case .left: [0x7B]
         case .right: [0x7C]
         case .down: [0x7D]
@@ -103,6 +104,7 @@ private extension KeyTrigger.SpecialKey {
         case .tab: .tab
         case .escape: .escape
         case .backspace: .delete
+        case .delete: .deleteForward
         case .left: .leftArrow
         case .right: .rightArrow
         case .down: .downArrow
@@ -116,6 +118,7 @@ private extension KeyTrigger.SpecialKey {
         case .tab: "⇥"
         case .escape: "⎋"
         case .backspace: "⌫"
+        case .delete: "⌦"
         case .left: "←"
         case .right: "→"
         case .down: "↓"

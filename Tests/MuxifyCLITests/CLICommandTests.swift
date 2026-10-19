@@ -176,6 +176,10 @@ final class CLICommandTests: XCTestCase {
              topic(.snooze(.relative(2, .hour), topics: [.named("a"), .named("b"), .named("a")]))),
             (["snooze", "forever", "--pane", "%3"], inside, topic(.snooze(.never, topics: []), target: pane)),
             (["unsnooze"], inside, topic(.unsnooze(topics: []))),
+            (["tag", "add", "backend", "#Release"], inside, topic(.tag(.add([Tag(name: "backend")!, Tag(name: "release")!])))),
+            (["tag", "remove", "backend", "--topic", "Fix"], outside,
+             topic(.tag(.remove([Tag(name: "backend")!])), target: .topic(.named("Fix")), caller: nil)),
+            (["tag", "set", "--pane", "%3", "--json"], inside, topic(.tag(.set([])), target: pane, output: .json)),
             (["unsnooze", "--window", "@12"], inside, topic(.unsnooze(topics: []), target: window)),
             (["unsnooze", "--topic", "a", "--topic", "b", "--json"], outside,
              topic(.unsnooze(topics: [.named("a"), .named("b")]), caller: nil, output: .json)),
@@ -397,6 +401,8 @@ final class CLICommandTests: XCTestCase {
                           ["topic", "show", "--timeout", "5"], ["topic", "status", "--stat"], ["topic", "status", "x"],
                           ["topic", "diff", "x"], ["topic", "diff", "--", "pwd"], ["topic", "show", "--stat"],
                           ["topic", "snooze"], ["topic", "snooze", "2h", "--project", "tools"], ["topic", "snooze", "2h", "--stat"],
+                          ["topic", "tag"], ["topic", "tag", "add"], ["topic", "tag", "remove"], ["topic", "tag", "rename", "a"],
+                          ["topic", "tag", "add", "a", "--project", "tools"],
                           ["topic", "unsnooze", "2h"], ["topic", "unsnooze", "--remove-worktrees"], ["topic", "snooze", "2h", "--topic"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2)
@@ -433,6 +439,9 @@ final class CLICommandTests: XCTestCase {
             (["snooze", "soon"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
             (["snooze", "25:00"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
             (["snooze", "never"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
+            (["tag", "add", "back end"], inside, "back end is not a Tag: use lower case letters, digits and -, e.g. backend"),
+            (["tag", "set", "café"], inside, "café is not a Tag: use lower case letters, digits and -, e.g. backend"),
+            (["tag", "add", "a"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
         ]
         for (arguments, environment, message) in cases {
             XCTAssertThrowsError(try CLICommand(arguments: ["topic"] + arguments, environment: environment), "\(arguments)") { error in

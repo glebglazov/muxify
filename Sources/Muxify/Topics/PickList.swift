@@ -13,6 +13,9 @@ struct SearchField: Equatable {
         case label
         /// Shown in the detail line only when it matched: a joined Session name.
         case hidden
+        /// A Tag, such as "#backend". Only a word that starts with `#` matches it, and such a word matches nothing
+        /// else. Always in the detail line, so a row shows which Tags its Topic has.
+        case tag
     }
 
     let text: String
@@ -23,6 +26,7 @@ struct SearchField: Equatable {
     static func detail(_ text: String) -> SearchField { SearchField(text: text, place: .detail) }
     static func hidden(_ text: String) -> SearchField { SearchField(text: text, place: .hidden) }
     static func label(_ text: String) -> SearchField { SearchField(text: text, place: .label) }
+    static func tag(_ tag: Tag) -> SearchField { SearchField(text: tag.description, place: .tag) }
 }
 
 /// The best field per word, summed over words. Nil when some word matches no field.
@@ -36,7 +40,8 @@ struct FieldsMatch: Equatable {
         var positions: [Int: [Int]] = [:]
         for word in query.words {
             var best: (index: Int, match: FuzzyMatch)?
-            for (index, field) in fields.enumerated() where field.place != .label {
+            let wantsTag = word.hasPrefix("#")
+            for (index, field) in fields.enumerated() where field.place != .label && (field.place == .tag) == wantsTag {
                 guard let match = FuzzyMatcher.match(word, in: field.text) else { continue }
                 if best.map({ match.score > $0.match.score }) ?? true { best = (index, match) }
             }
@@ -110,9 +115,11 @@ struct PickCandidate<Payload: Equatable> {
     var paste: String? = nil
     /// The id of the Topic that ⌃S Snoozes.
     var snooze: String? = nil
+    /// `.tag` when the title is a Tag, such as "#backend", so only a `#` word matches it.
+    var titlePlace: SearchField.Place = .title
 
     /// The title first: on an equal score the field listed first takes the word, so a title hit wins.
-    var searchFields: [SearchField] { [.title(title)] + fields }
+    var searchFields: [SearchField] { [SearchField(text: title, place: titlePlace)] + fields }
 }
 
 struct PickRow<Payload: Equatable>: Identifiable, Equatable {
@@ -209,12 +216,14 @@ enum FuzzyRanker {
     static func detail(_ fields: [SearchField], note: String?, match: FieldsMatch?) -> Highlighted {
         var parts: [Highlighted] = []
         func shown(_ place: SearchField.Place, onlyWhenMatched: Bool) {
-            for (index, field) in fields.enumerated() where field.place == place {
+            // The first field is the title, which the row shows on its own line.
+            for (index, field) in fields.enumerated() where index > 0 && field.place == place {
                 let marks = match?.positions[index] ?? []
                 if onlyWhenMatched, marks.isEmpty { continue }
                 parts.append(Highlighted(text: field.text, marks: marks))
             }
         }
+        shown(.tag, onlyWhenMatched: false)
         shown(.typeWord, onlyWhenMatched: true)
         shown(.detail, onlyWhenMatched: false)
         shown(.label, onlyWhenMatched: false)

@@ -16,6 +16,7 @@ The filename must match the `id` field. The id must be a nonempty filename witho
   "order": 0,
   "snoozed_until": null,
   "session_order": "manual",
+  "tags": ["backend", "release"],
   "sessions": [
     {
       "project_path": "/work/game_server",
@@ -46,6 +47,19 @@ An absent or null `title` gives an Untitled Topic. A slug such as `untitled-3`
 gives the label `Untitled 3`. Without that slug, the view assigns a free number
 in Topic id order. Manual display order does not change those numbers.
 A non-null `settled_at` removes the Topic from the Topics view.
+
+`tags` holds the Topic's Tags, without `#`, A→Z. A Tag has only lower case
+letters `a` to `z`, digits and `-`, and it is not empty. Muxify reads an entry
+as the user types a Tag: it makes upper case lower case and removes one `#` at
+the start, so `Backend` and `#backend` are the Tag `backend`. Muxify keeps an
+entry that is still not a Tag, and writes it back after the Tags. It reads a
+`tags` value that is not an array as no Tags, and writes the value back until
+a Tag change gives the Topic Tags. A Topic without Tags and without such
+entries has no `tags` key. There is no other list of Tags:
+Muxify suggests the Tags that are on the records now, also on Settled Topics.
+When the last record with a Tag is Forgotten, Muxify does not suggest it again.
+Edit Tags in the app and `muxify topic tag` change the field through the Topic
+service. They change only the `tags` key, and only for an open Topic.
 
 The store retains unknown JSON fields during writes, including nested fields
 in remembered Sessions and Windows. Writes replace the file atomically. The

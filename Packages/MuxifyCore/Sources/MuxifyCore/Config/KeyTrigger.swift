@@ -23,7 +23,8 @@ public struct KeyTrigger: Hashable {
     }
 
     public enum SpecialKey: String, CaseIterable {
-        case enter, tab, escape, backspace, left, right, up, down
+        /// `delete` is the forward delete key (⌦), as Ghostty names it.
+        case enter, tab, escape, backspace, delete, left, right, up, down
     }
 
     public struct ParseError: Error, CustomStringConvertible {

@@ -268,15 +268,4 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertNotNil(local.ghosttyConfigFile)
         XCTAssertEqual(local.remoteEnvironments.map(\.name), ["Home"])
     }
-
-    func testChooseRowsMarksWithTabAndSpaceInAnEmptyFieldAndCommandAMarksTheShownRows() throws {
-        let space = try KeyTrigger("space"), tab = try KeyTrigger("tab"), commandA = try KeyTrigger("cmd+a")
-        XCTAssertEqual(ChooseRowsKey(space, queryIsEmpty: true), .markHighlighted)
-        XCTAssertNil(ChooseRowsKey(space, queryIsEmpty: false), "with a query, Space types a space")
-        XCTAssertEqual(ChooseRowsKey(tab, queryIsEmpty: true), .markHighlighted)
-        XCTAssertEqual(ChooseRowsKey(tab, queryIsEmpty: false), .markHighlighted)
-        XCTAssertEqual(ChooseRowsKey(commandA, queryIsEmpty: false), .markShown)
-        XCTAssertNil(ChooseRowsKey(try KeyTrigger("a"), queryIsEmpty: true))
-        XCTAssertNil(ChooseRowsKey(try KeyTrigger("enter"), queryIsEmpty: true))
-    }
 }

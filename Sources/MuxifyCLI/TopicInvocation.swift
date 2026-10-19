@@ -27,13 +27,14 @@ struct TopicInvocation: Equatable {
         /// `topics` are the `--topic` options; empty is the target or the caller Pane's Topic.
         case snooze(SnoozeSchedule, topics: [TopicRef])
         case unsnooze(topics: [TopicRef])
+        case tag(TopicTagChange)
 
         /// The target options this command takes. A titled Topic in a Project starts its own Session, so it takes none.
         var targets: [TargetOption] {
             switch self {
             case .new(_?, _?): return []
             case .new: return [.window, .pane]
-            case .addProject, .settle, .forget, .show, .exec, .status, .diff, .snooze, .unsnooze: return [.topic, .window, .pane]
+            case .addProject, .settle, .forget, .show, .exec, .status, .diff, .snooze, .unsnooze, .tag: return [.topic, .window, .pane]
             case .list: return []
             }
         }
@@ -48,10 +49,10 @@ struct TopicInvocation: Equatable {
             }
         }
 
-        /// A Snooze needs no Project, and a command that shows a Topic finds only the Projects of its Sessions.
+        /// A Snooze or a Tag change needs no Project, and a command that shows a Topic finds only the Projects of its Sessions.
         var findsAllProjects: Bool {
             switch self {
-            case .snooze, .unsnooze: return false
+            case .snooze, .unsnooze, .tag: return false
             default: return !showsTopic
             }
         }
@@ -71,6 +72,7 @@ struct TopicInvocation: Equatable {
             case .diff: return "topic diff"
             case .snooze: return "topic snooze"
             case .unsnooze: return "topic unsnooze"
+            case .tag: return "topic tag"
             }
         }
     }
@@ -154,7 +156,7 @@ struct TopicInvocation: Equatable {
     }
 
     enum Output: Equatable {
-        /// Each changed Topic's id, the list as `topic list` has always printed it, or a short `topic show`.
+        /// Each changed Topic's id, the tab-separated lines of `topic list`, or a short `topic show`.
         case text
         /// The whole `TopicResponse` as one JSON line.
         case json
@@ -249,6 +251,19 @@ extension TopicInvocation {
                 throw CLIError("topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever", exitCode: 2)
             }
         case ("unsnooze", 0, nil): command = .unsnooze(topics: targets.topics)
+        case ("tag", 1..., nil):
+            let tags = try words.dropFirst().map { word in
+                guard let tag = Tag(typed: word) else {
+                    throw CLIError("\(word) is not a Tag: use lower case letters, digits and -, e.g. backend", exitCode: 2)
+                }
+                return tag
+            }
+            switch words[0] {
+            case "set": command = .tag(.set(tags))
+            case "add" where !tags.isEmpty: command = .tag(.add(tags))
+            case "remove" where !tags.isEmpty: command = .tag(.remove(tags))
+            default: throw usageError
+            }
         default: throw usageError
         }
         let takes = command.targets
@@ -326,11 +341,11 @@ extension TopicInvocation {
             case .topics(let topics):
                 // One line per Topic, so a label keeps no tab or line break.
                 for topic in topics {
-                    print("\(topic.id)\t\(topic.label.oneLineField)")
+                    print(Self.line(id: topic.id, label: topic.label, tags: topic.tags))
                 }
             case .topic(let topic):
                 // One line for the Topic, then one for each live Session, with tab-separated fields as in topic list.
-                print("\(topic.id)\t\(topic.label.oneLineField)")
+                print(Self.line(id: topic.id, label: topic.label, tags: topic.tags))
                 for session in topic.sessions {
                     print([session.name, session.project.label, session.worktree?.path ?? session.project.path,
                            session.worktree?.branch ?? ""].map(\.oneLineField).joined(separator: "\t"))
@@ -341,6 +356,12 @@ extension TopicInvocation {
             }
         }
         if case .failed(let failure) = response { throw CLIError(failure) }
+    }
+
+    /// A Topic's line in `topic list` and `topic show`: id, label, and its Tags with `#`, which an empty field
+    /// gives when it has none.
+    private static func line(id: String, label: String, tags: [Tag]) -> String {
+        [id, label.oneLineField, tags.map(\.description).joined(separator: " ")].joined(separator: "\t")
     }
 
     /// `topic show --conversations`: the Topic as `topic show` prints it, then the conversation of each Agent in its live
@@ -397,6 +418,7 @@ extension TopicInvocation {
             guard let deadline = schedule.deadline(from: Date()) else { throw CLIError("that time has already passed", exitCode: 2) }
             return .snooze(until: deadline, topics: topics)
         case .unsnooze(let topics): return .unsnooze(topics: topics)
+        case .tag(let change): return .tags(change)
         case .list: return .list
         case .show, .exec, .status, .diff: return .show
         }

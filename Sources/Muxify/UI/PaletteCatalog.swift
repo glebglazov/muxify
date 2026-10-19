@@ -4,7 +4,7 @@ import MuxifyCore
 /// What a Command Palette row is, for its icon and its actions.
 struct PaletteItem: Equatable {
     enum Kind: Equatable {
-        case topic, snoozedTopic, settledTopic, session, project, worktree, window, agent, command
+        case topic, snoozedTopic, settledTopic, session, project, worktree, window, agent, command, tag
     }
 
     enum Ref: Equatable {
@@ -16,6 +16,8 @@ struct PaletteItem: Equatable {
         case agent(Agent)
         case choice(PaletteChoice)
         case command(PaletteCommand)
+        /// A Tag row of a search: ↩ makes it the search's Tag filter.
+        case tag(Tag)
     }
 
     let kind: Kind
@@ -64,15 +66,19 @@ struct PaletteCatalog {
 
     private var inTopicsMode: Bool { offersTopics && topics?.mode == .topics }
 
-    func list(_ sources: [PaletteSource], query: String) -> PickList<PaletteItem> {
-        FuzzyRanker.list(sections(sources), query: FuzzyQuery(query))
+    /// With `tagFilter`, only the Topics that have the Tag: open, Snoozed and Settled.
+    func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil) -> PickList<PaletteItem> {
+        guard let tagFilter else { return FuzzyRanker.list(sections(sources), query: FuzzyQuery(query)) }
+        return FuzzyRanker.list((openTopicSection(only: tagFilter).map { [$0] } ?? []) + snoozedAndSettledSections(only: tagFilter),
+                                query: FuzzyQuery(query))
     }
 
     /// The rows before any query, in the order of `sources`, then the Snoozed and Settled Topics, which rank
     /// below every other Source's rows for any query. Windows show on an empty query only when theirs is the
-    /// only Source, and a Window with an Agent is left out beside the agents Source.
+    /// only Source, and a Window with an Agent is left out beside the agents Source. The Tags follow the Topics, for
+    /// a query only: a Tag is not a place, but a filter that leads to places.
     func sections(_ sources: [PaletteSource]) -> [PickSectionInput<PaletteItem>] {
-        let laterTopics = sources.contains(.topics) ? snoozedAndSettledSections : []
+        let laterTopics = sources.contains(.topics) ? snoozedAndSettledSections(only: nil) : []
         return sources.flatMap { source -> [PickSectionInput<PaletteItem>] in
             switch source {
             case .commands:
@@ -82,7 +88,7 @@ struct PaletteCatalog {
                                   pick: .available(PaletteItem(kind: .command, ref: .command($0))))
                 })]
             case .topics:
-                return openTopicSection.map { [$0] } ?? []
+                return (openTopicSection(only: nil).map { [$0] } ?? []) + (tagSection.map { [$0] } ?? [])
             case .sessions:
                 return [PickSectionInput(id: "sessions", title: "Sessions", rule: .ranked(showsWhenEmpty: true),
                                          candidates: sessionCandidates)]
@@ -98,16 +104,29 @@ struct PaletteCatalog {
 
     // MARK: Topics
 
-    private var openTopicSection: PickSectionInput<PaletteItem>? {
+    private func openTopicSection(only tag: Tag?) -> PickSectionInput<PaletteItem>? {
         guard offersTopics, let topics else { return nil }
         return PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
-                                candidates: topics.rows.compactMap(topicCandidate))
+                                candidates: topics.rows.filter { tag.map($0.tags.contains) ?? true }.compactMap(topicCandidate))
     }
 
-    private var snoozedAndSettledSections: [PickSectionInput<PaletteItem>] {
+    /// Each Tag on a Topic record, A→Z. A plain word matches its name too.
+    private var tagSection: PickSectionInput<PaletteItem>? {
+        guard offersTopics else { return nil }
+        return PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: false),
+                                candidates: Tag.suggestions(from: records).map { tag in
+            let count = records.filter { $0.tags.contains(tag) }.count
+            return PickCandidate(id: "tag-" + tag.name, title: tag.description, fields: [.hidden(tag.name)],
+                                 trailing: count == 1 ? "1 Topic" : "\(count) Topics",
+                                 pick: .available(PaletteItem(kind: .tag, ref: .tag(tag))), titlePlace: .tag)
+        })
+    }
+
+    private func snoozedAndSettledSections(only tag: Tag?) -> [PickSectionInput<PaletteItem>] {
         guard offersTopics, let topics else { return [] }
-        let snoozed = (topics.groups.first { $0.kind == .snoozed }?.topics ?? []).compactMap(snoozedCandidate)
-        let settled = records.filter { $0.settledAt != nil }
+        let snoozed = (topics.groups.first { $0.kind == .snoozed }?.topics ?? [])
+            .filter { tag.map($0.tags.contains) ?? true }.compactMap(snoozedCandidate)
+        let settled = records.filter { $0.settledAt != nil && (tag.map($0.tags.contains) ?? true) }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
             .map(settledCandidate)
         return [
@@ -121,7 +140,7 @@ struct PaletteCatalog {
     }
 
     private func topicFields(_ row: TopicsModel.Row, type: String) -> [SearchField] {
-        [.typeWord(type)] + row.sessions.map { .label($0.projectName) }
+        [.typeWord(type)] + row.sessions.map { .label($0.projectName) } + row.tags.map(SearchField.tag)
     }
 
     private func topicCandidate(_ row: TopicsModel.Row) -> PickCandidate<PaletteItem>? {
@@ -156,7 +175,7 @@ struct PaletteCatalog {
         if outcome.isEmpty, case .settled(let detail) = row.kind { settledOn = detail }
         return PickCandidate(
             id: row.id.accessibilityID, symbol: "✓", title: row.title,
-            fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]),
+            fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]) + row.tags.map(SearchField.tag),
             note: settledOn, trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "), mark: row.mark,
             lastVisit: visits.last(.topic(row.id)),
             pick: .available(PaletteItem(kind: .settledTopic, ref: .topic(id: record.id, window: nil))))

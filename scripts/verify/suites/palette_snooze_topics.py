@@ -1,102 +1,62 @@
-"""Every Snooze goes through one palette flow: a set of Topics, then one time for the whole set.
+"""Every Snooze goes through one palette flow: a pick step of Topic and Tag chips, then one time for the whole set.
 
 The driver cannot type keys. A check opens Commands from its View menu item, and starts Snooze again
-through the Snoozed row's accessibility action (GroupedTopicRow in UI/SidebarView.swift). In the choose
-step, the search field's Toggle Choice action is what Space in an empty field and Tab call, Mark Shown is
-what Cmd-A calls (UI/PaletteChooseRows.swift), and Accept and Back are what Return and Backspace call.
+through the Snoozed row's accessibility action (GroupedTopicRow in UI/SidebarView.swift). In the pick step,
+Accept and Back are what Return and Backspace in the empty field call. Select Previous Chip, Select Next Chip,
+Remove Selected Chip Backward and Select Next Row are what Left at the text start, Right, Backspace on a chip and Down call
+(UI/CommandPaletteView.swift, UI/PaletteChips.swift).
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.palette_snooze_topics
 """
 
 import datetime
-import json
 import subprocess
 import unittest
 
-from scripts.verify.sandbox import DEBUG_APP, Sandbox, frame, wait
+from scripts.verify.palette_fixture import PaletteFixture
+from scripts.verify.sandbox import DEBUG_APP, frame, wait
 
 CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
 
-SHELL = '/bin/zsh -f'
 LATER = '2099-01-01T00:00:00Z'
 
 
-class PaletteSnoozeTopics(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
-        cls.addClassCleanup(s.teardown)
-        cls.project = s.root/'projects/snooze'
-        cls.project.mkdir(parents=True)
-        cls.topics = s.root/'state/muxify/topics'
-        cls.topics.mkdir(parents=True, exist_ok=True)
-        (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n')
-        cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', 'base', '-c', str(cls.project), SHELL)
-        s.tmux('set-option', '-g', 'detach-on-destroy', 'off')
-        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])
-
-    def setUp(self):
-        if self.s.has('palette-search'):
-            self.s.act('action', 'palette-search', 'Close')
-        if self.s.row('sidebar-view-topics').get('accessibilityValue') != 'selected':
-            self.s.act('press', 'sidebar-view-topics')
-        self.select(self.base)
-
-    def select(self, window):
-        for client in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').splitlines():
-            if client.endswith(' 0'):
-                self.s.tmux('switch-client', '-c', client.split()[0], '-t', window)
-        self.s.wait_shown(window)
-
-    def topic(self, name, order, session=False, **fields):
-        """A Topic record, and with `session` a live Session in it; returns that Session's Window."""
-        path = self.topics/(name + '.json')
-        path.write_text(json.dumps(dict(dict(id=name, title=name, slug=name, home_project=str(self.project), order=order), **fields)))
-        self.addCleanup(path.unlink, missing_ok=True)
-        if not session:
-            return None
-        window = self.s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', name, '-c', str(self.project), SHELL)
-        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', name)
-        self.s.tmux('set-option', '-t', name, '@muxify_topic', name)
-        self.addCleanup(self.select, self.base)
-        return window
-
-    def record(self, name):
-        return json.loads((self.topics/(name + '.json')).read_text())
-
-    def text(self, key, rs):
-        row = self.s.row(key, rs)
-        return row.get('accessibilityLabel', '') + row.get('accessibilityValue', '')
-
-    def run_command(self, title):
-        wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'the Commands field did not show')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', title)
-        key = 'palette-row-command-' + title
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), title + ' was missing from Commands')
-        self.s.act('press', key)
-
+class PaletteSnoozeTopics(PaletteFixture):
     def filter(self, query):
         self.s.act('set', 'palette-search', query)
         self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue', '') == query,
-                         'the choose step did not take the filter %r' % query)
+                         'the pick step did not take the query %r' % query)
 
-    def is_marked(self, name, rs):
-        return 'marked' in self.s.row('palette-row-topic-' + name, rs).get('accessibilityValue', '').split(', ')
+    def chips(self, rs):
+        """The chips in the field, in order: `#tag` for a Tag, the id for a Topic, and `*` after the selected one."""
+        out = []
+        for row in rs:
+            key = row.get('accessibilityIdentifier', '')
+            mark = '*' if row.get('accessibilityValue') == 'selected' else ''
+            if key.startswith('palette-tag-'):
+                out.append('#' + key[len('palette-tag-'):] + mark)
+            elif key.startswith('palette-topic-'):
+                out.append(key[len('palette-topic-'):] + mark)
+        return out
 
-    def wait_marked(self, names, among, message):
-        """The note counts every mark; the rows that the filter shows tell which ones are marked."""
-        def holds(rs):
-            shown = [name for name in among if self.s.has('palette-row-topic-' + name, rs)]
-            return (shown and all(self.is_marked(name, rs) == (name in names) for name in shown)
-                    and self.text('palette-note', rs).startswith('%d marked' % len(names)))
-        return self.s.wait_rows(holds, '%s: want %s marked among %s' % (message, sorted(names), sorted(among)))
+    def wait_chips(self, chips, message):
+        return self.s.wait_rows(lambda rs: self.chips(rs) == chips, '%s: want the chips %s' % (message, chips))
 
     def wait_step(self, crumb):
         return self.s.wait_rows(lambda rs: crumb in self.text('palette-breadcrumb', rs) and self.s.has('palette-note', rs),
                                 'the step %r did not show' % crumb)
+
+    def open_pick(self):
+        self.run_command('Snooze Topics…')
+        return self.wait_step('Snooze Topics › pick')
+
+    def pick(self, query, chips):
+        """Types `query`, presses Return on the highlighted row, and waits for `chips` and an empty query."""
+        self.filter(query)
+        self.s.act('action', 'palette-search', 'Accept')
+        return self.s.wait_rows(lambda rs: self.chips(rs) == chips and self.s.row('palette-search', rs).get('accessibilityValue', '') == '',
+                                'Return on the row for %r did not make the chips %s and clear the query' % (query, chips))
 
     def test_snooze_again_with_an_earlier_time_writes_it_and_names_the_shorter_snooze(self):
         s = self.s
@@ -116,59 +76,121 @@ class PaletteSnoozeTopics(unittest.TestCase):
         until = datetime.datetime.strptime(stored, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
         self.assertLess(until, datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc), stored)
 
-
-    def test_choose_step_marks_with_space_tab_and_cmd_a_and_keeps_the_marks_when_the_filter_changes(self):
+    def test_the_pick_step_starts_with_no_chip_and_lists_tags_then_topics_then_already_snoozed(self):
         s = self.s
-        among = ['mk-alpha', 'mk-bravo', 'mk-charlie', 'mk-delta', 'mk-foxtrot']
-        self.topic('mk-alpha', 11)
-        self.topic('mk-charlie', 13)
-        self.topic('mk-delta', 14, title='mk-delta mkpair')
-        self.topic('mk-foxtrot', 16, snoozed_until=LATER)
-        self.topic('mk-settled', 17, settled_at='2026-01-01T00:00:00Z')
-        self.select(self.topic('mk-bravo', 12, session=True, title='mk-bravo mkpair'))
-        self.run_command('Snooze Topics…')
-        rs = self.wait_marked(['mk-bravo'], among, 'the choose step did not start with the Active Topic marked')
-        self.assertIn('Snooze Topics › choose', self.text('palette-breadcrumb', rs))
-        self.assertTrue(s.has('palette-section-visible', rs) and s.has('palette-section-snoozed', rs), s.ids(rs))
-        self.assertTrue(s.has('palette-row-topic-mk-foxtrot', rs), 'a Snoozed Topic is not listed')
-        self.assertFalse(s.has('palette-row-topic-mk-settled', rs), 'a Settled Topic is listed')
+        self.topic('pk-alpha', 11, tags=['pkfirst'])
+        self.topic('pk-snoozed', 12, snoozed_until=LATER)
+        self.topic('pk-settled', 13, settled_at='2026-01-01T00:00:00Z')
+        self.select(self.topic('pk-active', 14, session=True))
+        rs = self.open_pick()
+        self.assertEqual(self.chips(rs), [], 'the pick step started with a chip')
+        self.assertFalse(s.has('palette-row-snooze-picked', rs), 'the go-on row shows with no chip')
+        ids = s.ids(rs)
+        self.assertLess(ids.index('palette-section-tags'), ids.index('palette-section-topics'), ids)
+        self.assertLess(ids.index('palette-section-topics'), ids.index('palette-section-snoozed'), ids)
+        self.assertTrue(s.has('palette-row-topic-pk-snoozed', rs), 'a Snoozed Topic is not listed')
+        self.assertFalse(s.has('palette-row-topic-pk-settled', rs), 'a Settled Topic is listed')
 
-        self.filter('mk-charlie')
-        s.act('action', 'palette-search', 'Toggle Choice')
-        self.wait_marked(['mk-bravo', 'mk-charlie'], among, 'Tab with a filter did not mark the highlighted row')
-        self.filter('mkpair')
-        s.act('action', 'palette-search', 'Mark Shown')
-        self.wait_marked(['mk-bravo', 'mk-charlie', 'mk-delta'], among, 'Cmd-A did not mark every shown row')
-        s.act('action', 'palette-search', 'Mark Shown')
-        self.wait_marked(['mk-charlie'], among, 'Cmd-A did not unmark the shown rows when all were marked')
-        s.act('press', 'palette-mark-shown')
-        self.wait_marked(['mk-bravo', 'mk-charlie', 'mk-delta'], among, 'Mark all shown did not mark every shown row')
+    def test_return_picks_the_highlighted_row_as_a_chip_and_the_row_leaves_the_list(self):
+        s = self.s
+        self.topic('rp-one', 21)
+        self.topic('rp-two', 22)
+        self.open_pick()
+        rs = self.pick('rp-one', ['rp-one'])
+        self.assertFalse(s.has('palette-row-topic-rp-one', rs), 'the picked Topic is still a row')
+        self.assertIn('→ Snooze 1 Topic…', self.text('palette-row-snooze-picked', rs))
+        self.assertIn('selected', self.text('palette-row-snooze-picked', rs), 'the go-on row is not the first row')
+        self.assertIn('Snoozes: rp-one', self.text('palette-note', rs))
+        self.assertIn('Snooze Topics › pick', self.text('palette-breadcrumb', rs), 'Return on a row left the pick step')
+        self.assertIsNone(self.record('rp-one').get('snoozed_until'), 'Return on a row Snoozed')
 
-        self.filter('')
-        rs = self.wait_marked(['mk-bravo', 'mk-charlie', 'mk-delta'], among, 'the marks did not stay when the filter changed')
-        first = next(key for key in s.ids(rs) if key.startswith('palette-row-topic-'))[len('palette-row-topic-'):]
-        before = self.is_marked(first, rs)
-        s.act('action', 'palette-search', 'Toggle Choice')
-        s.wait_rows(lambda rs: self.is_marked(first, rs) != before, 'Space in the empty field did not change the highlighted row')
-        s.act('action', 'palette-search', 'Close')
+    def test_a_picked_tag_keeps_its_topics_dim_with_the_tag_and_return_on_a_tag_never_snoozes(self):
+        s = self.s
+        self.topic('pt-one', 31, tags=['ptag'])
+        self.topic('pt-two', 32, tags=['ptag'])
+        self.topic('pt-none', 33)
+        self.open_pick()
+        rs = self.pick('#ptag', ['#ptag'])
+        for name in ('pt-one', 'pt-two'):
+            self.assertIn('in #ptag', self.text('palette-row-topic-' + name, rs), name)
+            self.assertIn('covered', self.s.row('palette-row-topic-' + name, rs).get('accessibilityValue', ''), name)
+        self.assertNotIn('covered', self.s.row('palette-row-topic-pt-none', rs).get('accessibilityValue', ''))
+        self.assertFalse(s.has('palette-row-tag-ptag', rs), 'the picked Tag is still a row')
+        self.assertIn('→ Snooze 2 Topics…', self.text('palette-row-snooze-picked', rs))
+        self.assertTrue(all(self.record(name).get('snoozed_until') is None for name in ('pt-one', 'pt-two')),
+                        'Return on a Tag row Snoozed its Topics')
+
+    def test_the_query_row_picks_every_topic_that_the_query_matches(self):
+        s = self.s
+        self.topic('qr-one', 41, title='qr-one qrpair')
+        self.topic('qr-two', 42, title='qr-two qrpair')
+        self.topic('qr-other', 43)
+        self.open_pick()
+        self.filter('qrpair')
+        rs = s.wait_rows(lambda rs: s.has('palette-row-pick-all', rs), 'the query row did not show')
+        self.assertIn('＋ All 2 matches for “qrpair”', self.text('palette-row-pick-all', rs))
+        s.act('press', 'palette-row-pick-all')
+        self.wait_chips(['qr-one', 'qr-two'], 'the query row did not pick every match')
+
+    def test_chip_keys_select_and_remove_the_picked_chips(self):
+        s = self.s
+        for index, name in enumerate(['ck-one', 'ck-two', 'ck-three']):
+            self.topic(name, 51 + index)
+        self.open_pick()
+        self.pick('ck-one', ['ck-one'])
+        self.pick('ck-two', ['ck-one', 'ck-two'])
+        self.pick('ck-three', ['ck-one', 'ck-two', 'ck-three'])
+        s.act('action', 'palette-search', 'Select Previous Chip')
+        self.wait_chips(['ck-one', 'ck-two', 'ck-three*'], 'Left at the text start did not select the last chip')
+        s.act('action', 'palette-search', 'Select Previous Chip')
+        self.wait_chips(['ck-one', 'ck-two*', 'ck-three'], 'Left did not select the chip to the left')
+        s.act('action', 'palette-search', 'Remove Selected Chip Backward')
+        rs = self.wait_chips(['ck-one*', 'ck-three'], 'Backspace on a chip did not remove it and select the chip to its left')
+        self.assertTrue(s.has('palette-row-topic-ck-two', rs), 'the removed Topic did not come back as a row')
+        s.act('action', 'palette-search', 'Select Next Chip')
+        s.act('action', 'palette-search', 'Select Next Chip')
+        self.wait_chips(['ck-one', 'ck-three'], 'Right after the last chip did not put the caret back')
+        s.act('action', 'palette-search', 'Select Previous Chip')
+        self.wait_chips(['ck-one', 'ck-three*'], 'Left at the text start did not select the last chip again')
+        s.act('action', 'palette-search', 'Select Next Row')
+        self.wait_chips(['ck-one', 'ck-three'], 'Down to another row did not put the caret back')
+
+    def test_a_snooze_by_tag_writes_one_time_on_its_topics_and_no_other_field(self):
+        tagged = ['tgsnooze-one', 'tgsnooze-two', 'tgsnooze-three']
+        self.topic(tagged[0], 61, tags=['tgsnooze'])
+        self.topic(tagged[1], 62, tags=['tgsnooze', 'other'])
+        self.topic(tagged[2], 63, tags=['tgsnooze'], snoozed_until=LATER)
+        self.topic('tgsnooze-none', 64)
+        self.select(self.topic('tgsnooze-active', 65, session=True))
+        self.open_pick()
+        self.pick('#tgsnooze', ['#tgsnooze'])
+        self.s.act('action', 'palette-search', 'Accept')
+        self.wait_step('3 Topics › Snooze › until')
+        self.s.act('press', 'palette-row-0')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Snooze did not close the palette')
+        names = tagged + ['tgsnooze-none', 'tgsnooze-active']
+        times = {name: self.record(name).get('snoozed_until') for name in names}
+        self.assertEqual(len({times[name] for name in tagged}), 1, times)
+        self.assertNotIn(times['tgsnooze-one'], (None, LATER), times)
+        self.assertIsNone(times['tgsnooze-none'], times)
+        self.assertIsNone(times['tgsnooze-active'], 'a Topic with no chip was Snoozed: %s' % times)
+        self.assertEqual(sorted(self.record('tgsnooze-one')), ['home_project', 'id', 'order', 'sessions', 'slug', 'snoozed_until', 'tags', 'title'],
+                         'a Snooze by Tag writes a usual Snooze and no other field')
 
     def test_snooze_topics_writes_one_time_on_the_set_names_the_shorter_snooze_and_opens_the_next_topic_outside_it(self):
         s = self.s
-        self.topic('nx-a', 21, session=True)
-        active = self.topic('nx-b', 22, session=True)
-        self.topic('nx-c', 23)
-        after = self.topic('nx-d', 24, session=True)
-        self.topic('nx-f', 26, snoozed_until=LATER)
+        self.topic('nx-a', 71, session=True)
+        active = self.topic('nx-b', 72, session=True)
+        self.topic('nx-c', 73)
+        after = self.topic('nx-d', 74, session=True)
+        self.topic('nx-f', 76, snoozed_until=LATER)
         self.select(active)
-        self.run_command('Snooze Topics…')
-        among = ['nx-a', 'nx-b', 'nx-c', 'nx-d', 'nx-f']
-        self.wait_marked(['nx-b'], among, 'the choose step did not start with the Active Topic marked')
-        for name in ['nx-c', 'nx-f']:
-            self.filter(name)
-            s.act('action', 'palette-search', 'Toggle Choice')
-        self.filter('')
-        rs = self.wait_marked(['nx-b', 'nx-c', 'nx-f'], among, 'the set was not marked')
-        self.assertIn('Then opens: nx-d', self.text('palette-note', rs), 'the choose step does not name the Next Topic')
+        self.open_pick()
+        self.pick('nx-b', ['nx-b'])
+        self.pick('nx-f', ['nx-b', 'nx-f'])
+        rs = self.pick('nx-c', ['nx-b', 'nx-f', 'nx-c'])
+        self.assertIn('Snoozes: nx-b, nx-c, nx-f', self.text('palette-note', rs), 'the note does not name the set in list order')
+        self.assertIn('Then opens: nx-d', self.text('palette-note', rs), 'the pick step does not name the Next Topic')
         s.act('action', 'palette-search', 'Accept')
         rs = self.wait_step('3 Topics › Snooze › until')
         note = self.text('palette-note', rs)
@@ -178,27 +200,40 @@ class PaletteSnoozeTopics(unittest.TestCase):
         s.act('press', 'palette-row-0')
         s.wait_rows(lambda rs: not s.has('palette-search', rs), 'Snooze did not close the palette')
         s.wait_shown(after)
-        times = {name: self.record(name).get('snoozed_until') for name in among}
+        times = {name: self.record(name).get('snoozed_until') for name in ['nx-a', 'nx-b', 'nx-c', 'nx-d', 'nx-f']}
         self.assertEqual(len({times['nx-b'], times['nx-c'], times['nx-f']}), 1, times)
         self.assertNotIn(times['nx-f'], (None, LATER), 'the shorter Snooze was not written: %s' % times)
         self.assertIsNone(times['nx-a'], times)
         self.assertIsNone(times['nx-d'], times)
 
-    def test_snooze_topic_starts_at_until_and_back_goes_to_the_choose_step_with_the_set_marked(self):
+    def test_back_in_the_until_step_goes_back_to_pick_with_the_chips_kept(self):
+        self.topic('bk-one', 81, tags=['bktag'])
+        self.topic('bk-two', 82)
+        self.open_pick()
+        self.pick('#bktag', ['#bktag'])
+        self.pick('bk-two', ['#bktag', 'bk-two'])
+        self.s.act('action', 'palette-search', 'Accept')
+        self.wait_step('2 Topics › Snooze › until')
+        self.s.act('action', 'palette-search', 'Back')
+        rs = self.wait_step('Snooze Topics › pick')
+        self.assertEqual(self.chips(rs), ['#bktag', 'bk-two'], 'Back did not keep the chips')
+
+    def test_snooze_topic_starts_at_until_and_back_opens_pick_with_its_topic_as_a_chip(self):
         s = self.s
-        self.select(self.topic('st-one', 31, session=True))
+        self.select(self.topic('st-one', 91, session=True))
         self.run_command('Snooze Topic')
         rs = self.wait_step('st-one › Snooze › until')
         self.assertTrue(s.has('palette-row-never', rs), 'the "until" step has no times')
-        self.assertIn('⌫ to mark more Topics', self.text('palette-note', rs))
+        self.assertIn('⌫ goes back to pick', self.text('palette-note', rs))
         s.act('action', 'palette-search', 'Back')
-        rs = self.wait_step('Snooze Topics › choose')
-        self.assertTrue(self.is_marked('st-one', rs), 'Back did not keep the set marked')
+        rs = self.wait_step('Snooze Topics › pick')
+        self.assertEqual(self.chips(rs), ['st-one'], 'Back did not open pick with the Topic as a chip')
         s.act('action', 'palette-search', 'Accept')
         self.wait_step('st-one › Snooze › until')
         s.act('action', 'palette-search', 'Close')
         s.wait_rows(lambda rs: not s.has('palette-search', rs), 'Close did not close the palette')
         self.assertIsNone(self.record('st-one').get('snoozed_until'), 'Close after the steps Snoozed the Topic')
+
     def test_topic_snooze_from_the_cli_moves_the_topic_to_snoozed_and_keeps_its_session(self):
         s = self.s
         window = self.topic('cli-snz', 41, session=True)

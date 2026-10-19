@@ -158,6 +158,7 @@ public enum PaletteAction: String, KeybindAction {
     case move
     case addProjectToTopic = "add_project_to_topic"
     case rename
+    case editTags = "edit_tags"
     case suggestTopicTitle = "suggest_topic_title"
     case startZen = "start_zen"
     case settleTopic = "settle_topic"
@@ -196,6 +197,7 @@ public enum PaletteAction: String, KeybindAction {
         .move: [],
         .addProjectToTopic: [],
         .rename: [],
+        .editTags: [],
         .suggestTopicTitle: ["alt+s"],
         .startZen: [],
         .settleTopic: [],
