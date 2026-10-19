@@ -29,6 +29,18 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
+    @MainActor func testRestoredValueKeepsTheShownWindowAsTheOpenRequestConsumer() throws {
+        try withWindows { windows, _ in
+            let identity = AppWindowIdentity()
+            let launched = windows.defaultWindowRequest()
+            let shown = identity.resolve(launched, in: windows)
+            let restored = identity.resolve(AppWindowRequest(), in: windows)
+            XCTAssertEqual(restored.request.id, launched.id)
+            XCTAssertTrue(restored.store === shown.store)
+            XCTAssertEqual(shown.store.shouldConsumeOpenRequests?(), true)
+        }
+    }
+
     @MainActor func testOnlyFirstDefaultSceneUsesTheRememberedEnvironment() throws {
         try withWindows { windows, _ in
             UserDefaults.standard.set("Home", forKey: "selectedEnvironment")

@@ -4,24 +4,37 @@ import SwiftUI
 struct AppWindowView: View {
     let request: AppWindowRequest
     let windows: AppWindows
-    @State private var store: WorkspaceStore
+    @State private var identity = AppWindowIdentity()
     @Environment(\.openWindow) private var openWindow
 
-    init(request: AppWindowRequest, windows: AppWindows) {
-        self.request = request
-        self.windows = windows
-        _store = State(initialValue: windows.store(for: request))
-    }
-
     var body: some View {
-        ContentView(store: store, configStore: windows.configStore)
+        let shown = identity.resolve(request, in: windows)
+        ContentView(store: shown.store, configStore: windows.configStore)
             .frame(minWidth: 820, minHeight: 480)
-            .background(AppWindowRegistration { windows.register($0, for: request.id) })
+            // Otherwise SwiftUI creates a new scene for each muxify:// URL
+            // even though AppDelegate already routes it through AppWindows.
+            .handlesExternalEvents(preferring: windows.focusedID == shown.request.id ? ["*"] : [], allowing: ["*"])
+            .background(AppWindowRegistration { windows.register($0, for: shown.request.id) })
             .onAppear {
                 let action = openWindow
                 windows.openWindow = { action(id: "workspace", value: $0) }
             }
-            .onChange(of: store.activeEnvironment) { _, _ in windows.updateEnvironment(for: request.id) }
+            .onChange(of: shown.store.activeEnvironment) { _, _ in windows.updateEnvironment(for: shown.request.id) }
+    }
+}
+
+/// At launch SwiftUI shows the window with the default value, then hands the
+/// same window its restored value. The window keeps the request it first
+/// showed, so its store, native window, focus and `@muxify_open` consumer
+/// stay one App Window, and the restored value gets no store of its own.
+@MainActor final class AppWindowIdentity {
+    private var shown: (request: AppWindowRequest, store: WorkspaceStore)?
+
+    func resolve(_ request: AppWindowRequest, in windows: AppWindows) -> (request: AppWindowRequest, store: WorkspaceStore) {
+        if let shown { return shown }
+        let first = (request: request, store: windows.store(for: request))
+        shown = first
+        return first
     }
 }
 
