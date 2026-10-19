@@ -1,28 +1,54 @@
 import XCTest
 
 final class WindowRecoveryTests: XCTestCase {
-    func testClosedWindowReturnsToThePreviousWindowAcrossSessions() {
+    func testClosedWindowReturnsToTheWindowBeforeItInItsSession() {
+        var recovery = WindowRecovery()
+        recovery.selected("@1")
+        recovery.selected("@3")
+        let before = [window("@1"), window("@2"), window("@3"), window("@4", sessionID: "$2")]
+        let windows = [window("@1"), window("@2"), window("@4", sessionID: "$2")]
+        XCTAssertTrue(recovery.selectionDisappeared(in: windows))
+        XCTAssertEqual(recovery.fallback(in: windows, listedBefore: before)?.id, "@2")
+    }
+
+    func testClosedFirstWindowReturnsToTheWindowAfterIt() {
+        var recovery = WindowRecovery()
+        recovery.selected("@3")
+        recovery.selected("@1")
+        let before = [window("@1"), window("@2"), window("@3")]
+        XCTAssertEqual(recovery.fallback(in: [window("@2"), window("@3")], listedBefore: before)?.id, "@2")
+    }
+
+    func testWindowsClosedTogetherReturnToTheNearestSurvivorBefore() {
+        var recovery = WindowRecovery()
+        recovery.selected("@3")
+        let before = [window("@1"), window("@2"), window("@3"), window("@4")]
+        XCTAssertEqual(recovery.fallback(in: [window("@1"), window("@4")], listedBefore: before)?.id, "@1")
+    }
+
+    func testClosedSessionReturnsToThePreviousWindowAcrossSessions() {
         var recovery = WindowRecovery()
         recovery.selected("@1")
         recovery.selected("@2")
         recovery.selected("@3")
+        let before = [window("@1"), window("@2", sessionID: "$2"), window("@3", sessionID: "$3")]
         let windows = [window("@1"), window("@2", sessionID: "$2")]
         XCTAssertTrue(recovery.selectionDisappeared(in: windows))
-        XCTAssertEqual(recovery.fallback(in: windows)?.id, "@2")
+        XCTAssertEqual(recovery.fallback(in: windows, listedBefore: before)?.id, "@2")
     }
 
     func testMissingPreviousWindowFallsBackToFirstSidebarWindow() {
         var recovery = WindowRecovery()
         recovery.selected("@2")
         recovery.selected("@3")
-        XCTAssertEqual(recovery.fallback(in: [window("@4"), window("@1")])?.id, "@4")
+        XCTAssertEqual(recovery.fallback(in: [window("@4"), window("@1")], listedBefore: [])?.id, "@4")
     }
 
     func testEmptyServerHasNoRecoveryTarget() {
         var recovery = WindowRecovery()
         recovery.selected("@1")
         XCTAssertTrue(recovery.selectionDisappeared(in: []))
-        XCTAssertNil(recovery.fallback(in: []))
+        XCTAssertNil(recovery.fallback(in: [], listedBefore: [window("@1")]))
     }
 
     func testRepeatedSnapshotsAndClearingSelectionDoNotOverwritePreviousWindow() {

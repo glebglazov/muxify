@@ -370,6 +370,7 @@ final class WorkspaceStore {
             persistWork.removeAll()
             dirtyBrowsers.removeAll()
         }
+        let listedBefore = windows
         if windows != snapshot.windows { windows = snapshot.windows }
         hasNoSessions = snapshot.windows.isEmpty
         let agents = snapshot.agents
@@ -387,7 +388,8 @@ final class WorkspaceStore {
             let requested = takePendingSession(in: snapshot.windows)
             attach(to: (requested ?? last ?? Self.initialWindow(in: snapshot.windows)).map(Target.init))
         } else if recoveryPending || windowRecovery.selectionDisappeared(in: windows) {
-            let target = recoveryPending ? selectedWindow ?? windowRecovery.fallback(in: windows) : windowRecovery.fallback(in: windows)
+            let fallback = windowRecovery.fallback(in: windows, listedBefore: listedBefore)
+            let target = recoveryPending ? selectedWindow ?? fallback : fallback
             pendingSelection = nil
             if let target {
                 recoveryPending = true
