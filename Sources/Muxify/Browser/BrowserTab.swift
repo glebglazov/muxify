@@ -63,6 +63,11 @@ final class BrowserTab: NSObject, Identifiable {
         config.preferences.isElementFullscreenEnabled = true
         BrowserDeveloperTools.enable(in: config.preferences)
         config.userContentController = BrowserPageScripts.userContentController
+        #if DEBUG
+        // A verify run keeps many App Windows in the background, and they cover each other. WebKit suspends the
+        // page of a covered web view, so its timers stop and a check waits for a page that does not run.
+        if TestDriver.isRunning { config.preferences.inactiveSchedulingPolicy = .none }
+        #endif
         return config
     }()
 

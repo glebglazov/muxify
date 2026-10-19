@@ -11,6 +11,8 @@ enum TestDriver {
     private static var activity: NSObjectProtocol?
     private static var timer: Timer?
     private static var lastNonce: String?
+    /// True when a verify run drives this process.
+    private(set) static var isRunning = false
 
     /// Call before anything else at launch: it must see TMUX before
     /// AppEnvironment clears it, and must refuse before the first tmux call.
@@ -22,6 +24,7 @@ enum TestDriver {
             FileHandle.standardError.write(Data("muxify test driver: refusing to start: \(reason)\n".utf8))
             exit(1)
         }
+        isRunning = true
 
         // A verify run keeps the app in the background; without this, App Nap
         // throttles the timer and every command waits seconds.
@@ -296,6 +299,9 @@ enum TestDriver {
                 pressed = press(object) || pressed
             }
         }
+        if name == "press", let item = updatedMenuItem(titled: target) {
+            pressed = press(item) || pressed
+        }
         return ["rows": elements.map(\.row), "pressed": pressed]
     }
 
@@ -398,6 +404,19 @@ enum TestDriver {
         return true
     }
 
+    /// The main menu item with the title, after each menu has updated its items as it does before it opens.
+    /// SwiftUI builds and enables its menu items only then, so an item that nobody opened can be out of date.
+    private static func updatedMenuItem(titled title: String) -> NSMenuItem? {
+        func update(_ menu: NSMenu) {
+            menu.delegate?.menuNeedsUpdate?(menu)
+            menu.update()
+            menu.items.compactMap(\.submenu).forEach(update)
+        }
+        guard let mainMenu = NSApp.mainMenu else { return nil }
+        update(mainMenu)
+        return menuItem(titled: title, in: mainMenu)
+    }
+
     private static func menuItem(titled title: String, in menu: NSMenu?) -> NSMenuItem? {
         for item in menu?.items ?? [] {
             if item.title == title { return item }
@@ -417,8 +436,10 @@ enum TestDriver {
         return unsafeBitCast(target.method(for: selector), to: Perform.self)(target, selector, action)
     }
 
-    /// Every element of the visible windows and the main menu, depth first,
-    /// as the script sees them.
+    /// Every element of the visible windows, depth first, as the script sees
+    /// them. The main menu is not in it: its accessibility children make SwiftUI
+    /// update every menu, which takes seconds under load. `press` finds a menu
+    /// item by its title.
     private static func dump() -> [(object: NSObject, row: [String: String])] {
         var objects: [NSObject] = []
         var seen = Set<ObjectIdentifier>()
@@ -429,7 +450,6 @@ enum TestDriver {
             for child in (value(object, Selectors.children) as? [Any]) ?? [] { collect(child) }
         }
         for window in NSApp.windows where window.isVisible { collect(window) }
-        collect(NSApp.mainMenu)
         return objects.map { object in
             var row: [String: String] = [:]
             for key in Selectors.rowKeys {
