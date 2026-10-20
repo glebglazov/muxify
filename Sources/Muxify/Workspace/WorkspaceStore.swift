@@ -809,23 +809,8 @@ final class WorkspaceStore {
 
     /// Built again only after a change to what it reads, or when a Snooze deadline passes. The Sidebar, the menus
     /// and the terminal area read it many times in each update, and each build is expensive.
-    var topics: TopicsModel {
-        _ = topicsGeneration
-        if let topicsCache, topicsCache.changesAt.map({ Date() < $0 }) ?? true { return topicsCache }
-        let model = withObservationTracking { buildTopics() } onChange: { [weak self] in
-            MainActor.assumeIsolated { self?.invalidateTopics() }
-        }
-        topicsCache = model
-        return model
-    }
-    @ObservationIgnored private var topicsCache: TopicsModel?
-    /// The readers of `topics` observe this in place of its inputs, because a read from the cache reads no inputs.
-    private var topicsGeneration = 0
-
-    private func invalidateTopics() {
-        topicsCache = nil
-        topicsGeneration &+= 1
-    }
+    var topics: TopicsModel { topicsCache.value }
+    @ObservationIgnored private lazy var topicsCache = ObservedCache(expiry: \.changesAt) { [unowned self] in buildTopics() }
 
     private func buildTopics() -> TopicsModel {
         var selection = topicSelection
@@ -838,25 +823,13 @@ final class WorkspaceStore {
                            panes: panesVisible ? panes : nil, zen: isRemote ? nil : topicWatcher.zen)
     }
 
-    var sidebarFormatContexts: SidebarFormatContexts {
-        _ = sidebarFormatsGeneration
-        if let sidebarFormatsCache { return sidebarFormatsCache }
-        let contexts = withObservationTracking {
-            SidebarFormatContexts(model: topics, windows: windows, panes: panes, agents: agents,
-                                  branches: topicBranches, records: topicWatcher.records, projects: projects,
-                                  tabCounts: Dictionary(windows.map { ($0.id, tabCount(for: $0)) },
-                                                        uniquingKeysWith: { first, _ in first }))
-        } onChange: { [weak self] in
-            MainActor.assumeIsolated {
-                self?.sidebarFormatsCache = nil
-                self?.sidebarFormatsGeneration &+= 1
-            }
-        }
-        sidebarFormatsCache = contexts
-        return contexts
+    var sidebarFormatContexts: SidebarFormatContexts { sidebarFormatsCache.value }
+    @ObservationIgnored private lazy var sidebarFormatsCache = ObservedCache { [unowned self] in
+        SidebarFormatContexts(model: topics, windows: windows, panes: panes, agents: agents,
+                              branches: topicBranches, records: topicWatcher.records, projects: projects,
+                              tabCounts: Dictionary(windows.map { ($0.id, tabCount(for: $0)) },
+                                                    uniquingKeysWith: { first, _ in first }))
     }
-    @ObservationIgnored private var sidebarFormatsCache: SidebarFormatContexts?
-    private var sidebarFormatsGeneration = 0
 
     func sidebarWindowRow(_ window: TmuxWindow) -> SidebarFormats.WindowRowContent {
         config.sidebar.formats.windowRow(in: sidebarFormatContexts.windows[window.id] ?? .init(), mode: topics.mode)
