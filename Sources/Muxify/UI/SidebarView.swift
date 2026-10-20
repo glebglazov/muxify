@@ -89,6 +89,7 @@ private struct WorkSection: View {
 }
 
 private struct TopicsSection: View {
+    @Environment(\.sidebarTypography) private var typography
     let store: WorkspaceStore
     let model: TopicsModel
     @State private var drag: LongPressDrag<TopicListID> = .idle
@@ -138,7 +139,7 @@ private struct TopicsSection: View {
                 .accessibilityIdentifier("topics-list")
                 .overlay {
                     if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
-                        Text("No Topics").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text("No Topics").font(typography.font(for: .title)).foregroundStyle(.secondary)
                     }
                 }
                 if !model.groups.isEmpty {
