@@ -588,7 +588,7 @@ private struct TopicCard: View {
         CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned,
                    hintTarget: namedTopicID.map { .topic($0) },
                    notes: (topic.isPinned ? ["Pinned"] : []) + (topic.idleLabel.map { [$0] } ?? []),
-                   summary: formatted.summary, reservesCorner: true, titleBadge: tagsBadge) {
+                   summary: formatted.summary, reservesCorner: true) {
             if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
         }
         .longPressDrag(listID ?? .topic(""), state: $drag, in: Self.listSpace, isEnabled: listID != nil && !store.changingTopic,
@@ -659,13 +659,6 @@ private struct TopicCard: View {
                 CardMoveButtons(store: store, id: .topic(id), neighbors: neighbors)
             }
         }
-        .cardTitleBadge(tagsBadge)
-    }
-
-    /// Only the Active Topic's card shows its Tags, and only as their number.
-    private var tagsBadge: TagsBadge? {
-        guard holdsSelection, topic.kind == .open, let id = namedTopicID else { return nil }
-        return TagsBadge(store: store, topicID: id, tags: topic.tags)
     }
 
     private func pinButton(_ id: String) -> some View {
@@ -694,31 +687,6 @@ private struct TopicCard: View {
     }
 
     private var listID: TopicListID? { topic.id.listID }
-}
-
-/// The number of the Active Topic's Tags, or `#` when it has none. Pointing to it lists them, and a click opens Edit Tags.
-struct TagsBadge: View {
-    let store: WorkspaceStore
-    let topicID: String
-    let tags: [Tag]
-
-    var body: some View {
-        let theme = PaletteTheme(store.theme)
-        Button { store.presentEditTags(of: topicID) } label: {
-            Text(tags.isEmpty ? "#" : "# \(tags.count)")
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(theme.magenta)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(theme.magenta.opacity(0.16)))
-        }
-        .buttonStyle(.plain)
-        .disabled(store.changingTopic)
-        .takesFirstClick()
-        .help(tags.isEmpty ? "No Tags. Click to add one." : tags.map(\.description).joined(separator: " ") + "\nClick to edit")
-        .accessibilityIdentifier("tags-badge-" + topicID)
-        .accessibilityLabel(tags.isEmpty ? "No Tags" : tags.map(\.description).joined(separator: " "))
-    }
 }
 
 /// The Topic and Locked cards right above and below a card, among those with its pin.

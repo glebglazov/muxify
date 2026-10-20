@@ -18,10 +18,9 @@ The user adds a Tag by typing `#` in a palette field (ADR [0014](0014-every-acti
 - The pick step of Snooze Topics ([ADR 0025](0025-a-pick-step-collects-topics-and-tags-as-chips.md)) has three sections: **Tags**, **Topics** and **Already Snoozed**. ↩ on a Tag row makes the Tag a chip, which names all its Topics. This turns over the option "Chips in the Snooze search field" below.
 - A Topic that gets a Tag after a Snooze by Tag is not Snoozed.
 - In Snooze Topics and Go to…, `#` in the query matches Tags, not words in titles.
-- The Sidebar does not show Tags on the Topic cards. Only the Active Topic's card shows a badge with the number of Tags. Pointing to the badge lists them, and a click opens Edit Tags.
+- The Sidebar does not show Tags. Edit Tags and Go to… are where the user sees them.
 - The CLI changes Tags through the Topic service (ADR [0010](0010-the-cli-runs-topic-requests-through-muxifycore.md)), as for the other Topic requests.
 - A Tag change takes only the record lock, as a Snooze does (ADR [0010](0010-the-cli-runs-topic-requests-through-muxifycore.md)). It writes one key of one record.
 - In a field with chips, ⌫ in the empty field removes the last chip. When there is no chip, ⌫ goes back one step, as ADR [0014](0014-every-action-runs-in-the-palettes-view.md) says.
 - In every field with chips, ← and → select a chip, and ⌫ and ⌦ remove the selected chip (ADR 0025).
 - Go to… lists the Tags after the Topics, only for a query that is not empty. A Tag is not a place: it is a filter that leads to places. ↩ on a Tag row makes it a filter chip ("Go to… › #backend"), and the list then shows only the Topics with the Tag: open, Snoozed and Settled. ⌫ in the empty field removes the chip. ⌘K on a Tag row offers "Snooze its Topics…".
-- The Active Topic's Tags badge is in the title line of its card, before the pin, on one centre line with the title and the pin.

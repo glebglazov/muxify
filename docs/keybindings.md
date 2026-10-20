@@ -107,8 +107,7 @@ A space after a complete Tag also makes it a chip, so you can type `#backend `
 and go on. ⌫ in an empty field removes the last chip. Commands also lists Edit Tags…
 for the Active Topic, and the actions menu of a Topic row has it too. Its field
 holds the Topic's Tags as chips. Type a Tag, with or without `#`, to add it.
-↩ writes the Tags, and an empty field removes all of them. A click on the
-Tags badge of the Active Topic's card in the Sidebar also opens Edit Tags.
+↩ writes the Tags, and an empty field removes all of them.
 
 Commands also lists Show Next Session, Show Previous Session, Show Next Topic
 and Show Previous Topic. They do what `select_next_session`,

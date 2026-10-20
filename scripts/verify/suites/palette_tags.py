@@ -1,23 +1,20 @@
-"""Tags on Topics: `#` in New Topic, Edit Tags with chips, and the Active Topic's Tags badge.
+"""Tags on Topics: `#` in New Topic, Edit Tags with chips, and no Tags in the Sidebar.
 
 The driver cannot type keys. A check opens Commands from its View menu item. In a field that takes Tags, the
 search field's Toggle Choice action is what Tab calls on a Tag row, Accept is what Return calls, Space is what
 the space key does before the field takes it, and Back is what Backspace in the empty field calls
 (UI/PaletteFlow.swift, UI/CommandPalette.swift). Select Previous Chip, Select Next Chip, Remove Selected Chip
 Backward and Remove Selected Chip Forward are what Left at the text start, Right, Backspace and Forward Delete on a
-chip call (UI/PaletteChips.swift). The badge is a button with its own identifier, drawn in the title line of the
-card header (TagsBadge in UI/SidebarView.swift, CardHeader in UI/SidebarCard.swift).
+chip call (UI/PaletteChips.swift).
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.palette_tags
 """
 
-import json
-import re
 import unittest
 
 from scripts.verify.palette_fixture import PaletteFixture
-from scripts.verify.sandbox import frame, wait
+from scripts.verify.sandbox import wait
 
 
 class PaletteTags(PaletteFixture):
@@ -191,50 +188,12 @@ class PaletteTags(PaletteFixture):
         self.assertEqual(self.field(rs), 'Ship it', 'a chip key changed the text')
         self.s.act('action', 'palette-search', 'Close')
 
-    def badge_line(self, name, rs):
-        """(badge centre y, title line centre y, badge right edge) of the Active Topic's card."""
-        header = self.s.row('topic-' + name, rs)
-        badge = self.s.row('tags-badge-' + name, rs)
-        bottom, top = frame(badge)
-        _, title_y = map(float, re.findall(r'-?[\d.]+', header['accessibilityActivationPoint']))
-        x, _, width, _ = map(float, re.findall(r'-?[\d.]+', badge['accessibilityFrame']))
-        return (bottom + top) / 2, title_y, x + width
-
-    def test_the_badge_is_on_the_title_line_before_the_pin(self):
-        name = 'bd-align'
-        self.select(self.topic(name, 24, session=True, tags=['ops']))
-        rs = self.s.wait_rows(lambda rs: self.s.has('tags-badge-' + name, rs) and self.s.has('topic-' + name, rs),
-                              'the Active Topic card has no Tags badge')
-        badge_y, title_y, unpinned_right = self.badge_line(name, rs)
-        self.assertAlmostEqual(badge_y, title_y, delta=1, msg='the badge centre is not on the title line centre')
-        self.s.act('action', 'topic-' + name, 'Pin Topic')
-        self.addCleanup(lambda: self.s.driver('action', 'topic-' + name, 'Unpin Topic'))
-        rs = self.s.wait_rows(lambda rs: 'Pinned' in self.s.row('topic-' + name, rs).get('accessibilityValue', ''),
-                              'the Topic did not become Pinned')
-        badge_y, title_y, pinned_right = self.badge_line(name, rs)
-        self.assertAlmostEqual(badge_y, title_y, delta=1, msg='the badge of a Pinned Topic is not on the title line centre')
-        self.assertLess(pinned_right, unpinned_right - 5, 'the pin is not after the badge')
-
-    def test_the_active_topic_badge_lists_its_tags(self):
-        self.select(self.topic('bd-list', 21, session=True, tags=['ops', 'backend']))
-        self.s.wait_rows(lambda rs: self.s.row('tags-badge-bd-list', rs).get('accessibilityLabel') == '#backend #ops',
-                         'the Active Topic card has no badge that lists its Tags')
-
-    def test_the_badge_follows_a_tag_change_in_the_record(self):
-        self.select(self.topic('bd-follow', 22, session=True, tags=['ops']))
-        self.s.wait_rows(lambda rs: self.s.has('tags-badge-bd-follow', rs), 'the Active Topic card has no Tags badge')
-        record = self.record('bd-follow')
-        del record['tags']
-        (self.topics/'bd-follow.json').write_text(json.dumps(record))
-        self.s.wait_rows(lambda rs: self.s.row('tags-badge-bd-follow', rs).get('accessibilityLabel') == 'No Tags',
-                         'the badge did not follow the record')
-
-    def test_a_click_on_the_badge_opens_edit_tags(self):
-        self.select(self.topic('bd-click', 23, session=True, tags=['qa']))
-        self.s.wait_rows(lambda rs: self.s.has('tags-badge-bd-click', rs), 'the Active Topic card has no Tags badge')
-        self.s.act('press', 'tags-badge-bd-click')
-        self.s.wait_rows(lambda rs: 'bd-click › Edit Tags' in self.text('palette-breadcrumb', rs) and self.chips(rs) == ['qa'],
-                         'a click on the badge did not open Edit Tags')
+    def test_the_active_topic_card_shows_no_tags(self):
+        self.select(self.topic('no-badge', 21, session=True, tags=['ops']))
+        rs = self.s.wait_rows(lambda rs: self.s.has('topic-no-badge', rs), 'the Active Topic has no card')
+        shown = [r.get('accessibilityIdentifier', '') for r in rs if '#ops' in r.get('accessibilityLabel', '')
+                 or r.get('accessibilityIdentifier', '').startswith('tags-badge')]
+        self.assertEqual(shown, [], 'the Sidebar shows the Topic\'s Tags')
 
 
 if __name__ == '__main__':
