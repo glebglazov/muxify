@@ -511,7 +511,6 @@ private struct GroupedTopicRow: View {
 }
 
 private struct TopicCard: View {
-    @Environment(\.quickSwitchHints) private var hints
     let store: WorkspaceStore
     let topic: TopicsModel.Row
     let titles: [String: String]
@@ -559,7 +558,7 @@ private struct TopicCard: View {
                     .topicLink()
                     .disabled(store.changingTopic)
                     .accessibilityIdentifier("settle-topic-" + id)
-                    .opacity(hints.sidebarActive ? 0.5 : (topic.hasNoLiveSession ? 0.55 : 1))
+                    .opacity(topic.hasNoLiveSession ? 0.55 : 1)
             }
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.listSpace)) } action: { frame in

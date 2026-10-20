@@ -273,7 +273,7 @@ A hidden Sidebar still accepts card shortcuts, but shows no Hints.
 A hidden Browser shows no Tab Hints, but a Tab shortcut shows the Browser and selects the Tab.
 Only rendered cards and Window rows show Hints. A Pane row never takes a Window Hint.
 A held card Hint hides its Pin mark. A rest Hint leaves the Pin mark visible.
-A held Hint replaces the rest key in the leading slot. The content dims while held Hints stay at full opacity.
+A held Hint replaces the rest key in the leading slot. Tabs dim while held Hints stay at full opacity. Cards and the Terminal do not dim.
 
 Any other key or modifier release clears held Hints. Rest Hints stay visible. After another key, release all modifiers before a new hold.
 Opening a palette, changing the Environment, or leaving the App Window also clears held Hints.

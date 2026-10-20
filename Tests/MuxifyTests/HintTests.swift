@@ -156,7 +156,7 @@ final class HintTests: XCTestCase {
         XCTAssertEqual(hints.restKey(for: targets.tabs[8]), "9")
         XCTAssertNil(hints.restKey(for: targets.tabs[9]))
         XCTAssertNil(hints.restKey(for: .terminal))
-        XCTAssertFalse(hints.sidebarActive)
+        XCTAssertTrue((cards + targets.windows).allSatisfy { hints[$0].isEmpty })
     }
 
     func testSurfaceSwitchesDoNotRemoveShortcuts() throws {
@@ -174,7 +174,6 @@ final class HintTests: XCTestCase {
                 XCTAssertNil(hints.restKey(for: target))
                 XCTAssertTrue(hints[target].isEmpty)
             }
-            XCTAssertFalse(hints.sidebarActive)
         }
         XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("ctrl+1")), .selectCard1)
     }

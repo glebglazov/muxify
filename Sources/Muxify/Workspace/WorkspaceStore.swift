@@ -47,8 +47,9 @@ final class WorkspaceStore {
             if !self.isRemote { self.configStore.updateProjects(projects, foundFor: config) }
         }
         guard isRemote else {
+            let roots = config.projectRoots, aliases = config.projectAliases
             DispatchQueue.global(qos: .userInitiated).async {
-                let projects = ProjectDiscovery.discover(config.projectRoots, aliases: config.projectAliases)
+                let projects = ProjectDiscovery.discover(roots, aliases: aliases)
                 DispatchQueue.main.async { found(projects) }
             }
             return

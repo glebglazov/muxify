@@ -73,7 +73,7 @@ struct SidebarCard<Header: View, Content: View>: View {
             }
             .allowsHitTesting(false)
         }
-        .opacity(hints.sidebarActive ? 0.5 : restingOpacity)
+        .opacity(restingOpacity)
         .cardHints(hints)
         // A container, in which the header's sort priority applies.
         .accessibilityElement(children: .contain)

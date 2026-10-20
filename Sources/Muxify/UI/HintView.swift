@@ -120,11 +120,10 @@ extension View {
     }
 
     func quickSwitchHint(_ target: QuickSwitchTarget, hints: HintPresentation) -> some View {
-        opacity(hints[target].isEmpty ? 1 : 0.5)
-            .overlay(alignment: .topTrailing) {
-                if !hints[target].isEmpty {
-                    HintBadge(target: target, triggers: hints[target]).padding(4)
-                }
+        overlay(alignment: .topTrailing) {
+            if !hints[target].isEmpty {
+                HintBadge(target: target, triggers: hints[target]).padding(4)
             }
+        }
     }
 }

@@ -54,15 +54,6 @@ struct HintPresentation {
     }
 
     subscript(_ target: QuickSwitchTarget) -> [KeyTrigger] { triggers[target] ?? [] }
-
-    var sidebarActive: Bool {
-        triggers.keys.contains { target in
-            switch target {
-            case .topic, .locked, .session, .window: true
-            case .tab, .terminal: false
-            }
-        }
-    }
 }
 
 private struct QuickSwitchHintsKey: EnvironmentKey {

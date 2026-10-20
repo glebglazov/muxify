@@ -27,7 +27,7 @@ project: setup
 	xcodegen generate --quiet
 
 build: project
-	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug \
+	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 
 # Build only the CLI, without desktop app dependencies.
@@ -40,7 +40,7 @@ test: project
 	swift test
 	swift test --package-path Packages/MuxifyCore
 	node --test Tests/SimulatorWeb/*.test.mjs
-	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug \
+	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages test
 
 test-release:
@@ -59,7 +59,7 @@ release:
 	BUILD_NUMBER="$(or $(BUILD_NUMBER),1)" ./scripts/package-release.sh "$(TAG)"
 
 install: project
-	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release \
+	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 	rm -rf "$(INSTALL_DIR)/Muxify.app"
 	cp -R "$(RELEASE_APP)" "$(INSTALL_DIR)/"
