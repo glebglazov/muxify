@@ -2,7 +2,7 @@ import Foundation
 import MuxifyCore
 
 /// One `muxify session lock` or `muxify session unlock` command line. It runs the Topic service in this process, so
-/// the Lock order is planned with the Topic records under the same locks as every Topic edit (ADR 0010).
+/// the Lock order is planned with the Topic records under the same locks as every Topic edit (ADR 0032).
 struct SessionInvocation: Equatable {
     var locked: Bool
     /// The Session that `--session` names; nil for the caller Pane's Session.

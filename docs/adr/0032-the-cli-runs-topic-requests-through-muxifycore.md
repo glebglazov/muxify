@@ -1,6 +1,6 @@
 # The CLI runs Topic requests through MuxifyCore
 
-Every Topic read and edit goes through one service in the `MuxifyCore` package: the app's sheets, the `muxify://topic` URL and the command line tool all send a `TopicRequest` and get a `TopicResponse`. The command line tool runs the service in its own process, so it works when Muxify is off and can give a real result and exit code. This makes the command line tool a second writer of the Topic records ([ADR 0006](0006-topic-records-live-outside-tmux.md)), so the service takes two locks and merges each write. Every `muxify topic` command and `muxify window move` run this way.
+Every Topic read and edit goes through one service in the `MuxifyCore` package: the app's sheets, the `muxify://topic` URL and the command line tool all send a `TopicRequest` and get a `TopicResponse`. The command line tool runs the service in its own process, so it works when Muxify is off and can give a real result and exit code. This makes the command line tool a second writer of the Topic records ([ADR 0028](0028-topic-records-live-outside-tmux.md)), so the service takes two locks and merges each write. Every `muxify topic` command and `muxify window move` run this way.
 
 ## Considered Options
 

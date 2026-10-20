@@ -10,7 +10,7 @@ The user adds a Tag by typing `#` in a palette field (ADR [0014](0014-every-acti
 - **A choose-rows step for Tags in New Topic.** Rejected: it adds a step to every New Topic, also when the user wants no Tag. With `#`, a Topic with no Tag is made as before.
 - **Chips in the Snooze search field.** Rejected for the same reason as in ADR 0020: ↩ and ⌫ would get a second meaning in the choose step. Chips are used only in a field whose value is the Tags.
 - **One Tag for each Topic.** Rejected: a Topic can be in two groups, such as `#backend` and `#release`.
-- **A Snoozed Tag that stays as a rule.** A Topic that gets the Tag later would also be hidden. Rejected: this is a second kind of Snooze beside `snoozed_until`, with a record to keep, as Zen has (ADR [0009](0009-zen-remembers-the-snoozes-it-changed.md)). It is not clear what a Topic with two Tags does when only one is Snoozed.
+- **A Snoozed Tag that stays as a rule.** A Topic that gets the Tag later would also be hidden. Rejected: this is a second kind of Snooze beside `snoozed_until`, with a record to keep, as Zen has (ADR [0031](0031-zen-remembers-the-snoozes-it-changed.md)). It is not clear what a Topic with two Tags does when only one is Snoozed.
 - **Filter by `#tag`, then ⌘A.** Rejected: the user must know ⌘A, and the set is not visible as one row.
 
 ## Consequences
@@ -19,8 +19,8 @@ The user adds a Tag by typing `#` in a palette field (ADR [0014](0014-every-acti
 - A Topic that gets a Tag after a Snooze by Tag is not Snoozed.
 - In Snooze Topics and Go to…, `#` in the query matches Tags, not words in titles.
 - The Sidebar does not show Tags. Edit Tags and Go to… are where the user sees them.
-- The CLI changes Tags through the Topic service (ADR [0010](0010-the-cli-runs-topic-requests-through-muxifycore.md)), as for the other Topic requests.
-- A Tag change takes only the record lock, as a Snooze does (ADR [0010](0010-the-cli-runs-topic-requests-through-muxifycore.md)). It writes one key of one record.
+- The CLI changes Tags through the Topic service (ADR [0032](0032-the-cli-runs-topic-requests-through-muxifycore.md)), as for the other Topic requests.
+- A Tag change takes only the record lock, as a Snooze does (ADR [0032](0032-the-cli-runs-topic-requests-through-muxifycore.md)). It writes one key of one record.
 - In a field with chips, ⌫ in the empty field removes the last chip. When there is no chip, ⌫ goes back one step, as ADR [0014](0014-every-action-runs-in-the-palettes-view.md) says.
 - In every field with chips, ← and → select a chip, and ⌫ and ⌦ remove the selected chip (ADR 0025).
 - Go to… lists the Tags after the Topics, only for a query that is not empty. A Tag is not a place: it is a filter that leads to places. ↩ on a Tag row makes it a filter chip ("Go to… › #backend"), and the list then shows only the Topics with the Tag: open, Snoozed and Settled. ⌫ in the empty field removes the chip. ⌘K on a Tag row offers "Snooze its Topics…".

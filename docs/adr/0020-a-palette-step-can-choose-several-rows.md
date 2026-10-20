@@ -14,7 +14,7 @@
 [ADR 0025](0025-a-pick-step-collects-topics-and-tags-as-chips.md) replaces the "choose rows" step with the pick step. The Snooze of a set below stays.
 
 - The pick step lists the Topics in the Topics list now, then **Already Snoozed**. Settled Topics are not in it. No Topic starts picked, also not the Active Topic: the user picks each Topic or Tag to Snooze.
-- The time the user chooses is written on every Topic of the set, also when a Topic is already Snoozed until later. The "until" step names each Snooze that becomes shorter. Zen does not do this ([ADR 0009](0009-zen-remembers-the-snoozes-it-changed.md)): Zen does not ask about each Topic, so it never makes a Snooze shorter. Here the user picked each Topic or Tag.
-- A Snooze of a set keeps no record and has no undo. ADR 0009 rejected a bulk Snooze with no record only because "End Zen" must find the Topics that Zen changed. Nothing here ends early, so the user Unsnoozes a Topic as for any other Snooze.
+- The time the user chooses is written on every Topic of the set, also when a Topic is already Snoozed until later. The "until" step names each Snooze that becomes shorter. Zen does not do this ([ADR 0031](0031-zen-remembers-the-snoozes-it-changed.md)): Zen does not ask about each Topic, so it never makes a Snooze shorter. Here the user picked each Topic or Tag.
+- A Snooze of a set keeps no record and has no undo. ADR 0031 rejected a bulk Snooze with no record only because "End Zen" must find the Topics that Zen changed. Nothing here ends early, so the user Unsnoozes a Topic as for any other Snooze.
 - When the Active Topic is in the set, Muxify opens the Next Topic outside the set.
 - Later Actions on several Topics, such as Mark Read or Settle, use the pick step of ADR 0025 and do not need a new ADR.

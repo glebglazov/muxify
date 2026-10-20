@@ -2,7 +2,7 @@
 
 Upstream Muxify added `sessions.paths`: folders, each with a `depth`, that a Command Palette offers as Sessions. It called each folder or git worktree a Session Path. Our `projects` list did the same job for Topics. We keep one concept, the Project, and one Config section with upstream's name, `sessions.paths`, which takes upstream's `path` and `depth`. Upstream Configs keep their key, so the branch does not move the user's folders to a new section. `path` can also be a glob, and each match is a root that `depth` applies to. `display_depth` on an entry sets how many trailing folder names make the Project's name, 1 by default. `sessions.aliases` replaces `projects_aliases`.
 
-We keep our own rule from [ADR 0008](0008-a-repository-is-one-project.md): a repository is one Project, and its Worktrees are rows of it, found from git's layout, so bare repositories work. Upstream's rule makes each worktree its own Session Path and finds worktrees only below a `.git` folder.
+We keep our own rule from [ADR 0030](0030-a-repository-is-one-project.md): a repository is one Project, and its Worktrees are rows of it, found from git's layout, so bare repositories work. Upstream's rule makes each worktree its own Session Path and finds worktrees only below a `.git` folder.
 
 ## Considered Options
 

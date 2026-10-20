@@ -90,7 +90,7 @@ final class WorkspaceStore {
         palette.begin(.text(.tags(TagField(mode: .editTags(topic), chips: topic.tags.sorted()))), keepingHistory: keepingHistory)
     }
 
-    /// Tags go through the Topic service, as `muxify topic tag` does (ADR 0010).
+    /// Tags go through the Topic service, as `muxify topic tag` does (ADR 0032).
     func setTags(of id: String, _ tags: [Tag]) {
         perform(TopicRequest(.tags(.set(tags)), target: .topic(.id(id))))
     }
@@ -300,7 +300,7 @@ final class WorkspaceStore {
         return topics.lockedSessionIDs.contains(sessionID)
     }
 
-    /// Lock and Unlock go through the Topic service, as `muxify session lock` does (ADR 0010).
+    /// Lock and Unlock go through the Topic service, as `muxify session lock` does (ADR 0032).
     func setLock(ofSession sessionID: String, _ locked: Bool) {
         guard lockState(ofSession: sessionID) != nil, let id = SessionID(rawValue: sessionID) else { return }
         perform(TopicRequest(locked ? .lock : .unlock, target: .session(id)))

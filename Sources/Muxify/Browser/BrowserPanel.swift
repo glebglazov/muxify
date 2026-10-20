@@ -329,7 +329,7 @@ private struct TabContent: View {
     }
 }
 
-/// Find in Page for the active Tab, between its toolbar and its page (ADR-0020).
+/// Find in Page for the active Tab, between its toolbar and its page (ADR-0033).
 private struct FindBar: View {
     @Bindable var tab: BrowserTab
     let onClose: () -> Void
