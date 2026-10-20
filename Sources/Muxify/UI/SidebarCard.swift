@@ -99,8 +99,9 @@ private struct BalatroBorder: View, Animatable {
         set { angle = newValue }
     }
 
-    private static let colors: [Color] = [0xfe5f55, 0xfda200, 0xffe066, 0x4bc292, 0x009dff, 0x8e5cff, 0xfe5f55].map { hex in
-        Color(red: Double(hex >> 16 & 0xff) / 255, green: Double(hex >> 8 & 0xff) / 255, blue: Double(hex & 0xff) / 255)
+    private static let colors: [Color] = ([0xfe5f55, 0xfda200, 0xffe066, 0x4bc292, 0x009dff, 0x8e5cff, 0xfe5f55] as [UInt32]).map { hex in
+        let red = Double(hex >> 16 & 0xff), green = Double(hex >> 8 & 0xff), blue = Double(hex & 0xff)
+        return Color(red: red / 255, green: green / 255, blue: blue / 255)
     }
 
     var body: some View {
