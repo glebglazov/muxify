@@ -13,7 +13,7 @@ import json
 import time
 import unittest
 
-from scripts.verify.sandbox import frame, wait
+from scripts.verify.sandbox import frame, remove_topic, wait
 from scripts.verify.topics_sidebar import REFRESH_LIMIT, SHELL, TopicsSidebar
 
 AGENT_WINDOW = ('#{session_name}|#{@muxify_topic}|#{window_id}|#{pane_id}|#{pane_pid}|#{pane_current_command}|'
@@ -765,6 +765,6 @@ class TopicsCardsSidebar(TopicsSidebar):
     def remove_topics(self, prefix):
         """Deletes the Topic files with the prefix and waits until their rows are gone, so later checks find their rows in view."""
         for path in self.topics_dir.glob(prefix + '*.json'):
-            path.unlink()
+            remove_topic(path)
         self.s.wait_rows(lambda rs: not any(key.startswith('topic-' + prefix) for key in self.s.ids(rs)),
                          'rows of the removed %s* Topics are still shown' % prefix)

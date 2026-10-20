@@ -9,7 +9,7 @@ field's accessibility actions for the keys (UI/CommandPaletteView.swift).
 import json
 import unittest
 
-from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.sandbox import Sandbox, remove_topic, wait
 
 SHELL = '/bin/zsh -f'
 
@@ -48,7 +48,7 @@ class PaletteFixture(unittest.TestCase):
         if order is not None:
             record['order'] = order
         path.write_text(json.dumps(dict(record, **fields)))
-        self.addCleanup(path.unlink, missing_ok=True)
+        self.addCleanup(remove_topic, path)
         if not session:
             return None
         window = self.s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', name, '-c', str(self.project), SHELL)

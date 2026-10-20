@@ -13,7 +13,7 @@ import time
 import unittest
 from urllib.parse import quote
 
-from scripts.verify.sandbox import wait
+from scripts.verify.sandbox import remove_topic, wait
 from scripts.verify.topics_sidebar import REFRESH_LIMIT, TopicsSidebar
 
 
@@ -139,11 +139,13 @@ class TopicsOptionSidebar(TopicsSidebar):
         latency, rs = self.rows_until(lambda rs: not s.has('empty-topic-title', rs))
         self.assertIsNotNone(latency, 'the empty-Topic view stays after the first Session opened')
 
-    def test_new_topic_is_first_in_topics_view(self):
-        record = self.create_topic('First in order')
+    def test_new_topic_is_last_in_topics_view_by_default(self):
+        self.write_topic('insert-earlier', 'Earlier Topic', self.beta, order=0)
+        self.find('topic-insert-earlier')
+        record = self.create_topic('Last in order')
         rs = self.s.wait_rows(lambda rs: self.s.has('topic-' + record['id'], rs), 'no row for the new Topic')
         order = self.topic_rows(rs)
-        self.assertEqual(order[0], 'topic-' + record['id'],
+        self.assertEqual(order[-1], 'topic-' + record['id'],
                          'Topics view order %s; record orders %s' % (order, {i: r.get('order') for i, r in self.records().items()}))
 
     def test_a_topic_url_from_an_automation_creates_the_topic_and_its_session(self):
@@ -152,7 +154,7 @@ class TopicsOptionSidebar(TopicsSidebar):
         subprocess.run(['open', '-g', '-a', str(self.s.app), url], check=True, capture_output=True)
         record = wait(lambda: next((r for r in self.records().values() if r.get('title') == 'URL proof'), None),
                       'no Topic record for the URL', seconds=10)
-        self.addCleanup((self.topics_dir/(record['id'] + '.json')).unlink, missing_ok=True)
+        self.addCleanup(remove_topic, self.topics_dir/(record['id'] + '.json'))
         self.wait_session('beta/url-proof')
         sid = self.s.tmux('display-message', '-p', '-t', '=beta/url-proof:', '#{session_id}')
         self.addCleanup(self.end_session, sid)

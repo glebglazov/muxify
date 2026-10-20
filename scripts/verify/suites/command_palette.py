@@ -16,7 +16,7 @@ import subprocess
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, frame, wait
+from scripts.verify.sandbox import Sandbox, frame, remove_topic, wait
 
 # The app reads tmux once per second; a visit is recorded when it sees the client move.
 REFRESH_LIMIT = 2.0
@@ -434,7 +434,7 @@ class CommandPalette(unittest.TestCase):
         self.write_topic('sw-order-snoozed', 'Sw order snoozed', self.beta, snoozed_until='never')
         self.write_topic('sw-order-settled', 'Sw order settled', self.beta, settled_at='2031-01-01T10:00:00Z')
         for topic_id in ['sw-order-open', 'sw-order-snoozed', 'sw-order-settled']:
-            self.addCleanup((self.topics_dir/(topic_id + '.json')).unlink, missing_ok=True)
+            self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
         outside_sid = self.new_session('sw-order-outside', outside)
         for sid in [self.new_session('beta/sw-order-open', self.beta, topic='sw-order-open'), outside_sid]:
             self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
@@ -462,7 +462,7 @@ class CommandPalette(unittest.TestCase):
         cards = lambda rs: [key for key in s.ids(rs) if key.startswith('no-topic') and not key.endswith('-more')]
         for topic_id, title, fields in [('sw-slot-open', 'Sw slot open', {}), ('sw-slot-snoozed', 'Sw slot snoozed', dict(snoozed_until='never'))]:
             self.write_topic(topic_id, title, self.beta, **fields)
-            self.addCleanup((self.topics_dir/(topic_id + '.json')).unlink, missing_ok=True)
+            self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
         topic_sid = self.new_session('beta/sw-slot-open', self.beta, topic='sw-slot-open')
         topic_window = self.window_of(topic_sid)
         sid = self.new_session('sw-slot-outside', outside)

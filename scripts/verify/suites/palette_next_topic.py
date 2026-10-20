@@ -3,7 +3,7 @@
 import json
 import unittest
 
-from scripts.verify.sandbox import Sandbox, frame, wait
+from scripts.verify.sandbox import Sandbox, frame, remove_topic, wait
 
 SHELL = '/bin/zsh -f'
 
@@ -44,7 +44,7 @@ class PaletteNextTopic(unittest.TestCase):
             (self.topics/(name + '.json')).write_text(json.dumps(dict(
                 id=name, title=name, slug=name, home_project=str(self.project),
                 created_at='2026-01-0%dT00:00:00Z' % (index + 1))))
-            self.addCleanup((self.topics/(name + '.json')).unlink, missing_ok=True)
+            self.addCleanup(remove_topic, self.topics/(name + '.json'))
             sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name,
                           '-c', str(self.project), SHELL)
             s.tmux('set-option', '-t', sid, '@muxify_topic', name)
@@ -98,7 +98,7 @@ class PaletteNextTopic(unittest.TestCase):
         hidden = self.topics/'hidden-base.json'
         hidden.write_text(json.dumps(dict(id='hidden-base', title='Hidden base', slug='hidden-base',
                                           home_project=str(self.project), snoozed_until='never')))
-        self.addCleanup(hidden.unlink, missing_ok=True)
+        self.addCleanup(remove_topic, hidden)
         sid = self.s.tmux('display-message', '-p', '-t', self.base, '#{session_id}')
         self.s.tmux('set-option', '-t', sid, '@muxify_topic', 'hidden-base')
         self.addCleanup(self.s.tmux, 'set-option', '-u', '-t', sid, '@muxify_topic')

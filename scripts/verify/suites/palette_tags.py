@@ -14,7 +14,7 @@ Run from the repo root after `make build`:
 import unittest
 
 from scripts.verify.palette_fixture import PaletteFixture
-from scripts.verify.sandbox import wait
+from scripts.verify.sandbox import remove_topic, wait
 
 
 class PaletteTags(PaletteFixture):
@@ -106,7 +106,7 @@ class PaletteTags(PaletteFixture):
         self.s.act('action', 'palette-search', 'Accept')
         made = wait(lambda: next((record for record in self.records() if record['id'] not in before), None),
                     'New Topic did not write a record')
-        self.addCleanup((self.topics/(made['id'] + '.json')).unlink, missing_ok=True)
+        self.addCleanup(remove_topic, self.topics/(made['id'] + '.json'))
         self.assertEqual((made.get('title'), made.get('tags')), ('Ship it', ['fresh', 'more']), made)
         self.s.wait_rows(lambda rs: 'Add a Project' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Project')
         self.s.act('action', 'palette-search', 'Close')

@@ -13,7 +13,7 @@ import subprocess
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.sandbox import Sandbox, remove_topic, wait
 
 # The app reads tmux and the Topic files once per second.
 REFRESH_LIMIT = 2.0
@@ -120,7 +120,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
     def write_topic(self, topic_id, title, home, **fields):
         # A plain write, no temporary file: the way a person or script writes a Topic file by hand.
         path = self.topics_dir/(topic_id + '.json')
-        self.addCleanup(path.unlink, missing_ok=True)
+        self.addCleanup(remove_topic, path)
         with open(path, 'w') as handle:
             handle.write(json.dumps(dict(id=topic_id, title=title, slug=topic_id, home_project=str(home), **fields)))
 
@@ -214,7 +214,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
         s.act('press', 'palette-accept')
         record = wait(lambda: [r for i, r in self.records().items() if i not in before and r.get('title') == title],
                       'no new Topic record for %r' % title, seconds=15)[0]
-        self.addCleanup((self.topics_dir/(record['id'] + '.json')).unlink, missing_ok=True)
+        self.addCleanup(remove_topic, self.topics_dir/(record['id'] + '.json'))
         s.wait_rows(lambda rs: 'Add a Project' in self.describe('palette-breadcrumb', rs),
                     'New Topic did not open Add a Project', seconds=15)
         s.act('press', 'palette-cancel')
