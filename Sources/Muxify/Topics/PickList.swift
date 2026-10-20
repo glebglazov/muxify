@@ -118,7 +118,7 @@ struct PickCandidate<Payload: Equatable> {
     /// The Session's last activity in tmux, which breaks a tie after the last visit.
     var activity = 0
     let pick: Pick<Payload>
-    /// What ⌃Y types at the prompt of the terminal behind the picker, as pop's Yank does.
+    /// The text ⌃Y types where the Focus was before the picker opened, as pop's Yank does. A terminal gets it as one shell word.
     var paste: String? = nil
     /// The id of the Topic that ⌃S Snoozes.
     var snooze: String? = nil

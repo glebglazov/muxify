@@ -1,9 +1,9 @@
-"""Find in Page and Vim Keys in the Browser.
+"""Find in Page, Vim Keys and Paste Path in the Browser.
 
 The checks dispatch keys inside the page, because the driver must not type keys (README: "Do not take focus").
 A Vim Key dispatched there still reaches WebKit as the key it stands for, so the page scrolls for real.
 The fixture page reports its scroll positions, the Find in Page highlight and its key results in its title,
-which the Tab strip shows.
+which the Tab strip shows. The Paste Path check opens the palette from its View menu item.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.browser
@@ -12,6 +12,7 @@ Run from the repo root after `make build`:
 import re
 import time
 import unittest
+from urllib.parse import unquote
 
 from scripts.verify.sandbox import Sandbox, wait
 
@@ -85,7 +86,7 @@ PAGE = '''<!doctype html>
   setInterval(() => {
     const found = CSS.highlights.get('muxify-find');
     document.title = `mx q=${location.search.slice(1)} y=${Math.round(scrollY)} inner=${Math.round(inner.scrollTop)} hl=${found ? found.size : 0} passed=${passed} native=${native} active=${document.activeElement ? document.activeElement.tagName : 'none'}`
-      + ` sent=${sent} steps=${steps.join('/')}`;
+      + ` sent=${sent} steps=${steps.join('/')} value=${encodeURIComponent(field.value)}`;
   }, 100);
   addEventListener('load', () => setTimeout(async () => {
     if (params.has('focus')) field.focus();
@@ -307,6 +308,40 @@ class Browser(unittest.TestCase):
         self.wait_sent()
         time.sleep(1)
         self.assertEqual(self.page_state()['y'], '0', 'j scrolled with browser.vim_keys off')
+
+    # Paste Path
+
+    def test_paste_path_types_the_raw_path_into_the_text_field_that_has_focus(self):
+        folder = self.s.root/'pasted folder'
+        folder.mkdir(exist_ok=True)
+        sid = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'paste-into-page', '-c', str(folder), SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
+        self.open_page('focus&case=paste')
+        self.s.driver('press', 'Focus Browser')
+        wait(lambda: 'WKWebView' in self.s.driver('responder')['responders'], 'Focus Browser did not give the page Focus')
+        self.wait_page(lambda page: page['active'] == 'INPUT', 'the text field did not take focus')
+        key = 'palette-row-session:' + sid
+        def opened():
+            self.s.driver('press', 'Go to…')
+            try:
+                self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'not yet', seconds=3)
+                return True
+            except AssertionError:
+                return False
+        # SwiftUI rebuilds the View menu a moment after the state it reads changes, and a press in that moment can miss.
+        wait(opened, 'the palette did not open', seconds=20)
+        def searched():
+            self.s.act('focus', 'palette-search')
+            self.s.act('set', 'palette-search', 'paste-into-page')
+            return self.s.has(key)
+        wait(searched, 'no palette row for the Session paste-into-page', seconds=20)
+        self.s.act('action', key, 'Paste Path')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after Paste Path')
+        page = self.wait_page(lambda page: page['value'] != '', 'Paste Path typed nothing into the text field')
+        self.assertEqual(unquote(page['value']), str(folder), 'the text field did not get the path as it is, without shell quotes')
+        self.assertEqual(page['active'], 'INPUT', 'Paste Path took focus from the text field')
+        pane = self.s.tmux('display-message', '-p', '-t', 'browser:' + self.id().rsplit('.', 1)[-1][5:], '#{pane_id}')
+        self.assertNotIn('pasted folder', self.s.tmux('capture-pane', '-p', '-t', pane), 'Paste Path also typed the path at the prompt')
 
     def test_vim_keys_off_in_the_config_stop_an_open_page(self):
         self.addCleanup(self.reload_config, '')

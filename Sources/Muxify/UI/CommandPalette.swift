@@ -359,8 +359,10 @@ final class CommandPalette {
             copy(target, title: item.kind == .agent ? "Copied Pane ID" : "Copied tmux Target", shown: target)
         case .pasteFolder:
             guard let paste = row.paste else { return }
+            let responder = previousResponder
             close()
-            store.pasteIntoTerminal(paste)
+            // close() gives Focus back on the next turn of the main queue; the text follows it there.
+            DispatchQueue.main.async { [weak store] in store?.paste(paste, into: responder) }
         default: performRowAction(action, item: item)
         }
     }

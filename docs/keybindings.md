@@ -332,7 +332,7 @@ conflict with the actions above:
 | `show_actions` | ⌘K | Show or hide the actions menu |
 | `copy_folder` | ⌘C | Copy the result's folder |
 | `copy_tmux_target` | ⌘⇧C | Copy the result's tmux target or Pane ID |
-| `paste_folder` | ⌃Y | Type the result's folder, as one shell word, at the prompt of the current Pane |
+| `paste_folder` | ⌃Y | Type the result's folder where the Focus was: into the text field or web page that had it, or as one shell word at the prompt of the current Pane |
 | `snooze_topic` | ⌃S | Open Snooze for the highlighted open, Dormant or Snoozed Topic |
 | `move` | Unbound | Open Move for the highlighted result |
 | `add_project_to_topic` | Unbound | Add a Project to the highlighted Topic |

@@ -135,8 +135,19 @@ final class WorkspaceStore {
         palette.openMove(window, scope: .window, keepingHistory: keepingHistory)
     }
 
+    /// Types `text` into `responder`, the view that had Focus before the palette opened: at the cursor of a web
+    /// page or a text field, as typed keys are. From the terminal, or from a view that takes no text, it goes to
+    /// the prompt of the active Pane as one shell word.
+    func paste(_ text: String, into responder: NSResponder?) {
+        if !(responder is TerminalSurfaceView), let input = responder as? NSTextInputClient {
+            input.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+            return
+        }
+        pasteIntoTerminal(PaletteCatalog.shellWord(text))
+    }
+
     /// Types `text` at the prompt of the active Pane of the selected Window, without Enter.
-    func pasteIntoTerminal(_ text: String) {
+    private func pasteIntoTerminal(_ text: String) {
         guard let pane = selectedWindow?.activePaneID, !pane.isEmpty else {
             showGoFailure("No Window is selected.")
             return

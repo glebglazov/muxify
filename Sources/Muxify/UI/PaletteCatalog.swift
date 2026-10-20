@@ -221,7 +221,7 @@ struct PaletteCatalog {
             pick: .available(PaletteItem(kind: choice.isWorktree ? .worktree : .project,
                                          ref: .project(OpenDirectory(directory: choice.directory, name: choice.name, reach: reach)),
                                          path: choice.directory.path, target: names.first)),
-            paste: Self.shellWord(choice.directory.path))
+            paste: choice.directory.path)
     }
 
     private func looseSessionCandidates(_ windows: [TmuxWindow]) -> [PickCandidate<PaletteItem>] {
@@ -243,7 +243,7 @@ struct PaletteCatalog {
                 mark: topics?.sessionMarks[session.id].map(RowMark.agent),
                 lastVisit: visits.last(.session(name: session.name)), isCurrent: isCurrent, activity: active.sessionActivity,
                 pick: .available(PaletteItem(kind: .session, ref: .session(session), path: folder, target: session.name)),
-                paste: Self.shellWord(folder))
+                paste: folder)
         }
     }
 
@@ -257,7 +257,7 @@ struct PaletteCatalog {
             fields: [.typeWord("window"), .detail(target), .detail(window.abbreviatedPath), .hidden(window.command)],
             trailing: isCurrent ? "Current" : "", isCurrent: isCurrent, activity: window.sessionActivity,
             pick: .available(PaletteItem(kind: .window, ref: .window(window), path: window.path, target: target, logo: window.logoName)),
-            paste: Self.shellWord(window.path))
+            paste: window.path)
     }
 
     /// Those with a Notification first, then working ones, then the rest, each in tmux order.
@@ -282,7 +282,7 @@ struct PaletteCatalog {
                 pick: .available(PaletteItem(kind: .agent, ref: .agent(agent), path: path, target: agent.paneID,
                                              logo: agent.kind.rawValue, status: agent.status,
                                              mark: agentMarks[agent.paneID].map(RowMark.agent))),
-                paste: path.isEmpty ? nil : Self.shellWord(path))
+                paste: path.isEmpty ? nil : path)
         }
     }
 

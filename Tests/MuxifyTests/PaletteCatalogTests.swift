@@ -174,7 +174,7 @@ final class PaletteCatalogTests: XCTestCase {
                        ["topic-a": "a", "topic-d": "d", "topic-z": "z"], "the Settled Topic, Session and Project rows Snooze nothing")
         let pastes = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.paste) })
         XCTAssertEqual(pastes["topic-a"], .some(nil), "a Topic pastes nothing")
-        XCTAssertEqual(pastes["session:$scratch"], "'/elsewhere/my notes'")
+        XCTAssertEqual(pastes["session:$scratch"], "/elsewhere/my notes", "the path stays raw until a terminal gets it")
         XCTAssertEqual(pastes["project:/work/notes"], "/work/notes")
         XCTAssertEqual(pastes["window:@1"], "/work/game/main")
     }
