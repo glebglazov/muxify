@@ -33,7 +33,11 @@ final class TopicServiceTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root) }
     }
 
-    private func service() -> TopicService { TopicService(paths: paths, server: server, projects: [project, tools]) }
+    private func service(tags: [String] = ["backend", "release"]) -> TopicService {
+        var topics = Config.Topics()
+        topics.tags = ConfigTags(tags.map { TagDefinition(tag: Tag(name: $0)!) })
+        return TopicService(paths: paths, server: server, projects: [project, tools], topics: topics)
+    }
 
     private func records() throws -> [TopicRecord] { try TopicStore(paths: paths).read().records }
 
@@ -324,6 +328,30 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(noTarget.kind, .noTarget)
     }
 
+    func testOnlyTheTagsTheConfigDefinesCanBeAddedAndATagItNoLongerDefinesCanStayOrGo() throws {
+        let backend = Tag(name: "backend")!, release = Tag(name: "release")!, old = Tag(name: "old")!
+        let id = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "Fix", project: nil, tags: [release])))).topicID)
+        func current() throws -> Set<Tag> { try XCTUnwrap(records().first { $0.id == id }).tags }
+        try TopicStore(paths: paths).write { try $0.changeTags(of: id, .add([old])) }
+
+        let undefined = try failure(service().handle(TopicRequest(.tags(.add([backend, Tag(name: "bazel")!])), target: .topic(.id(id)))))
+        XCTAssertEqual(undefined.kind, .tagUndefined)
+        XCTAssertEqual(undefined.phase, .nothingChanged)
+        XCTAssertTrue(undefined.message.contains("#bazel") && undefined.message.contains("topics.tags"), undefined.message)
+        XCTAssertEqual(try current(), [old, release], "a refused change writes nothing, also not its defined Tags")
+
+        _ = try change(service().handle(TopicRequest(.tags(.set([old, backend])), target: .topic(.id(id)))))
+        XCTAssertEqual(try current(), [old, backend], "a Tag the Config no longer defines stays when the change keeps it")
+        _ = try change(service().handle(TopicRequest(.tags(.remove([old])), target: .topic(.id(id)))))
+        XCTAssertEqual(try current(), [backend])
+        XCTAssertEqual(try failure(service().handle(TopicRequest(.tags(.add([old])), target: .topic(.id(id))))).kind, .tagUndefined,
+                       "nothing adds a Tag the Config no longer defines again")
+
+        let off = try failure(service(tags: []).handle(TopicRequest(.create(title: "Untagged", project: nil, tags: [backend]))))
+        XCTAssertEqual(off.kind, .tagUndefined, "with Tags off, no Tag can be added")
+        XCTAssertFalse(try records().contains { $0.title == "Untagged" }, "a refused New Topic writes no record")
+    }
+
     func testUnsnoozePutsTheTopicBelowTheLocksAtTheConfiguredEnd() throws {
         try server.run(["new-session", "-d", "-s", "notes", "-c", project.folder.path])
         let first = try XCTUnwrap(change(service().handle(TopicRequest(.create(title: "First", project: nil)))).topicID)
@@ -333,7 +361,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"], "a Snoozed Topic keeps its stored order")
         XCTAssertEqual(service().handle(TopicRequest(.unsnooze(topics: [.id(first)]))), .snoozeChanged(TopicSnoozeChange(topicIDs: [first])))
         XCTAssertEqual(try topicList(), ["Second", "lock:notes", "First"])
-        let top = TopicService(paths: paths, server: server, projects: [project], insertPosition: .top)
+        let top = TopicService(paths: paths, server: server, projects: [project], topics: { var topics = Config.Topics(); topics.insertPosition = .top; return topics }())
         _ = top.handle(TopicRequest(.snooze(until: .never, topics: [.id(first)])))
         _ = top.handle(TopicRequest(.unsnooze(topics: [.id(first)])))
         XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"])
@@ -360,7 +388,7 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testTopInsertionAndReturningTopicsUseTheConfiguredEndAmongLocks() throws {
-        let top = TopicService(paths: paths, server: server, projects: [project], insertPosition: .top)
+        let top = TopicService(paths: paths, server: server, projects: [project], topics: { var topics = Config.Topics(); topics.insertPosition = .top; return topics }())
         _ = try change(top.handle(TopicRequest(.create(title: "First", project: nil))))
         let returning = try XCTUnwrap(change(top.handle(TopicRequest(.create(title: "Returning", project: nil)))).topicID)
         XCTAssertEqual(try topicList(), ["Returning", "First"])

@@ -50,6 +50,14 @@ extension SidebarTypography {
         return .system(size: size, weight: role.weight)
     }
 
+    /// The AppKit font of `font(for:)`, to measure text before SwiftUI lays it out.
+    func nsFont(for role: Role) -> NSFont {
+        let size = size(for: role)
+        if fontFamily != "system", let font = Self.lookup(family: fontFamily, weight: role.familyWeight, size: size) { return font }
+        let weights: [Font.Weight: NSFont.Weight] = [.semibold: .semibold, .medium: .medium, .regular: .regular]
+        return .systemFont(ofSize: size, weight: weights[role.weight] ?? .regular)
+    }
+
     static func lookup(family: String, weight: Int, size: CGFloat) -> NSFont? {
         NSFontManager.shared.font(withFamily: family, traits: [], weight: weight, size: size)
     }

@@ -60,7 +60,7 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertNil(titles["done-1"], "a Settled Topic beyond the shown page has no row and no title")
     }
 
-    func testSnoozedRowsKeepTopicOrderAndShowWakeTimeAndDormancy() {
+    func testSnoozedRowsShowWakeTimeAndDormancy() {
         let wake = SnoozeDeadline.at(now.addingTimeInterval(3600))
         var second = snoozed("second", until: .never, order: 2)
         second.sessions = [.object(["project_path": .string("/work/app")])]
@@ -74,6 +74,24 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertEqual(group.topics[1].kind, .snoozed(wake: "never"))
         XCTAssertTrue(group.topics[1].isDormant)
         XCTAssertFalse(topics.rows.contains { $0.id == .topic("first") }, "a snoozed Topic is not an open row")
+    }
+
+    func testSnoozedRowsGoByWakeTimeSoonestFirstWithUntilUnsnoozeLastAndIgnoreThePin() {
+        func pinned(_ record: TopicRecord) -> TopicRecord {
+            var record = record
+            record.isPinned = true
+            return record
+        }
+        let soon = SnoozeDeadline.at(now.addingTimeInterval(3600))
+        let late = SnoozeDeadline.at(now.addingTimeInterval(7200))
+        let records = [snoozed("forever", until: .never, order: 0), pinned(snoozed("pinned-late", until: late, order: 1)),
+                       snoozed("late", until: late, order: 2), snoozed("soon", until: soon, order: 3),
+                       snoozed("forever-too", until: .never, order: 4)]
+        let topics = model(records)
+        let expected: [TopicGroupID] = [.topic("soon"), .topic("pinned-late"), .topic("late"), .topic("forever"), .topic("forever-too")]
+        XCTAssertEqual(topics.snoozedRows.map(\.id), expected, "equal times keep the list order, where the Pinned Topic is first")
+        XCTAssertEqual(topics.groups.first { $0.kind == .snoozed }?.topics.map(\.id), expected)
+        XCTAssertEqual(model(records, mode: .sessions).snoozedRows.map(\.id), expected, "Sessions mode lists them in the same order")
     }
 
     func testPinnedTopicsComeFirstInTheOpenRowsAndTheSnoozedGroup() {
@@ -132,19 +150,56 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertTrue(model(records, groups: state).groups[0].isExpanded)
     }
 
-    func testOpenStateAndPagesSurviveARestartThroughUserDefaults() {
-        let defaults = UserDefaults(suiteName: "TopicGroupsTests")!
-        defaults.removePersistentDomain(forName: "TopicGroupsTests")
-        defer { defaults.removePersistentDomain(forName: "TopicGroupsTests") }
-        XCTAssertEqual(TopicGroupsState(defaults: defaults), TopicGroupsState())
-        var state = TopicGroupsState(defaults: defaults)
-        state.toggle(.snoozed)
+    func testOpeningAGroupClosesTheOtherAndClosingSettledForgetsItsPages() {
+        var state = TopicGroupsState()
         state.toggle(.settled)
         state.showMoreSettled()
-        state.save(to: defaults)
-        XCTAssertEqual(TopicGroupsState(defaults: defaults), state)
-        XCTAssertEqual(TopicGroupsState(defaults: defaults).open, [.snoozed, .settled])
-        XCTAssertEqual(TopicGroupsState(defaults: defaults).settledPages, 2)
+        state.toggle(.snoozed)
+        XCTAssertEqual(state.open, .snoozed, "opening Snoozed closes Settled")
+        XCTAssertEqual(state.settledPages, 1, "leaving Settled forgets its extra pages")
+        state.toggle(.snoozed)
+        XCTAssertNil(state.open)
+    }
+
+    func testTheOpenGroupFollowsTheActiveTopicOnlyWhenItsPlaceChanges() {
+        let wake = SnoozeDeadline.at(now.addingTimeInterval(3600))
+        let older = (0..<20).map { settled(String(format: "old-%02d", $0), at: "2026-09-01T10:00:00Z") }
+        let records = [TopicRecord(id: "open", title: "Open"), snoozed("asleep", until: wake, order: 1),
+                       settled("done", at: "2026-10-01T10:00:00Z")] + older
+        let windows = [window("@1", session: "$1", topic: "open"), window("@2", session: "$2", topic: "asleep"),
+                       window("@3", session: "$3", topic: nil)]
+        var state = TopicGroupsState()
+        func follow(window: String? = nil, empty: String? = nil, records: [TopicRecord] = records) {
+            var selection = TopicSelection()
+            selection.windowID = window
+            selection.emptyTopicID = empty
+            state.follow(model(records, windows: windows, groups: state, selection: selection))
+        }
+
+        follow(window: "@2")
+        XCTAssertEqual(state.open, .snoozed, "going to a Snoozed Topic opens the Snoozed group")
+        state.toggle(.snoozed)
+        follow(window: "@2")
+        XCTAssertNil(state.open, "a header click stays while the Active Topic stays in its group")
+
+        follow(empty: "old-00")
+        XCTAssertEqual(state.open, .settled, "going to a Settled Topic opens the Settled group")
+        XCTAssertEqual(state.settledPages, 2, "the Settled group shows the page that lists the Active Topic")
+
+        state.toggle(.snoozed)
+        XCTAssertEqual(state.settledPages, 1)
+        follow(window: "@1")
+        XCTAssertNil(state.open, "going to a Topic in the Topics list closes the open group")
+        state.toggle(.settled)
+        follow(window: "@3")
+        XCTAssertNil(state.open, "going to No Topic closes the open group")
+
+        follow(window: "@2")
+        XCTAssertEqual(state.open, .snoozed)
+        var awake = records
+        awake[1].snoozedUntil = nil
+        follow(window: "@2", records: awake)
+        XCTAssertNil(state.open, "an Unsnooze of the Active Topic closes the group")
     }
 
     private func settledOn(_ stored: String) -> String {

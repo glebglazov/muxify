@@ -24,8 +24,8 @@ enum ChipKey: Equatable {
 }
 
 /// The chips of a palette field, in the order the user made them, and the selected one. A nil selection means
-/// the caret is in the text. Tag fields and the pick step hold their chips in this one model, so the chip keys
-/// work the same in each.
+/// the caret is in the text. New Topic and Edit Tags hold their Tags in this one model, so the chip keys work the
+/// same in each.
 struct ChipField<Chip: Equatable>: Equatable {
     var chips: [Chip]
     var selection: Int? = nil
@@ -66,24 +66,19 @@ extension PaletteFlow {
             guard let chips = field.chipField.receiving(key) else { return nil }
             field.chipField = chips
             return .text(.tags(field))
-        case .snooze(var draft) where draft.step == .pick:
-            guard let chips = draft.chipField.receiving(key) else { return nil }
-            draft.chipField = chips
-            return .snooze(draft)
         default:
             return nil
         }
     }
 }
 
-/// A chip as the search field shows it.
+/// A Tag chip as the search field shows it.
 struct FieldChip: Identifiable {
-    enum Kind { case tag, topic }
     /// The accessibility identifier.
     let id: String
     let title: String
-    let kind: Kind
-    var count: Int? = nil
+    /// The Tag's colour in the Config; nil for a Tag the Config does not define.
+    let color: MarkColor?
     var isSelected = false
 }
 
@@ -109,29 +104,21 @@ extension CommandPalette {
         return false
     }
 
-    /// The chips of the step, or the Tag filter of a search.
+    /// The Tag chips of New Topic or Edit Tags, or the Tag filter of a search.
     var fieldChips: [FieldChip] {
         switch presentation {
         case .search(_, let tag?)?:
-            return [FieldChip(id: "palette-tag-" + tag.name, title: tag.description, kind: .tag)]
+            return [fieldChip(tag, defined: store?.topics.tags)]
         case .flow(.text(.tags(let field)))?:
             return field.chipField.chips.enumerated().map { index, tag in
-                FieldChip(id: "palette-tag-" + tag.name, title: tag.description, kind: .tag, isSelected: index == field.chipField.selection)
-            }
-        case .flow(.snooze(let draft))? where draft.step == .pick:
-            let topics = pickableTopics
-            return draft.chipField.chips.enumerated().map { index, chip in
-                let isSelected = index == draft.chipField.selection
-                switch chip {
-                case .tag(let tag):
-                    return FieldChip(id: "palette-tag-" + tag.name, title: tag.description, kind: .tag,
-                                     count: PickChip.topicIDs([chip], in: topics).count, isSelected: isSelected)
-                case .topic(let id):
-                    return FieldChip(id: "palette-topic-" + id, title: topicTitle(id: id), kind: .topic, isSelected: isSelected)
-                }
+                fieldChip(tag, defined: field.defined, isSelected: index == field.chipField.selection)
             }
         default:
             return []
         }
+    }
+
+    private func fieldChip(_ tag: Tag, defined: ConfigTags?, isSelected: Bool = false) -> FieldChip {
+        FieldChip(id: "palette-tag-" + tag.name, title: tag.description, color: defined?.definition(of: tag)?.color, isSelected: isSelected)
     }
 }

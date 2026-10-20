@@ -55,11 +55,15 @@ the start, so `Backend` and `#backend` are the Tag `backend`. Muxify keeps an
 entry that is still not a Tag, and writes it back after the Tags. It reads a
 `tags` value that is not an array as no Tags, and writes the value back until
 a Tag change gives the Topic Tags. A Topic without Tags and without such
-entries has no `tags` key. There is no other list of Tags:
-Muxify suggests the Tags that are on the records now, also on Settled Topics.
-When the last record with a Tag is Forgotten, Muxify does not suggest it again.
+entries has no `tags` key. The Config's `topics.tags` says which Tags exist
+(see [Tags](configuration.md#tags)), so `tags` may hold a name that the Config
+no longer defines, such as a Tag the user removed or renamed there. Muxify
+keeps that name in the record and shows it dimmed. A Tag change can remove it,
+but cannot add it again.
 Edit Tags in the app and `muxify topic tag` change the field through the Topic
-service. They change only the `tags` key, and only for an open Topic.
+service. They change only the `tags` key, and only for an open Topic. A change
+that adds a Tag the Config does not define fails with the kind `tag_undefined`
+and writes nothing.
 
 The store retains unknown JSON fields during writes, including nested fields
 in remembered Sessions and Windows. Writes replace the file atomically. The

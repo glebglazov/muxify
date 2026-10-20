@@ -297,7 +297,7 @@ extension TopicInvocation {
             let showsTopic = command.showsTopic
             var config = try await ConfigProjects.load(paths.configFile, within: command.findsAllProjects ? nil : [])
             func handle() throws -> TopicResponse {
-                let service = TopicService(paths: paths, server: .local, projects: config.projects, sessionOrder: config.topics.sessionOrder, insertPosition: config.topics.insertPosition)
+                let service = TopicService(paths: paths, server: .local, projects: config.projects, topics: config.topics)
                 // No client: no terminal switches to the result, because a command changes what the user sees only
                 // when they ask for it.
                 return service.handle(TopicRequest(try request(projects: config.projects, service: service), target: target,

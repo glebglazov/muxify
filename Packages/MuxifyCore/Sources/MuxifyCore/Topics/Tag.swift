@@ -1,7 +1,7 @@
 import Foundation
 
 /// A short name on a Topic, written with `#`, such as `#backend`. It holds only lower case ASCII letters, digits
-/// and `-`, so the suggestions have no near-duplicates such as `#Backend` beside `#backend`.
+/// and `-`, so `topics.tags` has no near-duplicates such as `#Backend` beside `#backend`.
 public struct Tag: Hashable, Comparable, Codable, Sendable, CustomStringConvertible {
     /// Without the `#`, as the record stores it.
     public let name: String
@@ -35,12 +35,6 @@ public struct Tag: Hashable, Comparable, Codable, Sendable, CustomStringConverti
     }
 
     private static let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
-
-    /// The Tags on the records that exist now, Settled Topics included, A→Z. There is no other list of Tags, so a
-    /// Tag goes away with the last record that has it.
-    public static func suggestions(from records: [TopicRecord]) -> [Tag] {
-        Set(records.flatMap(\.tags)).sorted()
-    }
 }
 
 /// How a request changes the Tags of a Topic.

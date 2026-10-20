@@ -176,7 +176,7 @@ final class AgentMarkViewTests: XCTestCase {
 
     @MainActor func testAgentColorsChangeTheMarkOnEverySurface() throws {
         var colors = AgentColors()
-        colors[.done] = .rgb(red: 0, green: 255, blue: 0)
+        colors[.done] = .single(.rgb(red: 0, green: 255, blue: 0))
         let views: [AnyView] = [AnyView(AgentMarkView(mark: .done)), AnyView(AgentMarkSpine(mark: .done).frame(width: 3, height: 20))]
         for view in views {
             let image = try render(view.environment(\.agentColors, colors), scheme: .light)
@@ -184,6 +184,18 @@ final class AgentMarkViewTests: XCTestCase {
             XCTAssertGreaterThan(center.greenComponent, center.redComponent + 0.3, "done is the green of the Config")
             XCTAssertGreaterThan(center.greenComponent, center.blueComponent + 0.3, "done is the green of the Config")
         }
+    }
+
+    @MainActor func testAColorPairFollowsTheAppearanceOfTheView() throws {
+        var colors = AgentColors()
+        colors[.done] = .pair(light: .rgb(red: 0, green: 255, blue: 0), dark: .rgb(red: 255, green: 0, blue: 0))
+        let view = AgentMarkSpine(mark: .done).frame(width: 3, height: 20).environment(\.agentColors, colors)
+        let light = try render(view, scheme: .light)
+        let lightCenter = try color(light, x: light.pixelsWide / 2, y: light.pixelsHigh / 2)
+        XCTAssertGreaterThan(lightCenter.greenComponent, lightCenter.redComponent + 0.3, "light appearance draws the light color")
+        let dark = try render(view, scheme: .dark)
+        let darkCenter = try color(dark, x: dark.pixelsWide / 2, y: dark.pixelsHigh / 2)
+        XCTAssertGreaterThan(darkCenter.redComponent, darkCenter.greenComponent + 0.3, "dark appearance draws the dark color")
     }
 
     @MainActor func testThePaletteAgentBadgeTakesTheMarkColorAndAReadDoneAgentHasNone() throws {

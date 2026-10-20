@@ -472,10 +472,10 @@ final class ConfigTests: XCTestCase {
 
     func testAgentColorsDefaultToGrayBlueRedOrange() throws {
         let colors = try load("").agentColors
-        XCTAssertEqual(colors[.working], .system(.gray))
-        XCTAssertEqual(colors[.done], .system(.blue))
-        XCTAssertEqual(colors[.failed], .system(.red))
-        XCTAssertEqual(colors[.blocked], .system(.orange))
+        XCTAssertEqual(colors[.working], .single(.system(.gray)))
+        XCTAssertEqual(colors[.done], .single(.system(.blue)))
+        XCTAssertEqual(colors[.failed], .single(.system(.red)))
+        XCTAssertEqual(colors[.blocked], .single(.system(.orange)))
     }
 
     func testAgentColorsTakeASystemColorNameOrAQuotedHexValue() throws {
@@ -487,12 +487,12 @@ final class ConfigTests: XCTestCase {
             failed: "#a1b2c3"
         """)
         XCTAssertEqual(config.problems, [])
-        XCTAssertEqual(config.agentColors[.working], .system(.teal))
-        XCTAssertEqual(config.agentColors[.done], .rgb(red: 0x33, green: 0x66, blue: 0xff))
-        XCTAssertEqual(config.agentColors[.failed], .rgb(red: 0xa1, green: 0xb2, blue: 0xc3))
-        XCTAssertEqual(config.agentColors[.blocked], .system(.orange))
+        XCTAssertEqual(config.agentColors[.working], .single(.system(.teal)))
+        XCTAssertEqual(config.agentColors[.done], .single(.rgb(red: 0x33, green: 0x66, blue: 0xff)))
+        XCTAssertEqual(config.agentColors[.failed], .single(.rgb(red: 0xa1, green: 0xb2, blue: 0xc3)))
+        XCTAssertEqual(config.agentColors[.blocked], .single(.system(.orange)))
         for name in SystemColorName.allCases {
-            XCTAssertEqual(try load("ui:\n  agent_colors:\n    done: \(name.rawValue)").agentColors[.done], .system(name))
+            XCTAssertEqual(try load("ui:\n  agent_colors:\n    done: \(name.rawValue)").agentColors[.done], .single(.system(name)))
         }
     }
 
@@ -507,13 +507,48 @@ final class ConfigTests: XCTestCase {
             idle: gray
         """)
         XCTAssertEqual(config.agentColors, AgentColors())
-        let expected = "expected one of blue, orange, red, green, yellow, purple, pink, teal, gray, or a quoted '#RRGGBB'"
+        let expected = "expected one of blue, orange, red, green, yellow, purple, pink, teal, gray, or a quoted '#RRGGBB', "
+            + "or a mapping with light and dark"
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 3, message: "ui.agent_colors.working: " + expected),
             ConfigProblem(path: root, line: 4, message: "ui.agent_colors.done: " + expected),
             ConfigProblem(path: root, line: 5, message: "ui.agent_colors.failed: " + expected),
             ConfigProblem(path: root, line: 6, message: "ui.agent_colors.blocked: " + expected),
             ConfigProblem(path: root, line: 7, message: "unknown key \"ui.agent_colors.idle\""),
+        ])
+    }
+
+    func testAnAgentColorCanBeAPairForLightAndDarkAppearance() throws {
+        let config = try load("""
+        ui:
+          agent_colors:
+            done: {light: '#3366ff', dark: Teal}
+            failed:
+              dark: '#a1b2c3'
+              light: red
+        """)
+        XCTAssertEqual(config.problems, [])
+        XCTAssertEqual(config.agentColors[.done], .pair(light: .rgb(red: 0x33, green: 0x66, blue: 0xff), dark: .system(.teal)))
+        XCTAssertEqual(config.agentColors[.failed], .pair(light: .system(.red), dark: .rgb(red: 0xa1, green: 0xb2, blue: 0xc3)),
+                       "key order does not matter")
+    }
+
+    func testABadColorPairIsAProblemWithItsLineAndKeepsTheDefault() throws {
+        let config = try load("""
+        ui:
+          agent_colors:
+            working: {light: blue}
+            done: {light: blue, dark: blue, dim: gray}
+            failed: {light: accent, dark: blue}
+            blocked: {}
+        """)
+        XCTAssertEqual(config.agentColors, AgentColors(), "a pair with a problem leaves the color out")
+        let expected = "expected one of blue, orange, red, green, yellow, purple, pink, teal, gray, or a quoted '#RRGGBB'"
+        XCTAssertEqual(config.problems.map { "\($0.line): \($0.message)" }, [
+            "3: ui.agent_colors.working: missing dark",
+            "4: unknown key \"ui.agent_colors.done.dim\"",
+            "5: ui.agent_colors.failed.light: " + expected,
+            "6: ui.agent_colors.blocked: missing light and dark",
         ])
     }
 

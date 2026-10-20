@@ -76,7 +76,7 @@ final class WorkspaceStore {
     func presentNewTopic(keepingHistory: Bool = false) {
         guard !isRemote, !changingTopic else { return }
         newTopicFailure = nil
-        palette.begin(.text(.tags(TagField(mode: .newTopic))), keepingHistory: keepingHistory)
+        palette.begin(.text(.tags(TagField(mode: .newTopic, defined: topicConfig.tags))), keepingHistory: keepingHistory)
     }
 
     /// Makes an open Topic with no Session and shows it, so the user adds its first Project from there.
@@ -87,8 +87,10 @@ final class WorkspaceStore {
     /// Edit Tags for an open Topic: one field with its Tags as chips.
     func presentEditTags(of id: String, keepingHistory: Bool = false) {
         topicWatcher.reload()
-        guard !changingTopic, !isRemote, let topic = topicWatcher.records.first(where: { $0.id == id && $0.settledAt == nil }) else { return }
-        palette.begin(.text(.tags(TagField(mode: .editTags(topic), chips: topic.tags.sorted()))), keepingHistory: keepingHistory)
+        guard !changingTopic, !isRemote, let defined = topicConfig.tags,
+              let topic = topicWatcher.records.first(where: { $0.id == id && $0.settledAt == nil }) else { return }
+        palette.begin(.text(.tags(TagField(mode: .editTags(topic), defined: defined, chips: defined.shown(topic.tags).map(\.tag)))),
+                      keepingHistory: keepingHistory)
     }
 
     /// Tags go through the Topic service, as `muxify topic tag` does (ADR 0032).
@@ -312,6 +314,35 @@ final class WorkspaceStore {
         setLock(ofSession: id, !locked)
     }
 
+    /// Where Move Topic Up (`previous`) or Down (`next`) puts the card of the Active Topic or Locked Session, as the
+    /// card's own Move Up and Move Down do. Nil at that end of the cards with its Pin, for No Topic, for a Snoozed or
+    /// Settled Topic, and outside Topics mode, where the cards do not show.
+    func activeCardMove(_ direction: StepDirection) -> (id: TopicListID, placement: TopicPlacement)? {
+        guard !isRemote, !changingTopic, topics.mode == .topics, let active = topics.activeTopic, let id = active.listID,
+              let placement = topics.neighbors(of: active).placement(direction) else { return nil }
+        return (id, placement)
+    }
+
+    func moveActiveCard(_ direction: StepDirection) {
+        if let move = activeCardMove(direction) { moveTopic(move.id, to: move.placement) }
+    }
+
+    /// The Active Topic when it is open or Snoozed, which Pin Topic and Unpin Topic act on.
+    var pinnableActiveTopic: TopicRecord? {
+        guard !isRemote, let id = activeTopicID else { return nil }
+        return topicWatcher.records.first { $0.id == id && $0.settledAt == nil }
+    }
+
+    func togglePinOfActiveTopic() {
+        if let topic = pinnableActiveTopic { pinTopic(topic.id, !topic.isPinned) }
+    }
+
+    /// The Active Topic when it is Snoozed, which Unsnooze Topic acts on.
+    var snoozedActiveTopicID: String? {
+        guard !isRemote, let id = activeTopicID, topics.snoozedTopicIDs.contains(id) else { return nil }
+        return id
+    }
+
     func changeTopic(_ source: TopicMembershipPlan.Source, destination: TopicRecord? = nil, title: String = "") {
         let target: TopicTarget?
         switch source {
@@ -462,16 +493,30 @@ final class WorkspaceStore {
         }
     }
 
-    /// Every Snooze goes through this flow: Snooze Topic starts at the "until" step with one Topic chip, and Snooze
-    /// Topics starts at the pick step with no chip, or with the Tag chip of "Snooze its Topics…".
-    func presentSnooze(_ chips: [PickChip], from step: SnoozeDraft.Step, keepingHistory: Bool = false) {
+    /// Snooze Topics… and Unsnooze Topics… start at the check step: with nothing checked, or with the Topics of a
+    /// Tag for "Snooze its Topics…".
+    func presentCheck(_ draft: CheckDraft, keepingHistory: Bool = false) {
         topicWatcher.reload()
-        let open = chips.filter { chip in
-            guard case .topic(let id) = chip else { return true }
-            return topicWatcher.records.contains { $0.id == id && $0.settledAt == nil }
+        palette.begin(.check(draft), keepingHistory: keepingHistory)
+    }
+
+    /// Snooze Topic: the "until" step of the same flow, so ⌫ goes back to the check step with the Topic checked.
+    func presentSnooze(_ id: String, keepingHistory: Bool = false) {
+        topicWatcher.reload()
+        guard topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }) else { return }
+        palette.begin(.snoozeUntil([id]), keepingHistory: keepingHistory)
+    }
+
+    /// Unsnooze Topic: the Active Topic at once while it is Snoozed, else a choice of one Snoozed Topic.
+    func presentUnsnoozeTopic(keepingHistory: Bool = false) {
+        if let id = snoozedActiveTopicID {
+            palette.close(restoringFocus: false)
+            unsnoozeTopic(id)
+            return
         }
-        guard step == .pick || !open.isEmpty else { return }
-        palette.begin(.snooze(SnoozeDraft(chipField: ChipField(chips: open), step: step)), keepingHistory: keepingHistory)
+        guard !isRemote, !topics.snoozedRows.isEmpty else { return }
+        topicWatcher.reload()
+        palette.begin(.unsnoozeTopic, keepingHistory: keepingHistory)
     }
 
     /// One write for all of `ids`, so Topics whose Snooze ends together keep their order. Returns the open Topics
@@ -510,6 +555,12 @@ final class WorkspaceStore {
             palette.close()
             if let next { showTopic(next) }
         } catch { showTopicFailure(error) }
+    }
+
+    /// Unsnooze Topics…: one write for the whole set.
+    func unsnoozeTopics(_ ids: [String]) {
+        guard !clearSnoozes(ids).isEmpty else { return }
+        palette.close()
     }
 
     /// The Sidebar's Unsnooze: back to the Topics list, and to its Window when it has one. A Dormant
@@ -698,7 +749,7 @@ final class WorkspaceStore {
 
     /// The service on the Local server, with the Projects as git reported them last.
     func topicService() -> TopicService {
-        TopicService(paths: topicWatcher.store.paths, server: .local, projects: projects, sessionOrder: topicConfig.sessionOrder, insertPosition: topicConfig.insertPosition)
+        TopicService(paths: topicWatcher.store.paths, server: .local, projects: projects, topics: topicConfig)
     }
 
     private func present(_ response: TopicResponse, as presentation: TopicPresentation, invocation: UUID) {
@@ -803,10 +854,8 @@ final class WorkspaceStore {
     /// The last read, so a refresh runs `ps` only when a Topic Pane starts another program.
     @ObservationIgnored private var paneCommandLines = PaneCommandLines()
 
-    /// The Snoozed and Settled groups the user opened, and the Settled pages shown.
-    var topicGroups = TopicGroupsState(defaults: .standard) {
-        didSet { topicGroups.save(to: .standard) }
-    }
+    /// The open Snoozed or Settled group, and the Settled pages shown.
+    var topicGroups = TopicGroupsState()
 
     /// Built again only after a change to what it reads, or when a Snooze deadline passes. The Sidebar, the menus
     /// and the terminal area read it many times in each update, and each build is expensive.
@@ -840,13 +889,21 @@ final class WorkspaceStore {
         config.sidebar.formats.text(for: object, in: context ?? .init(), mode: topics.mode)
     }
 
-    /// Going to a Snoozed Topic opens the Snoozed group, so the Sidebar shows the selected Window.
+    /// What the `topic.tags` Format gives for each of the card's Tags; nil when it shows none or `tag_placement` is `none`.
+    func cardTags(_ row: TopicsModel.Row) -> CardTags? {
+        guard config.sidebar.tagPlacement != .none, !row.tags.isEmpty, let context = sidebarFormatContexts.topics[row.id] else { return nil }
+        let items = config.sidebar.formats.topicTags[topics.mode].items(in: context).compactMap { item in
+            row.tags.indices.contains(item.index) ? CardTags.Item(shown: row.tags[item.index], text: item.text) : nil
+        }
+        return items.isEmpty ? nil : CardTags(placement: config.sidebar.tagPlacement, items: items, identifier: row.id.accessibilityID)
+    }
+
+    /// Going to a Snoozed or Settled Topic opens its group, so the Sidebar shows it; leaving the group closes it.
     func updateTopicSelection() {
         let model = topics
-        if model.activeTopic != topicSelection.activeTopic, case .topic(let id)? = model.activeTopic,
-           model.snoozedTopicIDs.contains(id) {
-            topicGroups.open.insert(.snoozed)
-        }
+        var groups = topicGroups
+        groups.follow(model)
+        if groups != topicGroups { topicGroups = groups }
         var selection = topicSelection
         selection.select(windowID: selectedWindowID, activeTopic: model.activeTopic)
         // This runs on each refresh. An unchanged write still notifies every reader of `topics`.
@@ -2208,8 +2265,9 @@ final class WorkspaceStore {
         case .moveWindow: presentMoveWindow()
         case .moveSession: if !isRemote { presentMoveSession() }
         case .addProjectToTopic: if !isRemote { presentAddProject() }
-        case .snoozeTopic: if !isRemote, let id = activeTopicID { presentSnooze([.topic(id)], from: .until) }
-        case .snoozeTopics: if !isRemote { presentSnooze([], from: .pick) }
+        case .snoozeTopic: if !isRemote, let id = activeTopicID { presentSnooze(id) }
+        case .snoozeTopics: if !isRemote { presentCheck(CheckDraft(action: .snooze)) }
+        case .unsnoozeTopics: if !isRemote { presentCheck(CheckDraft(action: .unsnooze)) }
         case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
         case .removeSessionFromTopic:
@@ -2217,6 +2275,10 @@ final class WorkspaceStore {
         case .forgetTopic: if let id = activeTopicID, topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }) { presentForgetTopic(id) }
         case .renameTopic: presentRenameTopic()
         case .toggleLock: toggleLockOfCurrentSession()
+        case .moveTopicUp: moveActiveCard(.previous)
+        case .moveTopicDown: moveActiveCard(.next)
+        case .togglePinTopic: togglePinOfActiveTopic()
+        case .unsnoozeTopic: presentUnsnoozeTopic()
         case .markRead: changeRead(.read, in: currentReadTarget)
         case .markUnread: changeRead(.unread, in: currentReadTarget)
         case .markAllRead: changeRead(.read, in: .environment)

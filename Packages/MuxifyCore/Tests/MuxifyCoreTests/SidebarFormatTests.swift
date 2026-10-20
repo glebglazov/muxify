@@ -216,6 +216,74 @@ final class SidebarFormatTests: XCTestCase {
         XCTAssertEqual(config.sidebar.formats.window.summary.topics.source, "unchanged")
     }
 
+    private var tagged: SidebarFormat.Context {
+        let topic: [SidebarFormat.Variable: String] = [.topic_title: "Ship", .tag_count: "2", .topic_tags: "#work #ops"]
+        let tags = ["work", "ops"].map { name in
+            SidebarFormat.Context(values: topic.merging([.tag: name]) { _, new in new })
+        }
+        return SidebarFormat.Context(values: topic, loops: [.tags: tags])
+    }
+
+    func testTheTagsLoopGivesEachTagItsNameAndPlace() throws {
+        XCTAssertEqual(try SidebarFormat("#{T:#{tag}#{?loop_last_flag,, }}").expand(in: tagged), "work ops")
+        XCTAssertEqual(try SidebarFormat("#{T:#{tag}=#{loop_index}#{?loop_last_flag,,;}}").expand(in: tagged), "work=0;ops=1")
+        XCTAssertEqual(try SidebarFormat("#{tag_count} #{topic_tags}").expand(in: tagged), "2 #work #ops")
+        XCTAssertEqual(try SidebarFormat("#{T:#{tag}}").expand(in: .init()), "", "a context with no Tags gives nothing")
+        XCTAssertThrowsError(try SidebarFormat("#{T:#{tag_name}}"), "the old tag_name is an unknown variable")
+    }
+
+    func testTheTagsPartGivesOneItemPerTagAndAnEmptyItemShowsNoTag() throws {
+        let items = { (source: String) in try SidebarTagsFormat(source).items(in: self.tagged).map { "\($0.index):\($0.text)" } }
+        XCTAssertEqual(try items("#{T:#{tag}}"), ["0:work", "1:ops"])
+        XCTAssertEqual(try items("[#{T:#{tag} (#{tag_count})}]"), ["0:work (2)", "1:ops (2)"], "text outside the loop gives no item")
+        XCTAssertEqual(try items("#{T:#{?#{==:#{tag},ops},#{tag},}}"), ["1:ops"], "an empty pass leaves its Tag out")
+        XCTAssertEqual(try items("#{?tag_count,#{T:#{tag}},}"), ["0:work", "1:ops"])
+        XCTAssertEqual(try items(""), [], "an empty Format hides the Tags")
+        XCTAssertEqual(try items("#{topic_tags}"), [], "plain text is not a Tag")
+        XCTAssertThrowsError(try SidebarTagsFormat("#{T:#{symbol:tag}}"), "a Tag is text, not an icon")
+        XCTAssertThrowsError(try SidebarTagsFormat("#{T:#{tags}}"))
+    }
+
+    func testConfigParsesTheTagsPartPerModeAndTheTagPlacement() throws {
+        func load(_ text: String) throws -> Config { try Config.load(path: "/c.yaml") { _ in text }.get() }
+        let defaults = try load("")
+        XCTAssertEqual(defaults.sidebar.tagPlacement, .none, "Tags show on no card by default")
+        XCTAssertEqual(defaults.sidebar.formats.topicTags.topics.source, "#{T:#{tag}}")
+        XCTAssertEqual(defaults.sidebar.formats.topicTags.sessions.source, "#{T:#{tag}}")
+        let custom = try load("""
+        sidebar:
+          tag_placement: line
+          formats:
+            topic:
+              tags:
+                topics: '#{T:#{tag} }'
+                sessions: ''
+        """)
+        XCTAssertEqual(custom.problems, [])
+        XCTAssertEqual(custom.sidebar.tagPlacement, .line)
+        XCTAssertEqual(try load("sidebar:\n  tag_placement: corner").sidebar.tagPlacement, .corner)
+        XCTAssertEqual(custom.sidebar.formats.topicTags.topics.source, "#{T:#{tag} }")
+        XCTAssertEqual(custom.sidebar.formats.topicTags.sessions.source, "")
+        XCTAssertEqual(try load("sidebar:\n  formats:\n    topic:\n      tags: null").sidebar.formats.topicTags,
+                       SidebarFormats.defaults.topicTags, "null keeps the default")
+        let bad = try load("""
+        sidebar:
+          tag_placement: summary
+          formats:
+            topic:
+              tags: '#{T:#{nope}}'
+            session:
+              tags: '#{tag}'
+        """)
+        XCTAssertEqual(bad.problems.map { "\($0.line): \($0.message)" }, [
+            "2: sidebar.tag_placement: expected none, corner, title or line",
+            "5: sidebar.formats.topic.tags: unknown variable \"nope\"",
+            "7: unknown key \"sidebar.formats.session.tags\"",
+        ])
+        XCTAssertEqual(bad.sidebar.tagPlacement, .none, "the removed summary value keeps the default")
+        XCTAssertEqual(bad.sidebar.formats.topicTags, SidebarFormats.defaults.topicTags)
+    }
+
     func testBranchReadsResolveParentAndCacheSharedPathsPerSnapshot() {
         let files = ["/repo/.git/HEAD": "ref: refs/heads/main\n", "/work/.git": "gitdir: ../meta/work\n",
                      "/meta/work/HEAD": "ref: refs/heads/feature\n", "/detached/.git/HEAD": "abcdef\n"]

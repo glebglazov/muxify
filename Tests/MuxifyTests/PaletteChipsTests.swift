@@ -61,7 +61,7 @@ final class PaletteChipsTests: XCTestCase {
     @MainActor
     func testEditTagsChipKeysChangeTheChipsAndAnyTextChangePutsTheCaretBack() {
         let palette = CommandPalette()
-        palette.begin(.text(.tags(TagField(mode: .editTags(TopicRecord(id: "t")), chips: [tag("ops"), tag("qa"), tag("ui")]))))
+        palette.begin(.text(.tags(TagField(mode: .editTags(TopicRecord(id: "t")), defined: ConfigTags(["ops", "qa", "ui"].map { TagDefinition(tag: Tag(name: $0)!) }), chips: [tag("ops"), tag("qa"), tag("ui")]))))
         XCTAssertTrue(palette.receiveChipKey(.left(caretAtStart: true)))
         XCTAssertTrue(palette.receiveChipKey(.left(caretAtStart: true)))
         XCTAssertEqual(palette.flow?.tagField?.chipField, ChipField(chips: [tag("ops"), tag("qa"), tag("ui")], selection: 1))
@@ -69,16 +69,5 @@ final class PaletteChipsTests: XCTestCase {
         XCTAssertEqual(palette.flow?.tagField?.chipField, ChipField(chips: [tag("ops"), tag("ui")], selection: 1))
         palette.query = "x"
         XCTAssertEqual(palette.flow?.tagField?.chipField, ChipField(chips: [tag("ops"), tag("ui")]), "typed text puts the caret back")
-    }
-
-    func testPickChipsNameTheirTopicsOnceEachInTopicsListOrder() {
-        let topics = [PickableTopic(id: "a", tags: [tag("backend")]), PickableTopic(id: "b", tags: []),
-                      PickableTopic(id: "c", tags: [tag("backend"), tag("release")]), PickableTopic(id: "snoozed", tags: [tag("release")])]
-        XCTAssertEqual(PickChip.topicIDs([.topic("snoozed"), .tag(tag("backend")), .topic("a")], in: topics), ["a", "c", "snoozed"])
-        XCTAssertEqual(PickChip.topicIDs([.tag(tag("release")), .tag(tag("backend"))], in: topics), ["a", "c", "snoozed"])
-        XCTAssertEqual(PickChip.topicIDs([.topic("gone"), .tag(tag("none"))], in: topics), [], "a chip names only the Topics in the list")
-        XCTAssertEqual(PickChip.coveringTag(of: "c", in: [.topic("c"), .tag(tag("release")), .tag(tag("backend"))], topics: topics), tag("release"),
-                       "the first picked Tag that the Topic has covers it")
-        XCTAssertNil(PickChip.coveringTag(of: "a", in: [.topic("a"), .tag(tag("release"))], topics: topics), "a Topic chip does not cover")
     }
 }

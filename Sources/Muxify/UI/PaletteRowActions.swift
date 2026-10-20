@@ -22,13 +22,13 @@ extension CommandPalette {
             return
         }
         if case .tag(let tag) = item.ref, action == .snoozeTopic {
-            store.presentSnooze([.tag(tag)], from: .pick, keepingHistory: true)
+            store.presentCheck(CheckDraft(action: .snooze, checked: topics(with: tag, .snooze)), keepingHistory: true)
             return
         }
         if case .topic(let id, _) = item.ref,
            let topic = store.topicWatcher.records.first(where: { $0.id == id }) {
             switch action {
-            case .snoozeTopic: store.presentSnooze([.topic(id)], from: .until, keepingHistory: true)
+            case .snoozeTopic: store.presentSnooze(id, keepingHistory: true)
             case .startZen:
                 if store.topicWatcher.zen == nil { begin(.zen(id), keepingHistory: true) }
                 else { close(); store.endZen() }

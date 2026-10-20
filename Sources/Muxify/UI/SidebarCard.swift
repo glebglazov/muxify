@@ -168,44 +168,88 @@ struct CardHeader<Details: View>: View {
     /// Words for the accessibility value after the open state, such as "Dormant".
     var notes: [String] = []
     let summary: String
-    /// The card shows an action in its bottom-right corner, so the summary stops before it.
-    var reservesCorner = false
+    /// The room the action in the card's bottom-right corner takes, so the last line of a closed card stops before it.
+    var cornerWidth: CGFloat = 0
+    /// Small text at the right end of the title's first line, such as a Snoozed Topic's wake time.
+    var titleNote: String? = nil
+    var tags: CardTags? = nil
     @ViewBuilder var details: () -> Details
     @Environment(\.sidebarTypography) private var typography
     @Environment(\.wrapsCardTitles) private var wrapsTitle
     /// The title line's frame in the header, where a click tool such as Homerow clicks in place of the header's centre.
     @State private var titleLine: CGRect = .zero
+    /// The title line's width, and the width of the Hint and of the marks after the title, for a title that shares its
+    /// first line with Tag chips.
+    @State private var titleLineWidth: CGFloat = 0
+    @State private var hintWidth: CGFloat = 0
+    @State private var titleLineEnd: CGFloat = 0
 
     private static var space: String { "card-header" }
+
+    private var showsSummary: Bool { !isOpen && !summary.isEmpty }
+
+    /// Tag Marks and Tag chips sit in the right corner of the title's first line, after the Pin or Lock.
+    private var tagsInTitleLine: CardTags? {
+        guard let tags, tags.placement == .corner || tags.placement == .title else { return nil }
+        return tags
+    }
+
+    /// With Tag chips in the title line, a long title wraps under them at the full card width, which SwiftUI's
+    /// `Text` cannot do: the title is cut into its first line and the rest.
+    private var titleLines: (first: String, rest: String)? {
+        guard wrapsTitle, tags?.placement == .title, titleLineWidth > 0 else { return nil }
+        // The gaps after the title, after the Hint and before the marks; 2 points against rounding.
+        let room = titleLineWidth - hintWidth - titleLineEnd - 3 * 5 - 2
+        return TitleLines.split(title, font: typography.nsFont(for: .session), width: room)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .titleLine, spacing: 5) {
                 ZStack(alignment: .topLeading) {
-                    Text(title)
-                        .font(typography.font(for: .session))
-                        .lineLimit(wrapsTitle ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let titleLines {
+                        Text(titleLines.first).font(typography.font(for: .session)).fixedSize()
+                    } else {
+                        Text(title)
+                            .font(typography.font(for: .session))
+                            .lineLimit(wrapsTitle ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     // One line of the title's font: its centre is the centre of the title's first line.
                     Text(" ").font(typography.font(for: .session)).hidden()
                         .alignmentGuide(.titleLine) { $0[VerticalAlignment.center] }
                 }
-                if let hintTarget { CardHintSlot(target: hintTarget) }
+                if let hintTarget {
+                    CardHintSlot(target: hintTarget).onGeometryChange(for: CGFloat.self) { $0.size.width } action: { hintWidth = $0 }
+                }
                 Spacer(minLength: 0)
-                // The Hint badge takes the mark's place while it shows.
-                let markOpacity: Double = hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1
-                if isPinned { PinMark().opacity(markOpacity) } else if isLocked { LockMark().opacity(markOpacity) }
+                HStack(alignment: .titleLine, spacing: 5) {
+                    if let titleNote { Text(titleNote).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
+                    // The Hint badge takes the mark's place while it shows.
+                    let markOpacity: Double = hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1
+                    if isPinned { PinMark().opacity(markOpacity) } else if isLocked { LockMark().opacity(markOpacity) }
+                    if let tagsInTitleLine { CardTagsSlot(tags: tagsInTitleLine) }
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { titleLineEnd = $0 }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { titleLineWidth = $0 }
+            .padding(.trailing, !isOpen && summary.isEmpty ? cornerWidth : 0)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { titleLine = $0 }
-            HStack(spacing: 5) { details() }
-            if !isOpen && !summary.isEmpty {
+            if let rest = titleLines?.rest, !rest.isEmpty {
+                Text(rest).font(typography.font(for: .session)).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 5) {
+                if let tags, tags.placement == .line { CardTagsSlot(tags: tags) }
+                details()
+            }
+            if showsSummary {
                 Text(summary)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .padding(.top, 1)
-                    .padding(.trailing, reservesCorner ? CardCorner.width : 0)
+                    .padding(.trailing, cornerWidth)
             }
         }
         .padding(.leading, 13).padding(.trailing, 10).padding(.top, 7).padding(.bottom, isOpen ? 3 : 7)
@@ -386,6 +430,8 @@ struct CardList<Heading: View, Row: View>: View {
 enum CardCorner {
     /// The room the action takes at the end of the summary line or the footer line.
     static let width: CGFloat = 44
+    /// The room of Unsnooze or Reopen… on a card in the Snoozed or Settled group.
+    static let groupWidth: CGFloat = 60
 }
 
 extension View {

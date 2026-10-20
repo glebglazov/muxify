@@ -25,7 +25,7 @@ enum TopicGroupID: Hashable {
     }
 }
 
-/// The two group rows after the open Topics and the No Topic card in Topics mode. Raw values are the stored open state.
+/// The two group rows after the open Topics and the No Topic card in Topics mode.
 enum TopicGroup: String, CaseIterable {
     case snoozed, settled
 
@@ -33,34 +33,53 @@ enum TopicGroup: String, CaseIterable {
     var accessibilityID: String { rawValue + "-topics" }
 }
 
-/// Which groups the user opened and how many pages the Settled group shows.
-/// View state: it lives in UserDefaults, never in the Config.
+/// Which group is open and how many pages the Settled group shows. At most one group is open, and only for a while:
+/// it follows the Active Topic, so it is view state that no restart keeps.
 struct TopicGroupsState: Equatable {
     static let pageSize = 15
-    private static let openKey = "openTopicGroups"
-    private static let pagesKey = "settledTopicPages"
 
-    var open: Set<TopicGroup> = []
-    var settledPages = 1
+    var open: TopicGroup? {
+        didSet { if oldValue == .settled, open != .settled { settledPages = 1 } }
+    }
+    private(set) var settledPages = 1
+    private var followed: Place?
 
-    init() {}
-
-    init(defaults: UserDefaults) {
-        open = Set((defaults.stringArray(forKey: Self.openKey) ?? []).compactMap(TopicGroup.init(rawValue:)))
-        settledPages = max(1, defaults.integer(forKey: Self.pagesKey))
+    private struct Place: Equatable {
+        let topic: TopicGroupID?
+        let group: TopicGroup?
     }
 
-    func save(to defaults: UserDefaults) {
-        defaults.set(open.map(\.rawValue).sorted(), forKey: Self.openKey)
-        defaults.set(settledPages, forKey: Self.pagesKey)
-    }
-
-    /// Collapsing Settled forgets the extra pages, so it opens short again.
-    mutating func toggle(_ group: TopicGroup) {
-        if open.remove(group) == nil { open.insert(group) } else if group == .settled { settledPages = 1 }
-    }
+    /// A header click opens its group and closes the other one, or closes its own.
+    mutating func toggle(_ group: TopicGroup) { open = open == group ? nil : group }
 
     mutating func showMoreSettled() { settledPages += 1 }
+
+    /// Opens the group that lists the Active Topic, with the Settled pages that reach its row, and closes the open group
+    /// when the Active Topic is in the Topics list, a Locked Session or No Topic. Only a change of the Active Topic or of
+    /// the group that lists it does this, so a header click stays while the user works in the same Topic.
+    mutating func follow(_ model: TopicsModel) {
+        let place = Place(topic: model.activeTopic, group: model.activeTopicGroup)
+        guard place != followed else { return }
+        followed = place
+        open = place.group
+        if place.group == .settled, case .topic(let id)? = place.topic, let index = model.settledTopicIDs.firstIndex(of: id) {
+            settledPages = max(settledPages, index / Self.pageSize + 1)
+        }
+    }
+}
+
+/// The Topic and Locked cards right above and below a card, among those with its Pin.
+struct CardNeighbors: Equatable {
+    let above: TopicListID?
+    let below: TopicListID?
+
+    /// Where Move Up (`previous`) or Move Down (`next`) puts the card; nil at that end of its cards.
+    func placement(_ direction: StepDirection) -> TopicPlacement? {
+        switch direction {
+        case .previous: return above.map(TopicPlacement.before)
+        case .next: return below.map(TopicPlacement.after)
+        }
+    }
 }
 
 /// Which Agents the Agents section lists: every Agent, or those of what the
@@ -230,13 +249,16 @@ struct TopicsModel {
         let isExpanded: Bool
         /// The record remembers Sessions that Reopen can make again.
         var remembersSessions = true
-        /// A→Z. A Locked Session has none.
-        var tags: [Tag] = []
+        /// In Config order, then the Tags the Config no longer defines. A Locked Session has none, and with Tags
+        /// off no Topic has any.
+        var tags: [ShownTag] = []
         /// An open Topic with no live Session. The card shows dimmed.
         var hasNoLiveSession: Bool {
             if case .settled = kind { return false }
             return sessions.isEmpty
         }
+        /// True for no Tag, so a missing filter keeps every row.
+        func has(_ tag: Tag?) -> Bool { tag.map { tag in tags.contains { $0.tag == tag } } ?? true }
         /// No live Session, and Reopen makes the remembered ones again.
         var isDormant: Bool { hasNoLiveSession && remembersSessions }
         /// "Dormant", or "Empty" for an open Topic that remembers no Session and offers Add a Project.
@@ -274,6 +296,20 @@ struct TopicsModel {
         return rows[(index + 1)...].first(where: stays)?.id ?? rows[..<index].last(where: stays)?.id ?? .noTopic
     }
 
+    /// The Pinned Topic cards, or the Topic and Locked cards that are not Pinned, in list order: a drag or Move Up
+    /// and Move Down reorders a card among these only.
+    func cardOrder(pinned: Bool) -> [TopicListID] {
+        rows.compactMap { row in row.isPinned == pinned ? row.id.listID : nil }
+    }
+
+    /// The cards right above and below a card in the Topics list, among those with its Pin. None for a Topic outside it.
+    func neighbors(of id: TopicGroupID) -> CardNeighbors {
+        guard let row = rows.first(where: { $0.id == id }), let listID = id.listID else { return CardNeighbors(above: nil, below: nil) }
+        let order = cardOrder(pinned: row.isPinned)
+        guard let index = order.firstIndex(of: listID) else { return CardNeighbors(above: nil, below: nil) }
+        return CardNeighbors(above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil)
+    }
+
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
     let noTopicSessions: [Session]
     /// The Locked Sessions, by Session ID, also while Zen hides their cards.
@@ -283,8 +319,17 @@ struct TopicsModel {
     let openedNoTopicSession: Session?
     /// Snoozed, then Settled, after the Topics rows in Topics mode. Empty in Sessions mode.
     let groups: [Group]
-    /// The Snoozed Topics in list order, in both Sidebar modes.
+    /// The Snoozed Topics by wake time, soonest first, in both Sidebar modes. A Topic Snoozed until the user Unsnoozes
+    /// it comes last; equal times keep the list order.
     let snoozedRows: [Row]
+    /// Every Settled Topic, newest first.
+    let settledTopicIDs: [String]
+    /// The group that lists the Active Topic. Nil for a Topic in the Topics list, a Locked Session and No Topic.
+    var activeTopicGroup: TopicGroup? {
+        guard case .topic(let id)? = activeTopic else { return nil }
+        if snoozedTopicIDs.contains(id) { return .snoozed }
+        return settledTopicIDs.contains(id) ? .settled : nil
+    }
     /// The title each row shows, by Topic id: open, Snoozed and the Settled Topics on the shown pages.
     let titles: [String: String]
     let snoozedTopicIDs: Set<String>
@@ -311,6 +356,8 @@ struct TopicsModel {
     let topicsEnabled: Bool
     let sessionsEnabled: Bool
     let mode: SidebarMode
+    /// `topics.tags`; nil while Tags are off.
+    let tags: ConfigTags?
     var showsToggle: Bool { topicsEnabled && sessionsEnabled }
 
     init(records: [TopicRecord], windows: [TmuxWindow], config: Config, selection: TopicSelection,
@@ -319,6 +366,7 @@ struct TopicsModel {
          now: Date = Date()) {
         topicsEnabled = config.sidebar.topics
         sessionsEnabled = config.sidebar.sessions
+        tags = config.topics.tags
         self.mode = config.sidebar.shownMode(chosen: mode)
         let locks = SessionLock.locks(in: windows, records: records)
         lockedSessionIDs = Set(locks.map(\.sessionID))
@@ -390,7 +438,7 @@ struct TopicsModel {
             let agents = isQuiet(id) ? [] : agentsByGroup[id] ?? []
             return Row(id: id, title: title, kind: kind, mark: isQuiet(id) ? nil : RowMark(unread: record.isUnread, agent: mark(agents)), isPinned: record.isPinned,
                        sessions: sessions(of: id, members: grouped[id] ?? [], record: record), isExpanded: openTopics.contains(id),
-                       remembersSessions: !record.sessions.isEmpty, tags: record.tags.sorted())
+                       remembersSessions: !record.sessions.isEmpty, tags: config.topics.tags?.shown(record.tags) ?? [])
         }
         /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
         func lockedRow(_ lock: SessionLock) -> Row {
@@ -436,25 +484,33 @@ struct TopicsModel {
         openedNoTopicSession = active == .noTopic ? noTopicSessions.first { $0.id.session == selectedWindow?.sessionID } : nil
         topicSessions = Dictionary((rows.flatMap(\.sessions) + noTopicSessions).map { ($0.id.session, $0) },
                                    uniquingKeysWith: { first, _ in first })
+        let wakes = Dictionary(open.compactMap { record in record.snoozeDeadline.map { (record.id, $0) } },
+                               uniquingKeysWith: { first, _ in first })
+        func wake(_ row: Row) -> Date {
+            guard case .topic(let id) = row.id, case .at(let date)? = wakes[id] else { return .distantFuture }
+            return date
+        }
         let snoozedRows = rows.filter { if case .topic(let id) = $0.id { return snoozedIDs.contains(id) }; return false }
+            .enumerated().sorted { (wake($0.element), $0.offset) < (wake($1.element), $1.offset) }.map(\.element)
         let openRows = rows.filter { if case .topic(let id) = $0.id { return !snoozedIDs.contains(id) }; return true }
         self.rows = openRows
         self.snoozedRows = snoozedRows
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
+        settledTopicIDs = settled.map(\.id)
         if let id = emptyTopicID, let row = rows.first(where: { $0.id == .topic(id) }) {
             emptyTopic = row
         } else if let id = emptyTopicID, let record = settled.first(where: { $0.id == id }) {
-            emptyTopic = Self.settledRow(record, projects: config.projects, expanded: openTopics)
+            emptyTopic = Self.settledRow(record, projects: config.projects, tags: config.topics.tags, expanded: openTopics)
         } else {
             emptyTopic = nil
         }
         let settledRows = settled.prefix(groupsState.settledPages * TopicGroupsState.pageSize)
-            .map { Self.settledRow($0, projects: config.projects, expanded: openTopics) }
+            .map { Self.settledRow($0, projects: config.projects, tags: config.topics.tags, expanded: openTopics) }
         groups = self.mode == .topics ? [
-            Group(kind: .snoozed, topics: snoozedRows, hiddenCount: 0, isExpanded: groupsState.open.contains(.snoozed)),
+            Group(kind: .snoozed, topics: snoozedRows, hiddenCount: 0, isExpanded: groupsState.open == .snoozed),
             Group(kind: .settled, topics: settledRows,
-                  hiddenCount: settled.count - settledRows.count, isExpanded: groupsState.open.contains(.settled)),
+                  hiddenCount: settled.count - settledRows.count, isExpanded: groupsState.open == .settled),
         ].filter { $0.count > 0 } : []
         titles = Dictionary((rows + settledRows).compactMap { row -> (String, String)? in
             if case .topic(let id) = row.id { return (id, row.title) }
@@ -505,7 +561,7 @@ struct TopicsModel {
     }
 
     /// A Settled Topic's row, with the Sessions and Windows its record remembers.
-    static func settledRow(_ record: TopicRecord, projects: [Project], expanded: Set<TopicGroupID>) -> Row {
+    static func settledRow(_ record: TopicRecord, projects: [Project], tags: ConfigTags?, expanded: Set<TopicGroupID>) -> Row {
         let id = TopicGroupID.topic(record.id)
         let title = [record.title, record.slug].compactMap { $0 }
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Untitled Topic"
@@ -528,7 +584,7 @@ struct TopicsModel {
         }
         return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
                    mark: RowMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id),
-                   tags: record.tags.sorted())
+                   tags: tags?.shown(record.tags) ?? [])
     }
 
     /// A Session in a Worktree is named as the Project names that Worktree.

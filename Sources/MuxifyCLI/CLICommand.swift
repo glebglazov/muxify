@@ -77,9 +77,9 @@ enum CLICommand: Equatable {
     topic unsnooze Unsnoozes this Pane's Topic, or each --topic. A Topic that is not
                    Snoozed does not change. It changes nothing in tmux.
     topic tag      Adds Tags to this Pane's Topic, removes them, or sets them, so that the
-                   Topic has exactly these Tags: set with no Tag removes every Tag. A Tag has
-                   lower case letters, digits and - only, such as backend; upper case becomes
-                   lower case. The # is optional, and the shell reads an unquoted # as a comment.
+                   Topic has exactly these Tags: set with no Tag removes every Tag. Only a Tag
+                   that the Config lists in topics.tags can be added, such as backend; upper case
+                   becomes lower case. The # is optional, and the shell reads an unquoted # as a comment.
     topic list     Prints each open Topic's id, label and Tags without starting Muxify.
     topic show     Prints this Pane's Topic: its id, label and Tags, then a line for each live
                    Session: its name, Project, folder and branch. With --json, also its

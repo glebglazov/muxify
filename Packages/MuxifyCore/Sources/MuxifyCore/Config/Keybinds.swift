@@ -27,6 +27,11 @@ public enum ConfigAction: String, KeybindAction {
     case forgetTopic = "forget_topic"
     case renameTopic = "rename_topic"
     case toggleLock = "toggle_lock"
+    case moveTopicUp = "move_topic_up"
+    case moveTopicDown = "move_topic_down"
+    case togglePinTopic = "toggle_pin_topic"
+    case unsnoozeTopic = "unsnooze_topic"
+    case unsnoozeTopics = "unsnooze_topics"
     case markRead = "mark_read"
     case markUnread = "mark_unread"
     case markAllRead = "mark_all_read"
@@ -87,6 +92,11 @@ public enum ConfigAction: String, KeybindAction {
         .forgetTopic: [],
         .renameTopic: [],
         .toggleLock: [],
+        .moveTopicUp: ["alt+cmd+up"],
+        .moveTopicDown: ["alt+cmd+down"],
+        .togglePinTopic: [],
+        .unsnoozeTopic: [],
+        .unsnoozeTopics: [],
         .markRead: ["cmd+shift+r"],
         .markUnread: ["cmd+shift+u"],
         .markAllRead: [],

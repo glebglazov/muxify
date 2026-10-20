@@ -61,11 +61,15 @@ public struct Config: Equatable {
         }
     }
 
-    public struct Topics: Equatable {
+    public struct Topics: Equatable, Sendable {
         public var snoozePresets = SnoozePreset.defaults
         public var titleCommandFallbacks: [String] = []
         public var sessionOrder = SessionOrder.oldestFirst
         public var insertPosition = TopicInsertPosition.bottom
+        /// Nil: Tags are off, and `#` in New Topic is plain title text.
+        public var tags: ConfigTags?
+
+        public init() {}
     }
 
     public struct Notifications: Equatable {
@@ -88,6 +92,19 @@ public struct Config: Equatable {
         /// `titles.wrap`: a Topic or Session card's title wraps onto as many lines as it needs.
         /// False keeps it on one line and cuts it with "…".
         public var wrapsTitles = true
+        public var tagPlacement = TagPlacement.none
+
+        /// Where a Topic card shows its Tags.
+        public enum TagPlacement: String {
+            /// No Tags on the cards.
+            case none
+            /// One Tag Mark per Tag in the right corner of the title's first line, after the Pin or Lock.
+            case corner
+            /// The first Tag as a chip, and "+N", in the right corner of the title's first line, after the Pin or Lock.
+            case title
+            /// Chips on their own line under the title.
+            case line
+        }
 
         /// The mode the Sidebar shows when the user chose `chosen`; a mode that is off gives way to the other.
         public func shownMode(chosen: SidebarMode) -> SidebarMode {
@@ -294,6 +311,11 @@ public struct Config: Equatable {
         #     agent:
         #       title: '#{window_name}'
         #       summary: '#{agent_group}'
+        #   # Where a Topic card shows its Tags: none, corner (marks in the
+        #   # title line's right corner), title (chips after the title) or line
+        #   # (chips under it).
+        #   # formats.topic.tags gives each Tag's text: '#{T:#{tag}}'; '' hides them.
+        #   tag_placement: none
         #
         # hints:
         #   hold_delay: 0.35 # seconds; 0 shows at once; false disables hold Hints
@@ -337,6 +359,14 @@ public struct Config: Equatable {
         #   # New and returning Settled Topics go at the bottom or top of their
         #   # part of the list. Dormant Topics keep their place.
         #   insert_position: bottom
+        #   # The only Tags a Topic can have, in this order. A key is lower case
+        #   # letters, digits and -. color is as in ui.agent_colors; a Tag
+        #   # without one gets a fixed color from its name. No tags: Tags are off.
+        #   tags:
+        #     work:
+        #       color: blue
+        #     personal:
+        #       color: {light: '#5E8C6A', dark: '#7FA88A'}
         #
         # keybindings:
         #   # An action maps to one trigger or a list of them, spelled as in
@@ -589,9 +619,34 @@ private struct ConfigReader {
                     continue
                 }
                 config.topics.sessionOrder = order
+            case "tags": readTags(value)
             default: problem(at: key, "unknown key \"topics.\(name)\"")
             }
         }
+    }
+
+    /// A Tag that cannot apply is left out, so a later Tag change cannot add it. A bad `color` leaves only the
+    /// colour out.
+    mutating func readTags(_ node: Node) {
+        guard node.null == nil else { return }
+        var definitions: [TagDefinition] = []
+        for (name, key, value) in entries(of: node, "topics.tags") {
+            guard let tag = Tag(name: name) else {
+                problem(at: key, "topics.tags: \"\(name)\" is not a Tag: use lower case letters, digits and -, e.g. backend")
+                continue
+            }
+            var color: MarkColor?
+            if value.null == nil {
+                for (field, fieldKey, fieldValue) in entries(of: value, "topics.tags.\(name)") {
+                    switch field {
+                    case "color": color = markColor(fieldValue, "topics.tags.\(name).color")
+                    default: problem(at: fieldKey, "unknown key \"topics.tags.\(name).\(field)\"")
+                    }
+                }
+            }
+            definitions.append(TagDefinition(tag: tag, color: color))
+        }
+        config.topics.tags = ConfigTags(definitions)
     }
 
     public mutating func readTitleCommands(_ node: Node) {
@@ -764,6 +819,12 @@ private struct ConfigReader {
                     }
                     config.sidebar.wrapsTitles = wraps
                 }
+            case "tag_placement":
+                guard value.tag == Yams.Tag(.str), let placement = value.string.flatMap(Config.Sidebar.TagPlacement.init(rawValue:)) else {
+                    problem(at: value, "sidebar.tag_placement: expected none, corner, title or line")
+                    continue
+                }
+                config.sidebar.tagPlacement = placement
             case "agents_scope":
                 config.sidebar.agentsScope = perMode(value, "sidebar.agents_scope", config.sidebar.agentsScope,
                                                      expected: "active, window or all") { node in
@@ -798,6 +859,15 @@ private struct ConfigReader {
                     }
                     if part == "left" { config.sidebar.formats.windowParts.left = parsed }
                     else { config.sidebar.formats.windowParts.right = parsed }
+                    continue
+                }
+                if object == .topic, part == "tags" {
+                    config.sidebar.formats.topicTags = perMode(value, place, SidebarFormats.defaults.topicTags,
+                                                               expected: "a Format string or null") { node in
+                        if node.null != nil { return SidebarFormats.defaults.topicTags.topics }
+                        guard node.tag == Yams.Tag(.str), let source = node.string else { return nil }
+                        return try SidebarTagsFormat(source)
+                    }
                     continue
                 }
                 guard part == "title" || part == "summary" else {
@@ -939,12 +1009,7 @@ private struct ConfigReader {
                 problem(at: key, "unknown key \"ui.agent_colors.\(name)\"")
                 continue
             }
-            // An unquoted #RRGGBB is a YAML comment, so it arrives here as null.
-            guard value.tag == Yams.Tag(.str), let text = string(value), let color = AgentColor(text) else {
-                let names = SystemColorName.allCases.map(\.rawValue).joined(separator: ", ")
-                problem(at: value, "ui.agent_colors.\(name): expected one of \(names), or a quoted '#RRGGBB'")
-                continue
-            }
+            guard let color = markColor(value, "ui.agent_colors.\(name)") else { continue }
             config.agentColors[mark] = color
         }
     }
@@ -1218,6 +1283,46 @@ private struct ConfigReader {
             }
         }
         return result
+    }
+
+    /// One color, or a mapping with one color for `light` and one for `dark` appearance. Nil after a problem.
+    private mutating func markColor(_ node: Node, _ place: String) -> MarkColor? {
+        let names = SystemColorName.allCases.map(\.rawValue).joined(separator: ", ")
+        let expected = "expected one of \(names), or a quoted '#RRGGBB'"
+        // An unquoted #RRGGBB is a YAML comment, so it arrives here as null.
+        func single(_ node: Node) -> MarkColor.Single? {
+            guard node.tag == Yams.Tag(.str), let text = string(node) else { return nil }
+            return MarkColor.Single(text)
+        }
+        guard node.mapping != nil else {
+            guard let color = single(node) else {
+                problem(at: node, "\(place): \(expected), or a mapping with light and dark")
+                return nil
+            }
+            return .single(color)
+        }
+        let fields = entries(of: node, place)
+        var colors: [String: MarkColor.Single] = [:]
+        var valid = true
+        for (name, key, value) in fields {
+            guard ["light", "dark"].contains(name) else {
+                problem(at: key, "unknown key \"\(place).\(name)\"")
+                valid = false
+                continue
+            }
+            guard let color = single(value) else {
+                problem(at: value, "\(place).\(name): \(expected)")
+                valid = false
+                continue
+            }
+            colors[name] = color
+        }
+        let missing = ["light", "dark"].filter { side in !fields.contains { $0.name == side } }
+        if !missing.isEmpty {
+            problem(at: node, "\(place): missing \(missing.joined(separator: " and "))")
+        }
+        guard valid, let light = colors["light"], let dark = colors["dark"] else { return nil }
+        return .pair(light: light, dark: dark)
     }
 
     /// A scalar other than null (empty, `~` or `null`).

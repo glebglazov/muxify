@@ -8,22 +8,20 @@ public struct TopicService: Sendable {
     public let server: TmuxServer
     /// The Projects a request may name, with the layouts that git reported.
     public let projects: [Project]
-    /// `topics.session_order` in the Config, which places a new Session in a Topic the user ordered.
-    public let sessionOrder: SessionOrder
-    public let insertPosition: TopicInsertPosition
+    /// The Config's `topics`: where a new Session and a new Topic go, and the Tags a request may add.
+    public let topics: Config.Topics
     private let store: TopicStore
     private let editLockTimeout: TimeInterval
 
-    public init(paths: MuxifyPaths, server: TmuxServer = .local, projects: [Project] = [], sessionOrder: SessionOrder = .oldestFirst, insertPosition: TopicInsertPosition = .bottom) {
-        self.init(paths: paths, server: server, projects: projects, sessionOrder: sessionOrder, insertPosition: insertPosition, editLockTimeout: 10)
+    public init(paths: MuxifyPaths, server: TmuxServer = .local, projects: [Project] = [], topics: Config.Topics = Config.Topics()) {
+        self.init(paths: paths, server: server, projects: projects, topics: topics, editLockTimeout: 10)
     }
 
-    init(paths: MuxifyPaths, server: TmuxServer, projects: [Project], sessionOrder: SessionOrder = .oldestFirst, insertPosition: TopicInsertPosition = .bottom, editLockTimeout: TimeInterval) {
+    init(paths: MuxifyPaths, server: TmuxServer, projects: [Project], topics: Config.Topics = Config.Topics(), editLockTimeout: TimeInterval) {
         self.paths = paths
         self.server = server
         self.projects = projects
-        self.sessionOrder = sessionOrder
-        self.insertPosition = insertPosition
+        self.topics = topics
         self.editLockTimeout = editLockTimeout
         store = TopicStore(paths: paths)
     }
@@ -61,7 +59,7 @@ public struct TopicService: Sendable {
             let records = try store.read().records
             let snapshot = server.snapshot()
             let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
-            let record = topic.remembering(snapshot, projects: projects, order: sessionOrder) ?? topic
+            let record = topic.remembering(snapshot, projects: projects, order: topics.sessionOrder) ?? topic
             return .success(TopicSettleSession.choices(topic: record, snapshot: snapshot, projects: projects,
                                                        mergedWorktrees: TopicWorktrees.merged(in: record, root: paths.worktrees.path)))
         } catch {
@@ -151,14 +149,14 @@ public struct TopicService: Sendable {
                         record.snoozedUntil = nil
                         return record
                     }
-                    return ([], try transaction.setSnoozes(saves, insertPosition: insertPosition))
+                    return ([], try transaction.setSnoozes(saves, insertPosition: self.topics.insertPosition))
                 }
                 let set = SnoozeSet(ids, until: deadline, records: transaction.records)
                 // A Topic that was Settled after the read has no save.
                 if let settled = ids.first(where: { id in !set.saves.contains { $0.id == id } }) {
                     throw TopicRequestError.topicUnavailable(settled)
                 }
-                return (set.shortened, try transaction.setSnoozes(set.saves, insertPosition: insertPosition))
+                return (set.shortened, try transaction.setSnoozes(set.saves, insertPosition: self.topics.insertPosition))
             }
             phase = .changesStarted
             try executor.run(moved.map { .tmux($0.setOption) }, client: client)
@@ -173,11 +171,18 @@ public struct TopicService: Sendable {
         do {
             let records = try store.read().records
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: server.snapshot(), client: client)
+            try checkDefined(change, on: topic.tags)
             try store.write { try $0.changeTags(of: topic.id, change) }
             return .changed(TopicChange(topicID: topic.id))
         } catch {
             return .failed(failure(error, phase: .nothingChanged))
         }
+    }
+
+    /// Only the Tags in `topics.tags` can be added; a Tag the Config no longer defines can stay on its Topic.
+    private func checkDefined(_ change: TopicTagChange, on tags: Set<Tag>) throws {
+        let undefined = topics.tags?.undefinedTags(added: change, to: tags) ?? change.applied(to: tags).subtracting(tags).sorted()
+        guard undefined.isEmpty else { throw TopicRequestError.undefinedTags(undefined) }
     }
 
     /// A plan with what the host shows when the plan itself selects nothing.
@@ -206,7 +211,7 @@ public struct TopicService: Sendable {
                     if let left = edit.leftTopic {
                         _ = try transaction.apply(TopicRecordChange(before: records.first { $0.id == left.id }, after: left))
                     }
-                    return try transaction.apply(TopicRecordChange(before: read, after: record), insertPosition: insertPosition,
+                    return try transaction.apply(TopicRecordChange(before: read, after: record), insertPosition: topics.insertPosition,
                                                  replacingLockOf: planned.replacedLockOf)
                 }
                 commands += moved.map { .tmux($0.setOption) }
@@ -220,12 +225,12 @@ public struct TopicService: Sendable {
                 let before = edit.record ?? records.first { $0.id == record.id }
                 let locks = SessionLock.locks(in: server.snapshot().windows, records: try store.read().records)
                 let moved = try store.write(locks: locks) {
-                    try $0.apply(TopicRecordChange(before: before, after: record), insertPosition: insertPosition)
+                    try $0.apply(TopicRecordChange(before: before, after: record), insertPosition: topics.insertPosition)
                 }
                 try executor.run(moved.map { .tmux($0.setOption) }, client: client)
             case .forget(let id):
                 let locks = SessionLock.locks(in: server.snapshot().windows, records: try store.read().records)
-                let moved = try store.write(locks: locks) { try $0.forget(id, insertPosition: insertPosition) }
+                let moved = try store.write(locks: locks) { try $0.forget(id, insertPosition: topics.insertPosition) }
                 try executor.run(moved.map { .tmux($0.setOption) }, client: client)
             case nil: break
             }
@@ -249,6 +254,7 @@ public struct TopicService: Sendable {
             throw TopicRequestError.noTarget
         case .create(let title, let projectPath, let tags):
             let tags = Set(tags ?? [])
+            try checkDefined(.add(Array(tags)), on: [])
             let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             let home: Project
             if let projectPath {
@@ -276,7 +282,7 @@ public struct TopicService: Sendable {
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let project = try project(at: projectPath)
             return Planned(edit: try TopicProjectPlan(topic: topic, project: project, workingCopy: workingCopy(choice, of: project),
-                                                      windows: snapshot.windows, projects: projects, order: sessionOrder).edit)
+                                                      windows: snapshot.windows, projects: projects, order: topics.sessionOrder).edit)
         case .settle(let choices, let outcome):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)
@@ -286,7 +292,7 @@ public struct TopicService: Sendable {
             }
             return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, projects: projects, choices: choices, outcome: outcome,
                                                  mergedWorktrees: TopicWorktrees.merged(in: topic, root: paths.worktrees.path),
-                                                 order: sessionOrder).edit)
+                                                 order: topics.sessionOrder).edit)
         case .forget(let choices, let worktrees):
             let topic = try forgetTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)
@@ -327,10 +333,10 @@ public struct TopicService: Sendable {
             case .newWindow: throw TopicRequestError.noTarget
             case .topic(let ref):
                 plan = try TopicMembershipPlan(source: moved, destination: ref.resolve(in: records, open: true), records: records,
-                                               windows: windows, projects: projects, clientTTY: client, order: sessionOrder)
+                                               windows: windows, projects: projects, clientTTY: client, order: topics.sessionOrder)
             case .newTopic(let title):
                 plan = try TopicMembershipPlan(source: moved, title: title, records: records, windows: windows,
-                                               projects: projects, clientTTY: client, order: sessionOrder)
+                                               projects: projects, clientTTY: client, order: topics.sessionOrder)
             }
             var edit = TopicEdit(record: plan.record, commands: plan.commands, selection: selection)
             edit.leftTopic = plan.leftTopic
@@ -395,7 +401,7 @@ public struct TopicService: Sendable {
                 throw TopicEditFailure.sessionUnavailable
             }
             return Planned(edit: try TopicSessionOrderPlan(moving: id.rawValue, to: placement, topic: topic, windows: snapshot.windows,
-                                                           projects: projects, order: sessionOrder).edit)
+                                                           projects: projects, order: topics.sessionOrder).edit)
         case .sortSessions:
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             return Planned(edit: TopicSessionOrderPlan(sortingByCreation: topic).edit)
@@ -547,6 +553,7 @@ public struct TopicService: Sendable {
         case let error as TopicRequestError:
             switch error {
             case .invalidURL, .targetAndTopics: return .unsupported
+            case .undefinedTags: return .tagUndefined
             case .noTarget: return .noTarget
             case .projectUnavailable: return .projectUnavailable
             case .sourceHasNoTopic: return .sourceHasNoTopic
@@ -616,6 +623,7 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case sessionUnavailable(String)
     case sessionInTopic(session: String, topic: String)
     case targetAndTopics
+    case undefinedTags([Tag])
 
     public var description: String {
         switch self {
@@ -635,6 +643,8 @@ public enum TopicRequestError: Error, CustomStringConvertible {
         case .sessionInTopic(let session, let topic):
             return "The Session \(session) is in the Topic \(topic). Only a No Topic Session can be Locked."
         case .targetAndTopics: return "The request names a target and a list of Topics. Name only one of them."
+        case .undefinedTags(let tags):
+            return "The Config does not define \(tags.map(\.description).joined(separator: ", ")) in topics.tags. Add a Tag there first."
         }
     }
 }
