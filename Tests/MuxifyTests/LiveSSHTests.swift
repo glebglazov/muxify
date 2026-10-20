@@ -1,5 +1,6 @@
 import XCTest
 import Darwin
+@testable import MuxifyCore
 
 /// Opt-in smoke test of the real SSH lanes on a Linux/macOS host. Its tmux
 /// server is isolated under a unique remote temp directory, not the user's.
@@ -148,7 +149,7 @@ final class LiveSSHTests: XCTestCase {
                                            "-t", "\(main.sessionID):", "-n", name])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         _ = try connection.run(["switch-client", "-c", tty, "-t", "\(main.sessionID):\(windowID)"])
-        let stored = StoredBrowser(tabURLs: ["http://\(host):3000", "https://example.com"], activeTab: 1, isOpen: true)
+        let stored = StoredBrowser(tabURLs: ["http://\(host):3000", "https://example.com"], activeTab: 1, layout: PanelLayout(shown: .both))
         _ = try connection.run(stored.setOptionArgs(windowID: windowID))
         let paneID = try connection.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", windowID, "exec /bin/sleep 120"])
             .trimmingCharacters(in: .whitespacesAndNewlines)

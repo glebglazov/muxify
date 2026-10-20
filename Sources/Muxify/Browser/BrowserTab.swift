@@ -16,6 +16,22 @@ final class BrowserTab: NSObject, Identifiable {
     private(set) var isLoading = false
     private(set) var progress: Double = 0
 
+    /// Find in Page. Kept while the Tab lives; tmux does not store it.
+    private(set) var isFindShown = false
+    var findQuery = "" {
+        didSet { if findQuery != oldValue { find(step: 0) } }
+    }
+    private(set) var findStatus = FindStatus.idle
+    /// The panel moves Focus to the find field and selects its text.
+    var findFieldFocusRequested = false
+
+    enum FindStatus: Equatable {
+        case idle
+        case notFound
+        /// `index` is 0-based.
+        case match(index: Int, total: Int)
+    }
+
     /// Whether the Tab shows (or will show, once loaded) a page.
     var hasPage: Bool { !urlString.isEmpty }
 
@@ -36,6 +52,7 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored private var loadedPageView: NSView?
     @ObservationIgnored private var pendingURL: URL?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
+    @ObservationIgnored private var finder: PageFinder?
 
     private static let configuration: WKWebViewConfiguration = {
         let config = WKWebViewConfiguration()
@@ -45,6 +62,12 @@ final class BrowserTab: NSObject, Identifiable {
         config.applicationNameForUserAgent = "Version/26.0 Safari/605.1.15"
         config.preferences.isElementFullscreenEnabled = true
         BrowserDeveloperTools.enable(in: config.preferences)
+        config.userContentController = BrowserPageScripts.userContentController
+        #if DEBUG
+        // A verify run keeps many App Windows in the background, and they cover each other. WebKit suspends the
+        // page of a covered web view, so its timers stop and a check waits for a page that does not run.
+        if TestDriver.isRunning { config.preferences.inactiveSchedulingPolicy = .none }
+        #endif
         return config
     }()
 
@@ -63,6 +86,9 @@ final class BrowserTab: NSObject, Identifiable {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         loadedWebView = webView
+        let finder = PageFinder(webView: webView)
+        self.finder = finder
+        BrowserPageScripts.register(webView, finder: finder)
         observe(webView)
         if let pendingURL {
             self.pendingURL = nil
@@ -198,6 +224,35 @@ final class BrowserTab: NSObject, Identifiable {
         copyURL(to: .general)
     }
 
+    // MARK: - Find in Page
+
+    func showFind() {
+        guard hasPage else { return }
+        isFindShown = true
+        findFieldFocusRequested = true
+        if !findQuery.isEmpty { find(step: 0) }
+    }
+
+    func findNext() { stepFind(1) }
+    func findPrevious() { stepFind(-1) }
+
+    private func stepFind(_ step: Int) {
+        if findQuery.isEmpty { showFind() } else { find(step: step) }
+    }
+
+    @MainActor func closeFind() {
+        isFindShown = false
+        finder?.clear()
+    }
+
+    private func find(step: Int) {
+        guard let finder, hasPage else { return }
+        let query = findQuery
+        Task { @MainActor in
+            if let status = await finder.find(query, step: step) { findStatus = status }
+        }
+    }
+
     func copyURL(to pasteboard: NSPasteboard) {
         guard hasPage else { return }
         pasteboard.clearContents()
@@ -217,6 +272,11 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
             onOpenInNewTab?(url)
         }
         return nil
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        finder?.reset()
+        findStatus = .idle
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

@@ -12,17 +12,38 @@ through Extensions installed into each Agent's own hook or plugin system.
 
 See [CONTEXT.md](../CONTEXT.md) for vocabulary and [ADRs](adr) for design decisions.
 
-### Agent indicators
+The Topic records and plans, the Config and the tmux runner are in the
+`MuxifyCore` package in `Packages/MuxifyCore`. The app and the command line tool
+both link it, so both read and change Topics with the same code.
 
-The Sidebar and Command Palette use the same Agent indicators: separate gray
-square pixels on a three-by-three square perimeter, 10×10 pt overall, light
-up clockwise in discrete steps to mean working. The blocks are 3 pt on Retina
-displays and 2 pt on 1× displays, keeping a physical pixel between blocks.
-A blue dot means an Unread completion, and an orange dot means blocked or failed
-(even when Unread). A read, done Agent or one that has not run a turn has no
-indicator. Reduce Motion keeps the working pixel glyph static. Green is not an
-Agent Status color; these presentation rules do not change the Status or Unread
-pane options.
+### Agent marks
+
+`AgentMark` in `MuxifyCore` decides the one Agent mark an Agent shows, from its
+Status, its Unread flag, the `notifications` switches and whether its group is
+quiet (a Snoozed Topic, or No Topic while Zen is on). `TopicsModel` computes
+every mark once: `agentMarks` for each Agent by Pane ID, `Row.mark` for each
+Topic or Locked Session card, and `sessionMarks` for each Session card in
+Sessions mode. A group's mark is its strongest member's. A quiet group has no
+mark on its card; an Agent's own row there keeps only the Working mark. Do not
+decide a mark anywhere else.
+
+The app draws a mark in two views in `UI/AgentMarks.swift`, and each takes its
+color from `ui.agent_colors` through the `agentColors` environment value:
+
+- `AgentMarkView` is the mark of a row: a Pane row, an Agents row, a Command
+  Palette result and the badge on a Palette Agent's icon. A Notification is a
+  dot. The Working mark is `TerminalActivityIndicator`: eight square pixels on a
+  three-by-three perimeter, 10×10 pt overall, that light up clockwise in
+  discrete steps. The blocks are 3 pt on Retina displays and 2 pt on 1×
+  displays, with a physical pixel between blocks.
+- `AgentMarkSpine` is the 3 pt bar along a card's left edge. The Working mark's
+  bar fades in and out.
+
+`ui.pulse: false` and Reduce Motion keep every Working mark still. The
+`ContentView` sets the environment values once, and the Command Palette is an
+overlay inside it, so the Sidebar and the Palette always agree. A terminal bell
+is not an Agent mark: it is a gray `bell.fill` symbol. None of these rules
+changes the Status or Unread Pane options.
 
 ## Build
 
@@ -33,6 +54,27 @@ also requires `tmux`.
 make run       # vendor libghostty, generate the Xcode project, build and open
 make install   # install a Release build into /Applications (or INSTALL_DIR)
 ```
+
+`make build`, `make run` and `make install` sign ad-hoc. macOS then sees each
+build as a new app, and you must grant Accessibility and Input Monitoring again.
+To keep the grants, set `MUXIFY_SIGN_IDENTITY` to a certificate in your
+keychain and `MUXIFY_DEVELOPMENT_TEAM` to its team ID, for example in your shell
+profile:
+
+```sh
+export MUXIFY_SIGN_IDENTITY="Apple Development"
+export MUXIFY_DEVELOPMENT_TEAM="ABCDE12345"
+```
+
+The team ID is the `OU` field of the certificate, not the ID in its name. To
+see it, run:
+
+```sh
+security find-certificate -c "Apple Development" -p | openssl x509 -noout -subject
+```
+
+Use these variables only on your own Mac. Release packaging and CI always sign
+ad-hoc.
 
 Desktop build targets run `make setup` first to prepare a fresh machine: it
 installs `xcodegen` with Homebrew if missing, then runs `scripts/setup-ghostty.sh`

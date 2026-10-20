@@ -49,7 +49,7 @@ mkdir -p "$DIST"
 codesign --verify --deep --strict "$APP"
 # Consume all diagnostic output: grep -q can give codesign SIGPIPE under pipefail.
 codesign -dv "$APP" 2>&1 | grep '^Signature=adhoc$' >/dev/null
-[ "$(lipo -archs "$APP/Contents/MacOS/Muxify")" = arm64 ]
+[ "$(lipo -archs "$APP/Contents/MacOS/MuxifyApp")" = arm64 ]
 for notice in Ghostty Yams libyaml; do
   [ -s "$APP/Contents/Resources/ThirdPartyNotices/$notice.txt" ] || {
     echo "Missing bundled license notices: $notice" >&2; exit 1;
@@ -71,7 +71,8 @@ Ghostty is bundled; you do not need to install Ghostty, Zig, or Xcode.
    for Muxify, then confirm. Only do this for a download you trust.
 
 The **Muxify** menu can install the optional command-line tool and Agent Extensions.
-Claude Code and Codex Extensions also need \`jq\`.
+Claude Code and Codex Extensions also need \`jq\`. The Codex installer needs
+\`python3\` and \`codex\` on PATH.
 
 ## Verify the download
 

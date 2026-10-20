@@ -3,6 +3,10 @@
 Run the normal suite with `make test`. Live SSH tests are skipped unless you
 provide a destination with working key authentication and a verified host key.
 
+`swift test --package-path Packages/MuxifyCore` runs only the tests of the
+MuxifyCore package: Topic records and plans, Worktrees, the Config and tmux
+parsing. It needs neither Xcode nor libghostty.
+
 ## Live SSH test
 
 For an OrbStack Ubuntu VM (use its actual Linux username):

@@ -6,4 +6,7 @@ xcuserdata/
 __pycache__/
 /.build/
 /.swiftpm/
+/Packages/*/.build/
+/Packages/*/.swiftpm/
+/.claude/worktrees/
 .scratch

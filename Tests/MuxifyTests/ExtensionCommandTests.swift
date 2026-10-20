@@ -1,4 +1,5 @@
 import XCTest
+@testable import MuxifyCore
 
 final class ExtensionCommandTests: XCTestCase {
     func testInstalledSymlinkFindsBundledPayloadsAndInstallationIsIdempotent() throws {
@@ -25,8 +26,9 @@ final class ExtensionCommandTests: XCTestCase {
         try fm.createSymbolicLink(atPath: command.path, withDestinationPath: "alias")
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home.path
-        guard (try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", "command -v jq"]), environment: environment)) != nil else {
-            throw XCTSkip("The existing Claude/Codex installer requires jq")
+        environment["CODEX_HOME"] = nil
+        guard (try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", "command -v jq && command -v python3 && command -v codex"]), environment: environment)) != nil else {
+            throw XCTSkip("The Extension installer requires jq, python3 and codex")
         }
         let invocation = CommandInvocation(executable: command.path, arguments: ["extensions", "install"])
         let first = try CommandRunner().run(invocation, environment: environment)

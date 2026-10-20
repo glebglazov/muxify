@@ -21,7 +21,7 @@ _Avoid_: current host, active workspace
 ### tmux
 
 **Session**:
-A tmux session, usually one per project. Sessions group Windows in the sidebar.
+A tmux session. Sessions group Windows in the Sidebar. Outside Topics there is usually one per Project; a Topic has at most one in each Project.
 _Avoid_: project, workspace
 
 **Window**:
@@ -32,6 +32,96 @@ _Avoid_: tab, workspace
 One split of a Window, laid out by tmux.
 _Avoid_: split, terminal
 
+**Client**:
+A terminal attached to a tmux server, showing one of its Sessions. Each App Window's Terminal is one Client; Ghostty.app or another terminal attached to the same server is another.
+_Avoid_: attachment, connection, viewer
+
+### Topics
+
+**Topic**:
+One thing the user wants to get done, such as "Fix reward drop bug in GS". It owns at most one Session in each Project it touches, and it is open or Settled.
+_Avoid_: task, project, workspace, thread
+
+**Project**:
+A folder that the Config's projects.paths names, or one found below such a folder, where the user opens Sessions. It gives a Topic's Session its directory and the first part of its name. When the folder is a repository with several Worktrees, the repository is one Project, not one Project per Worktree. Any path that leads to the folder, through symlinks too, finds the Project, and Muxify shows it with the path that the Config wrote.
+_Avoid_: repo, workspace, Session Path, project directory, Session (when you mean the folder)
+
+**Worktree**:
+One checkout of a Project's repository at its own path, such as a folder inside a bare repository's folder. A Topic's Session in a Project uses one Worktree, and no other open Topic can use it.
+_Avoid_: checkout, clone, Project (when you mean one checkout)
+
+**Home Project**:
+The Project a Topic starts in. Its first Session opens there.
+_Avoid_: base, root, main repo
+
+**Untitled Topic**:
+A Topic that has no title yet. A rename or a title suggested from its Agents gives it one.
+_Avoid_: draft, scratch, temp Topic
+
+**Active Topic**:
+The Topic of the Window the user looks at, or No Topic when that Window belongs to no Topic.
+_Avoid_: current Topic, selected Topic, focused Topic
+
+**Next Topic**:
+The Topic or Locked Session that Muxify opens after the user Snoozes or Settles the Active Topic: the nearest row below it in the Topics list that stays in the list, else the nearest such row above it, else No Topic.
+_Avoid_: following Topic, previous Topic, last Topic
+
+**Tag**:
+An optional short name on a Topic, written with `#`, such as `#backend`. A Topic can have several Tags. The Tags that Muxify suggests are the Tags on the Topic records that exist now.
+_Avoid_: label, category, folder, group
+
+**Settle**:
+To mark a Topic as done. It leaves the Sidebar, its Sessions are killed or leave the Topic, and its record stays so that it can be reopened.
+_Avoid_: close, archive, resolve, complete
+
+**Reopen**:
+To bring a Settled or Dormant Topic back and create its remembered Sessions again, with their Windows, Panes, Tabs and Agents.
+_Avoid_: restore, unsettle, resume
+
+**Start Fresh**:
+To bring a Dormant or Settled Topic back with one new Session in each Project it remembers, each with one shell Window. Its remembered Windows, Tabs and Agents are not created again.
+_Avoid_: start anew, reset, new Topic
+
+**Forget**:
+To remove a Topic for good, at any time, so that it can never be Reopened. Its live Sessions are killed or kept with no Topic, as in Settle, and the clean Worktrees it made can be removed with it.
+_Avoid_: archive, delete, purge
+
+**Dormant**:
+An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart or a Kill Session. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it.
+_Avoid_: inactive, sleeping, suspended
+
+**Empty**:
+An open Topic that has no live Session and remembers no Session: the user removed its last Session or Window from it, or moved it to another Topic. Going to it offers Add a Project; nothing is Reopened.
+_Avoid_: Dormant (when it remembers no Session), blank, cleared
+
+**Snooze**:
+To hide one or more open Topics until a time, or until the user Unsnoozes them. Their Sessions and Agents keep running, but their Agents show no Notification until they come back. A Snooze on a Topic that is already Snoozed replaces its time. A Snoozed Topic loses its place in the Topics list, unless Zen Snoozed it: it comes back at the end that the Config gives to new Topics, among the Topics with its Pin, and the Topics that come back together keep their earlier order among themselves.
+_Avoid_: hide, park, defer, archive, mass snooze
+
+**Unsnooze**:
+To end a Snooze before its time, so the Topic goes back to the Topics list. Nothing changes in tmux.
+_Avoid_: restore, wake, resume
+
+**Zen**:
+A time when every open Topic except one is Snoozed, so the user can work on that one Topic. Locked Sessions are hidden too, and the Agents of No Topic show no Notification mark. It ends at its time or when the user ends it, and then each Topic it Snoozed comes back as it was before, in its earlier place in the Topics list.
+_Avoid_: focus, focus mode, do not disturb, mass snooze
+
+**Pin**:
+To keep a Topic above every Topic that is not Pinned, in each list of Topics, until you unpin it. A Pinned Topic can be Snoozed as usual, and it is still Pinned when it comes back.
+_Avoid_: favorite, star, sticky, keep on top
+
+**Lock**:
+To keep a No Topic Session in the Topics list as a card with a number, in the order of the Topics, until the user Unlocks it, the Session ends, or the Session goes into a Topic.
+_Avoid_: pin, keep, dock, sticky
+
+**Locked Session**:
+A No Topic Session that the user Locked. It has a card among the Topics, but it is not a Topic: it cannot be Settled, Snoozed, Pinned or Forgotten.
+_Avoid_: kept Session, pinned Session, Topic (when you mean the Session)
+
+**Unlock**:
+To end a Lock. The Session stays, as a No Topic Session.
+_Avoid_: unpin, release
+
 ### Browser
 
 **Browser**:
@@ -41,6 +131,14 @@ _Avoid_: webview, inspector, sidebar browser
 **Tab**:
 One page in a Window's Browser, with its own back/forward history. "Tab" never means a tmux Window.
 _Avoid_: page (when you mean the Tab itself), browser window
+
+**Find in Page**:
+Searching the text of the active Tab's page, its iframes included, from a find bar in the Browser, with every match highlighted. It never searches the Terminal or a Command Palette.
+_Avoid_: search (when you mean the page text), Find (alone)
+
+**Vim Keys**:
+The letter keys h, j, k, l, d, u, gg and G, which scroll the active Tab's page as the arrow keys, Page Down, Page Up, Home and End do, when the Browser has Focus and the page does not use the key itself. They are on by default and the Config can turn them off.
+_Avoid_: vim mode, keyboard navigation
 
 ### Simulator
 
@@ -67,12 +165,45 @@ What an Agent is doing: working (a turn is running), blocked (waiting for the us
 _Avoid_: state, idle
 
 **Unread**:
-An Agent that reached done, failed or blocked while the user wasn't looking at its Window. Looking at the Window makes it read.
-_Avoid_: unseen, new, notification
+A Topic explicitly marked with Mark Unread, or an Agent with a done, failed or blocked update that the user has not marked read. Topic Unread is saved independently of Agents and remains when they exit. With Manual Read, updates stay Unread until Mark Read or Mark All as Read. Without Manual Read, a new visit to a Window or Topic clears Unread; continued viewing preserves an explicit mark. A Topic mark is not an Agent Status and does not add to an Agent count. Snooze hides its mark without clearing it.
+_Avoid_: unseen, new
+
+**Manual Read**:
+The default behavior in which visiting a Window or Topic does not clear Unread, and Agent updates become Unread even while the user looks at their Window. The user can turn it off in the Config to restore automatic reading.
+
+**Mark Read**:
+An Action that clears the Topic Unread mark and Unread for Agents in its target. Its Command and direct shortcut use the Active Topic, or the current Session when there is no Active Topic. It is available for every Topic, with or without Agents. A blocked Agent keeps its blocked Notification until its Status changes.
+_Avoid_: dismiss Status
+
+**Mark Unread**:
+An Action that marks any Topic as Unread, with or without Agents. It also marks read Agents with done, failed or blocked Status as Unread. Its Command and direct shortcut use the Active Topic, or the current Session when there is no Active Topic. Its row Action uses the selected Topic, Session, Window or Agent.
+
+**Mark All as Read**:
+A Command that clears Unread for all Topics and Agents in the Active Environment, including hidden, Snoozed and Settled Topics.
+
+**Notification**:
+A mark that Muxify shows because an Agent is Unread, or is blocked, such as the mark on its Topic. Its type is the Status: done, failed or blocked.
+_Avoid_: alert, badge, Unread (when you mean the mark)
+
+**Working mark**:
+The gray, moving mark that shows an Agent is working. It is not a Notification, and it is never Unread.
+_Avoid_: spinner, activity indicator, working dot, pulse
+
+**Agent mark**:
+A Working mark or a Notification. Each kind has one meaning, one shape family and one colour on every card, row and Command Palette result.
+_Avoid_: indicator, status dot, status color, marker
 
 **Extension**:
 The file or plugin folder installed into an Agent's own plugin or hook system that reports the Agent and its Status to Muxify.
 _Avoid_: integration, hook (when you mean the whole file), plugin (when you mean ours)
+
+**Transcript**:
+The file in which an Agent's own CLI stores one conversation. Muxify reads it and never writes it.
+_Avoid_: log, history, session file
+
+**Entry**:
+One message, tool call or tool result in an Agent's conversation, with an index that never changes. A turn holds many Entries.
+_Avoid_: line, record, event, turn, message (when you mean the Entry)
 
 ### Layout
 
@@ -84,29 +215,57 @@ _Avoid_: instance, Window (without "App", when you mean the native window)
 The panel on the left of the Muxify window that lists Sessions, Windows and Agents.
 _Avoid_: left sidebar, left panel
 
+**Focus**:
+Where keyboard input goes in an App Window: the Terminal, the Browser or a Command Palette. One of them has Focus at a time.
+_Avoid_: the keyboard (when you mean where input goes), active side, first responder
+
+**Maximize**:
+Showing one of a Window's Terminal and Browser alone, with the Sidebar hidden, until the user restores the Window; it never changes the toggles.
+_Avoid_: focus, zoom (tmux zooms a Pane), solo, full screen
+
+**Hint**:
+The key that Muxify shows on a Topic or Session card, a Window row, a Tab or the Terminal while the user holds a modifier alone, such as ⌃2, or at all times on the cards, Window rows and Tabs where the Config turns that on. When it shows at all times, it is the key alone, such as 2. Pressing that key goes to what the Hint is on.
+_Avoid_: badge, number, label, Notification (when you mean the key mark)
+
+**Summary**:
+The line under the title of a closed Topic or Session card, or under the title of a Window or Pane row. It shows only when its Format gives text.
+_Avoid_: subtitle, details, description, second line
+
 **Sidebar typography**:
 The typography of text in the Sidebar's Sessions and Agents sections, independent of the Terminal's typography and the App Window header.
 _Avoid_: UI font, terminal font (when you mean Sidebar text)
 
+**Action**:
+Something the user does to one Topic, Session, Window, Pane, Agent or Tab, such as Jump To, Snooze, Rename or Settle. Every Action runs in the palette's view, whichever way the user starts it.
+_Avoid_: command (when you mean an Action on a thing), operation, menu item
+
+**Command**:
+An entry in the Commands Source that starts an app operation or an Action on the current Pane, Window, Session, Topic or Tab. It uses the current item without requiring a search result first.
+_Avoid_: Action (when nothing is acted on), menu item, operation
+
 ### Command Palette
 
 **Command Palette**:
-A named search, opened by its own keybinding, over the Sources selected in it, whose highlighted result the user acts on. Each palette opens with its own Sources selected; the others can be selected too.
-_Avoid_: switcher, launcher, finder, sessionizer
+A named search, opened by its own keybinding, over the Sources selected in it, whose highlighted result the user acts on or, for a Command, runs. Each palette opens with its own Sources selected; the others can be selected too.
+_Avoid_: switcher, launcher, finder, sessionizer, Go to Topic
 
 **Source**:
-One kind of thing a Command Palette searches: Sessions (including Session Paths), Windows or Agents.
-_Avoid_: provider, category
+One kind of thing a Command Palette searches: Topics, Sessions (a row for each Project with the Sessions in it, and a row for each Session outside every Project), Windows, Agents or Commands.
+_Avoid_: provider, category, section
 
-**Session Path**:
-A folder named in the Config, or a git worktree of one, that a Command Palette offers as a Session. Choosing it switches to the Session started in that folder, creating it if none is running.
-_Avoid_: project, project directory
+**Pick step**:
+A palette step that collects Topics and Tags as chips in the search field, one pick at a time, before an Action on all the Topics they name. A Tag chip names every Topic that has the Tag. Snooze Topics starts with it.
+_Avoid_: choose rows, mark, multi-select, selection
 
 ### Configuration
 
 **Config**:
 The Muxify config file on a machine: settings, in YAML sections, that control how Muxify itself behaves. An App Window uses the Config of its Active Environment's machine, or the local one when that machine has none. It never holds what is open or shown now.
 _Avoid_: settings, preferences, Muxify settings
+
+**Format**:
+A Config string with #{…} placeholders that sets a Sidebar line or a Window row part from the Topic, Session, Window or Pane that the row shows. Muxify expands it, not tmux. Titles and Summaries give plain text. Window left and right parts can also give the current app icon or macOS SF Symbols.
+_Avoid_: template, pattern, label string, tmux format (when you mean ours)
 
 **Ghostty config**:
 The Ghostty config files that control the terminal: its fonts, theme and terminal keybinds.

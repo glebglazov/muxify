@@ -8,6 +8,7 @@ let package = Package(
     products: [.executable(name: "muxify", targets: ["MuxifyCLI"])],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.80.0"),
+        .package(path: "Packages/MuxifyCore"),
     ],
     targets: [
         .target(name: "MuxifySimulatorPrivate"),
@@ -20,7 +21,9 @@ let package = Package(
         ], exclude: ["Web"], plugins: ["EmbedWebAssetsPlugin"]),
         .executableTarget(name: "EmbedWebAssets", path: "Tools/EmbedWebAssets"),
         .plugin(name: "EmbedWebAssetsPlugin", capability: .buildTool(), dependencies: ["EmbedWebAssets"]),
-        .executableTarget(name: "MuxifyCLI", dependencies: ["MuxifySimulatorServer"]),
+        .executableTarget(name: "MuxifyCLI", dependencies: [
+            "MuxifySimulatorServer", .product(name: "MuxifyCore", package: "MuxifyCore"),
+        ]),
         .testTarget(name: "MuxifyCLITests", dependencies: ["MuxifyCLI"]),
         .testTarget(name: "MuxifySimulatorServerTests", dependencies: ["MuxifySimulatorServer"]),
     ],

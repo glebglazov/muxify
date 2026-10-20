@@ -87,7 +87,7 @@ final class AppWindows {
     func handle(_ url: URL) {
         guard !isQuitting, url.scheme == "muxify" else { return }
         if url.host == "toggle-browser" { focusedStore?.handle(url); return }
-        guard ["select", "open"].contains(url.host ?? ""), openWindow != nil else { return }
+        guard ["select", "open", "topic"].contains(url.host ?? ""), openWindow != nil else { return }
         let request = catalog.openEnvironment(named: nil)
         store(for: request).handle(url)
         selectEnvironment(named: nil)
@@ -104,13 +104,17 @@ final class AppWindows {
         let center = NotificationCenter.default
         observers[id] = [
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.focus(id) }
+                MainActor.assumeIsolated {
+                    self?.focus(id)
+                    self?.stores[id]?.readActiveTopicOnEntry()
+                }
             },
             center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.close(id) }
             },
         ]
-        if window.isKeyWindow { focus(id) }
+        // An app launched in the background gets no key window, and its menus need one to act on.
+        if window.isKeyWindow || focusedID == nil { focus(id) }
     }
 
     func updateEnvironment(for id: UUID) {

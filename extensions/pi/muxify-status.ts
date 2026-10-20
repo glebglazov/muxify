@@ -1,7 +1,7 @@
 // Muxify Extension for Pi.
 //
 // Reports this Agent and the Status of its runs on its own tmux Pane through
-// the pane options @muxify_agent and @muxify_agent_status (docs/adr/0004).
+// the pane options @muxify_agent, @muxify_agent_status and @muxify_agent_conversation (docs/adr/0004).
 // Pi loads it from ~/.pi/agent/extensions/muxify-status.ts.
 //
 // Only the interactive TUI reports: Pi children spawned in json or print mode
@@ -11,7 +11,7 @@
 // failed when its last assistant message stopped with an error, otherwise as
 // done (Esc aborts count as done). While any dialog is open (ui_prompt_start
 // to ui_prompt_end, Pi >= 0.84.4) the Status is blocked. Quitting Pi unsets
-// both options.
+// all three options.
 //
 // Plain TypeScript that Node runs by stripping types: no enums, namespaces or
 // parameter properties.
@@ -48,6 +48,7 @@ export default function (pi: ExtensionAPI) {
 	let stopReason: string | undefined; // the last run's last assistant message's
 	let published: Status | undefined; // the Status last written; undefined = none yet
 	let quit = false;
+	let conversation: string | undefined;
 
 	// Writes the Status if it changed. Every Status write names the Agent too,
 	// in the same tmux call; with no Status known, the Status is unset.
@@ -68,6 +69,11 @@ export default function (pi: ExtensionAPI) {
 		return (e: E, ctx: ExtensionContext) => {
 			try {
 				if (quit || !ctx || ctx.mode !== "tui") return;
+				const id = ctx.sessionManager.getSessionId();
+				if (id !== conversation) {
+					conversation = id;
+					tmux([...nameAgent, ";", "set", "-p", "-t", pane, "@muxify_agent_conversation", id]);
+				}
 				handler(e, ctx);
 			} catch {}
 		};
@@ -115,7 +121,8 @@ export default function (pi: ExtensionAPI) {
 		quit = true;
 		tmux([
 			"set", "-p", "-u", "-t", pane, "@muxify_agent", ";",
-			"set", "-p", "-u", "-t", pane, "@muxify_agent_status",
+			"set", "-p", "-u", "-t", pane, "@muxify_agent_status", ";",
+			"set", "-p", "-u", "-t", pane, "@muxify_agent_conversation",
 		]);
 	}));
 }

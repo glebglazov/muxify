@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import MuxifyCore
 
 /// One foreground, prompt-owning SSH master and its master-only channels.
 /// No files, helper or listening port are installed on the remote machine.
@@ -143,7 +144,8 @@ final class RemoteSSH {
         // not flash raw Session/Browser records in the terminal before exit.
         let reportSnapshot = """
         if snapshot=$(\(snapshotCommand) 2>/dev/null); then
-            printf '\\033Pmuxify;\\n%s\\n%s\\n%s\\n%s\\n\\033\\\\' \(Tmux.shellQuote(snapshotStart)) "${HOME}\(Tmux.separator)$(uname -n)" "$snapshot" \(Tmux.shellQuote(snapshotEnd)) >&2
+            reports=$(printf '%s\\n' "$snapshot" | /bin/sh -c \(Tmux.shellQuote(Tmux.codexReportsForInventoryScript)))
+            printf '\\033Pmuxify;\\n%s\\n%s\\n%s\\n%s\\n%s\\n\\033\\\\' \(Tmux.shellQuote(snapshotStart)) "${HOME}\(Tmux.separator)$(uname -n)" "$snapshot" "$reports" \(Tmux.shellQuote(snapshotEnd)) >&2
         elif absence=$(tmux -u has-session 2>&1); then
             :
         else
@@ -156,7 +158,7 @@ final class RemoteSSH {
         // A child owns the tmux client PID recorded in the marker. Its parent
         // remains on the same foreground SSH/PTY to report inventory on exit.
         let attachment = """
-        marker="$$\(Tmux.separator)$1\(Tmux.separator)${HOME}\(Tmux.separator)$(uname -n)"
+        marker="$$\(Tmux.separator)$1\(Tmux.separator)${HOME}\(Tmux.separator)$(uname -n)\(Tmux.separator)remote"
         tmux -u set-option -sq \(Tmux.shellQuote(markerOption)) "$marker" || exit $?
         if [ -n "$2" ]; then
             exec tmux -u -T RGB attach-session -t "$2"
@@ -203,6 +205,7 @@ final class RemoteSSH {
         # Advertise it for this client only, without rewriting server options.
         /bin/sh -c \(Tmux.shellQuote(attachment)) muxify "$client_tty" "$target"
         status=$?
+        tmux -u set-option -su \(Tmux.shellQuote(markerOption)) 2>/dev/null
         \(reportSnapshot)
         exit "$status"
         """

@@ -1,3 +1,4 @@
+import MuxifyCore
 /// Selection history belongs to one App Window, not tmux's server-wide last
 /// Window option. A closed Window falls back to the Window before it in its
 /// Session, else the one after it. With the whole Session gone, it falls back

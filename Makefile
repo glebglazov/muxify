@@ -1,8 +1,12 @@
 APP := build/Build/Products/Debug/Muxify.app
 RELEASE_APP := build/Build/Products/Release/Muxify.app
 INSTALL_DIR ?= /Applications
+# Ad-hoc by default. Name a certificate and its team, and macOS keeps
+# Accessibility and Input Monitoring grants across rebuilds.
+MUXIFY_SIGN_IDENTITY ?= -
+MUXIFY_DEVELOPMENT_TEAM ?=
 
-.PHONY: all setup tools project build cli test test-release run install release clean
+.PHONY: all setup tools project build cli test test-release verify run install release clean
 
 all: build
 
@@ -24,7 +28,7 @@ project: setup
 
 build: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet build
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 
 # Build only the CLI, without desktop app dependencies.
 cli:
@@ -32,7 +36,9 @@ cli:
 	/bin/sh scripts/bundle-simulator-notices.sh build/bin/ThirdPartyNotices
 
 test: project
+	./scripts/check-folder-paths.sh
 	swift test
+	swift test --package-path Packages/MuxifyCore
 	node --test Tests/SimulatorWeb/*.test.mjs
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages test
@@ -40,15 +46,21 @@ test: project
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v
 
+SUITE ?= $(basename $(notdir $(wildcard scripts/verify/suites/*.py)))
+
+verify: build
+	python3 scripts/verify/run.py $(SUITE)
+
+# CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build
-	open $(APP)
+	$(if $(CONFIG),open -n --env "MUXIFY_CONFIG=$(if $(filter ~%,$(CONFIG)),$(CONFIG),$(abspath $(CONFIG)))" $(APP),open $(APP))
 
 release:
 	BUILD_NUMBER="$(or $(BUILD_NUMBER),1)" ./scripts/package-release.sh "$(TAG)"
 
 install: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet build
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 	rm -rf "$(INSTALL_DIR)/Muxify.app"
 	cp -R "$(RELEASE_APP)" "$(INSTALL_DIR)/"
 

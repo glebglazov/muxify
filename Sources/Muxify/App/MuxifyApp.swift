@@ -8,6 +8,9 @@ struct MuxifyApp: App {
 
     init() {
         CommandLineToolForwarding.forwardIfNeeded()
+        #if DEBUG
+        TestDriver.startIfRequested()
+        #endif
         AppEnvironment.prepare()
         let configStore = ConfigStore()
         configStore.start()
@@ -29,6 +32,9 @@ struct MuxifyApp: App {
         }
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.hiddenTitleBar)
+        // AppDelegate sends each muxify:// URL to the App Window of its Environment. Without this, SwiftUI
+        // also opens a new App Window for the URL.
+        .handlesExternalEvents(matching: [])
         .commands { MuxifyCommands(windows: windows) }
     }
 }
@@ -50,6 +56,15 @@ enum AppEnvironment {
         for dir in ["/usr/local/bin", "/opt/homebrew/sbin", "/opt/homebrew/bin"] where !path.contains(dir) {
             path.insert(dir, at: 0)
         }
+        if let resources = Bundle.main.resourceURL {
+            let bin = resources.appendingPathComponent("bin").path
+            if let executableDirectory = Bundle.main.executableURL?.deletingLastPathComponent().path {
+                path.removeAll { $0 == executableDirectory }
+            }
+            path.removeAll { $0 == bin }
+            path.insert(bin, at: 0)
+            setenv("GHOSTTY_BIN_DIR", bin, 1)
+        }
         setenv("PATH", path.joined(separator: ":"), 1)
 
         // libghostty finds terminfo/themes inside our bundle (copied at build
@@ -57,7 +72,9 @@ enum AppEnvironment {
         let fm = FileManager.default
         let bundled = Bundle.main.resourceURL?.appendingPathComponent("terminfo/78/xterm-ghostty").path ?? ""
         let installed = "/Applications/Ghostty.app/Contents/Resources/ghostty"
-        if !fm.fileExists(atPath: bundled), getenv("GHOSTTY_RESOURCES_DIR") == nil, fm.fileExists(atPath: installed) {
+        if fm.fileExists(atPath: bundled), let resources = Bundle.main.resourceURL {
+            setenv("GHOSTTY_RESOURCES_DIR", resources.appendingPathComponent("ghostty").path, 1)
+        } else if getenv("GHOSTTY_RESOURCES_DIR") == nil, fm.fileExists(atPath: installed) {
             setenv("GHOSTTY_RESOURCES_DIR", installed, 1)
         }
     }

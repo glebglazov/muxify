@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import MuxifyCore
 
 /// A Window's Browser: a tab strip over the active Tab's toolbar and page.
 struct BrowserPanel: View {
@@ -64,6 +65,7 @@ private struct TabItem: View {
     let onSelect: () -> Void
     let onClose: () -> Void
 
+    @Environment(\.quickSwitchHints) private var hints
     @State private var hovering = false
 
     var body: some View {
@@ -71,6 +73,8 @@ private struct TabItem: View {
             Group {
                 if tab.isLoading {
                     ProgressView().controlSize(.mini)
+                } else if hints[.tab(tab.id)].isEmpty, let key = hints.restKey(for: .tab(tab.id)) {
+                    HintKey(target: .tab(tab.id), key: key)
                 } else {
                     Image(systemName: "globe")
                         .font(.system(size: 10))
@@ -79,6 +83,7 @@ private struct TabItem: View {
             }
             .frame(width: 14)
             Text(tab.displayTitle)
+                    .accessibilityIdentifier("browser-tab-title-" + tab.id.uuidString)
                 .font(.system(size: 12))
                 .foregroundStyle(isActive ? .primary : .secondary)
                 .lineLimit(1)
@@ -107,6 +112,12 @@ private struct TabItem: View {
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
         .help(tab.hasPage ? tab.urlString : "New Tab")
+        .opacity(hints[.tab(tab.id)].isEmpty ? 1 : 0.5)
+        .overlay(alignment: .leading) {
+            if !hints[.tab(tab.id)].isEmpty {
+                HintBadge(target: .tab(tab.id), triggers: hints[.tab(tab.id)]).padding(.leading, 4)
+            }
+        }
     }
 
     private var background: Color {
@@ -130,6 +141,10 @@ private struct TabContent: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
+            if tab.isFindShown {
+                FindBar(tab: tab, onClose: closeFind)
+                Divider()
+            }
             ZStack {
                 WebViewHost(tab: tab)
                 if !tab.hasPage { emptyState }
@@ -144,7 +159,7 @@ private struct TabContent: View {
         .onChange(of: tab.urlString) { _, newValue in
             if !addressFocused { address = newValue }
         }
-        .onChange(of: browser.wantsAddressFocus) { _, _ in consumeFocusRequest() }
+        .onChange(of: browser.focusRequest) { _, _ in consumeFocusRequest() }
     }
 
     // MARK: - Toolbar
@@ -153,8 +168,10 @@ private struct TabContent: View {
         HStack(spacing: 4) {
             ToolbarIconButton(systemName: "chevron.left", help: "Back", action: tab.goBack)
                 .disabled(!tab.canGoBack)
+                .accessibilityIdentifier("browser-back")
             ToolbarIconButton(systemName: "chevron.right", help: "Forward", action: tab.goForward)
                 .disabled(!tab.canGoForward)
+                .accessibilityIdentifier("browser-forward")
             ToolbarIconButton(
                 systemName: tab.isLoading ? "xmark" : "arrow.clockwise",
                 help: tab.isLoading ? "Stop" : "Reload",
@@ -171,7 +188,8 @@ private struct TabContent: View {
                 Button("Show Developer Tools", action: tab.showDeveloperTools).disabled(!tab.hasPage)
                 Divider()
                 Button("Close Tab") { browser.close(tab) }
-                Button("Hide Browser") { browser.setOpen(false) }
+                Button("Hide Browser") { browser.toggle(.browser) }
+                    .disabled(!browser.layout.canToggle(.browser))
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .medium))
@@ -198,6 +216,8 @@ private struct TabContent: View {
                 .font(.system(size: 13))
                 .focused($addressFocused)
                 .onSubmit(submit)
+                .accessibilityIdentifier("browser-address")
+                .accessibilityAction(named: "Submit", submit)
                 .onExitCommand {
                     address = tab.urlString
                     focusPage()
@@ -279,22 +299,97 @@ private struct TabContent: View {
         focusPage()
     }
 
-    /// Only explicit requests (opening the panel, ⌘L) take focus; merely
-    /// switching tmux windows keeps the keyboard in the terminal.
+    /// Only explicit requests (opening the panel, ⌘L, Maximize, Focus Browser)
+    /// take Focus; merely switching tmux windows keeps it in the Terminal.
     private func consumeFocusRequest() {
-        guard browser.wantsAddressFocus else { return }
-        browser.wantsAddressFocus = false
-        DispatchQueue.main.async { addressFocused = true }
+        guard let request = browser.focusRequest else { return }
+        browser.focusRequest = nil
+        switch request {
+        case .addressBar: DispatchQueue.main.async { addressFocused = true }
+        case .page: focusPage()
+        }
+    }
+
+    private func closeFind() {
+        tab.closeFind()
+        focusPage()
     }
 
     private func focusPage() {
         addressFocused = false
-        DispatchQueue.main.async { tab.webView.window?.makeFirstResponder(tab.webView) }
+        DispatchQueue.main.async {
+            guard tab.webView.window?.makeFirstResponder(tab.webView) == true else { return }
+            BrowserPageScripts.focusMainPart(of: tab.webView)
+        }
     }
 
     private func scanPorts() {
         guard browser.discoversLocalServers else { return }
         DevServerScanner.scan(windowID: browser.windowID) { ports = $0 }
+    }
+}
+
+/// Find in Page for the active Tab, between its toolbar and its page (ADR-0033).
+private struct FindBar: View {
+    @Bindable var tab: BrowserTab
+    let onClose: () -> Void
+
+    @FocusState private var fieldFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField("Find in Page", text: $tab.findQuery)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 260)
+                .focused($fieldFocused)
+                .onSubmit {
+                    if NSApp.currentEvent?.modifierFlags.contains(.shift) == true { tab.findPrevious() } else { tab.findNext() }
+                }
+                .onExitCommand(perform: onClose)
+                .accessibilityIdentifier("browser-find-field")
+            Text(status)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .accessibilityIdentifier("browser-find-status")
+            HStack(spacing: 2) {
+                Button(action: tab.findPrevious) { Image(systemName: "chevron.left") }
+                    .help("Find Previous (⌘⇧G)")
+                    .accessibilityLabel("Find Previous")
+                    .accessibilityIdentifier("browser-find-previous")
+                Button(action: tab.findNext) { Image(systemName: "chevron.right") }
+                    .help("Find Next (⌘G)")
+                    .accessibilityLabel("Find Next")
+                    .accessibilityIdentifier("browser-find-next")
+            }
+            .disabled(tab.findQuery.isEmpty)
+            Spacer(minLength: 0)
+            Button("Done", action: onClose)
+                .accessibilityIdentifier("browser-find-done")
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(Color.primary.opacity(0.035))
+        .onAppear(perform: consumeFocusRequest)
+        .onChange(of: tab.findFieldFocusRequested) { _, _ in consumeFocusRequest() }
+    }
+
+    private var status: String {
+        switch tab.findStatus {
+        case .idle: ""
+        case .notFound: "Not found"
+        case let .match(index, total): "\(index + 1) of \(total)"
+        }
+    }
+
+    private func consumeFocusRequest() {
+        guard tab.findFieldFocusRequested else { return }
+        tab.findFieldFocusRequested = false
+        DispatchQueue.main.async {
+            fieldFocused = true
+            DispatchQueue.main.async { (tab.webView.window?.firstResponder as? NSText)?.selectAll(nil) }
+        }
     }
 }
 

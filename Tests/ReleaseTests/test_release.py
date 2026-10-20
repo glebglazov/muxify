@@ -70,7 +70,7 @@ class ReleaseTests(unittest.TestCase):
         }))
         self.write("vendor/ghostty/notices/Ghostty.txt", "Upstream notices\n")
         app = "build/Build/Products/Release/Muxify.app"
-        executable = self.write(f"{app}/Contents/MacOS/Muxify", "fixture\n")
+        executable = self.write(f"{app}/Contents/MacOS/MuxifyApp", "fixture\n")
         executable.chmod(0o755)
         for name in ["Ghostty", "Yams", "libyaml"]:
             self.write(f"{app}/Contents/Resources/ThirdPartyNotices/{name}.txt", "License\n")
@@ -94,7 +94,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(archive.is_file())
         subprocess.run(["shasum", "-a", "256", "-c", "SHA256SUMS"], cwd=dist, check=True, capture_output=True)
         with zipfile.ZipFile(archive) as zipped:
-            executable = zipped.getinfo("Muxify.app/Contents/MacOS/Muxify")
+            executable = zipped.getinfo("Muxify.app/Contents/MacOS/MuxifyApp")
             self.assertTrue((executable.external_attr >> 16) & 0o111)
             link = zipped.getinfo("Muxify.app/Contents/Resources/notice-link")
             self.assertEqual((link.external_attr >> 16) & 0o170000, 0o120000)

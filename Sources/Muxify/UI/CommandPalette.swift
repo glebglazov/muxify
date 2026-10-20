@@ -1,244 +1,58 @@
 import AppKit
 import SwiftUI
-
-// MARK: - Items
-
-/// A Command Palette result: a running Session, a Session Path, a Window or
-/// an Agent.
-struct PaletteItem: Identifiable {
-    enum Kind {
-        case session, sessionPath, window, agent
-
-        var source: PaletteSource {
-            switch self {
-            case .session, .sessionPath: .sessions
-            case .window: .windows
-            case .agent: .agents
-            }
-        }
-    }
-
-    enum Ref {
-        case session(SessionGroup)
-        case sessionPath(SessionPath)
-        case window(TmuxWindow)
-        case agent(Agent)
-    }
-
-    let id: String
-    let kind: Kind
-    let ref: Ref
-    let title: String
-    /// What it is ("Session", "Worktree", "Claude Code"), and where.
-    let subtitle: String
-    let path: String
-    /// What Copy tmux Target copies: a Session name, `session:index`, or a
-    /// Pane ID. A Session Path has none.
-    let target: String?
-    /// A `Resources/Logos` name, for Windows and Agents.
-    var logo: String?
-    var status: AgentStatus?
-    var unread = false
-    var isCurrent = false
-    /// Matched after the title, with less weight.
-    var keywords = ""
-    /// The Session's last activity, which breaks ties.
-    var activity = 0
-}
-
-/// What the Command Palettes of an App Window search.
-struct PaletteCatalog {
-    var windows: [TmuxWindow]
-    var agents: [Agent]
-    var sessionPaths: [SessionPath]
-    var selectedWindowID: String?
-    var homeDirectory = NSHomeDirectory()
-
-    /// One Source's results for an empty query, in its order:
-    /// - Sessions, most recently active first and the current one last, then
-    ///   the Session Paths that have no Session.
-    /// - Agents that need you (blocked, failed or unread), then working ones,
-    ///   then the rest.
-    /// - Windows in Sidebar order. A Window with an Agent can be left out:
-    ///   the Agent's row stands for it.
-    func items(_ source: PaletteSource, hidingAgentWindows: Bool = false) -> [PaletteItem] {
-        switch source {
-        case .sessions: return sessionItems + sessionPathItems
-        case .windows: return windowItems(hidingAgentWindows: hidingAgentWindows)
-        case .agents: return agentItems
-        }
-    }
-
-    private var groups: [SessionGroup] {
-        var groups: [SessionGroup] = []
-        for window in windows {
-            if let last = groups.indices.last, groups[last].id == window.sessionID {
-                groups[last].windows.append(window)
-            } else {
-                groups.append(SessionGroup(id: window.sessionID, name: window.sessionName, windows: [window]))
-            }
-        }
-        return groups
-    }
-
-    private var sessionItems: [PaletteItem] {
-        let items = groups.map { session -> PaletteItem in
-            let active = session.windows.first(where: \.isActive) ?? session.windows[0]
-            let folder = session.windows[0].sessionPath.isEmpty ? active.path : session.windows[0].sessionPath
-            let count = session.windows.count
-            return PaletteItem(
-                id: "session:\(session.id)", kind: .session, ref: .session(session),
-                title: session.name,
-                subtitle: "Session · \(count) window\(count == 1 ? "" : "s") · \(Paths.tildify(folder, home: homeDirectory))",
-                path: folder, target: session.name,
-                isCurrent: session.windows.contains { $0.id == selectedWindowID },
-                keywords: Paths.tildify(folder, home: homeDirectory),
-                activity: active.sessionActivity
-            )
-        }
-        let byRecency = items.sorted { $0.activity > $1.activity }
-        return byRecency.filter { !$0.isCurrent } + byRecency.filter(\.isCurrent)
-    }
-
-    private var sessionPathItems: [PaletteItem] {
-        let folders = groups.map { $0.windows[0].sessionPath }
-        return sessionPaths
-            .filter { path in !folders.contains { SessionPaths.matches(path, sessionFolder: $0) } }
-            .map { path in
-                let shown = Paths.tildify(path.path, home: homeDirectory)
-                return PaletteItem(
-                    id: "path:\(path.path)", kind: .sessionPath, ref: .sessionPath(path),
-                    title: path.sessionName,
-                    subtitle: "\(path.isWorktree ? "Worktree" : "Folder") · \(shown)",
-                    path: path.path, target: nil, keywords: shown
-                )
-            }
-    }
-
-    private func windowItems(hidingAgentWindows: Bool) -> [PaletteItem] {
-        let agentWindows = hidingAgentWindows ? Set(agents.map(\.windowID)) : []
-        return windows.filter { !agentWindows.contains($0.id) }.map { window in
-            let target = "\(window.sessionName):\(window.index)"
-            return PaletteItem(
-                id: "window:\(window.id)", kind: .window, ref: .window(window),
-                title: window.displayTitle,
-                subtitle: "Window · \(target) · \(window.abbreviatedPath)",
-                path: window.path, target: target, logo: window.logoName,
-                isCurrent: window.id == selectedWindowID,
-                keywords: "\(target) \(window.command) \(window.abbreviatedPath)",
-                activity: window.sessionActivity
-            )
-        }
-    }
-
-    private var agentItems: [PaletteItem] {
-        let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        func rank(_ agent: Agent) -> Int {
-            if agent.unread || agent.status == .blocked || agent.status == .failed { return 0 }
-            return agent.status == .working ? 1 : 2
-        }
-        // A stable sort keeps tmux order within each rank.
-        let ordered = agents.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
-        return ordered.map { agent in
-            let window = windowsByID[agent.windowID]
-            let path = agent.path.isEmpty ? window?.path ?? "" : agent.path
-            return PaletteItem(
-                id: "agent:\(agent.paneID)", kind: .agent, ref: .agent(agent),
-                title: agent.windowTitle,
-                subtitle: "\(agent.kind.displayName) · \(agent.location)",
-                path: path, target: agent.paneID, logo: agent.kind.rawValue,
-                status: agent.status, unread: agent.unread,
-                isCurrent: agent.windowID == selectedWindowID,
-                keywords: "\(agent.kind.displayName) \(agent.location) \(agent.status?.rawValue ?? "") \(Paths.tildify(path, home: homeDirectory))",
-                activity: window?.sessionActivity ?? 0
-            )
-        }
-    }
-}
-
-enum PaletteSearch {
-    /// Searches the `sources` whose chips are on. With nothing typed, each
-    /// one's list in chip order; Windows only when theirs is the only chip
-    /// on. Otherwise one list, best match first; on a tie running Sessions
-    /// come before Session Paths, then more recent activity first.
-    static func results(sources: [PaletteSource], query: String, catalog: PaletteCatalog) -> [PaletteItem] {
-        let hidingAgentWindows = sources.contains(.agents)
-        let words = query.lowercased().split(separator: " ").map(String.init)
-        guard !words.isEmpty else {
-            return sources.filter { $0 != .windows || sources == [.windows] }
-                .flatMap { catalog.items($0, hidingAgentWindows: hidingAgentWindows) }
-        }
-        let items = sources.flatMap { catalog.items($0, hidingAgentWindows: hidingAgentWindows) }
-        var scored: [(offset: Int, score: Int, item: PaletteItem)] = []
-        for (offset, item) in items.enumerated() {
-            if let score = score(item, words: words) { scored.append((offset, score, item)) }
-        }
-        return scored.sorted { a, b in
-            if a.score != b.score { return a.score > b.score }
-            let rankA = a.item.kind == .sessionPath ? 1 : 0
-            let rankB = b.item.kind == .sessionPath ? 1 : 0
-            if rankA != rankB { return rankA < rankB }
-            if a.item.activity != b.item.activity { return a.item.activity > b.item.activity }
-            return a.offset < b.offset
-        }.map(\.item)
-    }
-
-    /// Every word must match the title or, for less, the subtitle and keywords.
-    static func score(_ item: PaletteItem, words: [String]) -> Int? {
-        var score = 0
-        for word in words {
-            if let match = fuzzy(word, in: item.title) {
-                score += match * 2
-            } else if let match = fuzzy(word, in: item.subtitle + " " + item.keywords) {
-                score += match
-            } else {
-                return nil
-            }
-        }
-        return score
-    }
-
-    /// Scores contiguous matches first; otherwise the word's letters in order,
-    /// rewarding runs and word starts.
-    static func fuzzy(_ word: String, in text: String) -> Int? {
-        let haystack = Array(text.lowercased())
-        let needle = Array(word)
-        guard !needle.isEmpty, needle.count <= haystack.count else { return nil }
-        if let start = (0...(haystack.count - needle.count)).first(where: { Array(haystack[$0..<$0 + needle.count]) == needle }) {
-            let atWordStart = start == 0 || !(haystack[start - 1].isLetter || haystack[start - 1].isNumber)
-            return 100 + needle.count * 10 + (atWordStart ? 40 : 0) - start
-        }
-        var first: Int?
-        var last: Int?
-        var score = 0
-        var next = 0
-        for (offset, character) in haystack.enumerated() where next < needle.count && character == needle[next] {
-            var gain = 2
-            if let last, last == offset - 1 { gain += 6 }
-            if offset == 0 || !(haystack[offset - 1].isLetter || haystack[offset - 1].isNumber) { gain += 8 }
-            score += gain
-            first = first ?? offset
-            last = offset
-            next += 1
-        }
-        guard next == needle.count else { return nil }
-        return score - (first ?? 0) / 3
-    }
-}
+import MuxifyCore
 
 // MARK: - State
 
-/// The Command Palette of one App Window (ADR 0009): which palette is open,
-/// what is typed, and what is selected.
 @MainActor @Observable
 final class CommandPalette {
-    private(set) var current: CommandPaletteConfig?
-    var query = "" {
-        didSet { if query != oldValue { selectedID = nil } }
+    enum Presentation {
+        /// A Tag filter shows only the Topics with that Tag.
+        case search(CommandPaletteConfig, tagFilter: Tag? = nil)
+        case flow(PaletteFlow)
     }
+    struct PreviousStep {
+        let presentation: Presentation
+        let query: String
+        let selectedID: String?
+        let selection: Set<PaletteSource>
+    }
+    private(set) var presentation: Presentation?
+    var history: [PreviousStep] = []
+    var invocation = UUID()
+    /// Add a Project's New Worktree option. Each step starts with it off, so one Project's choice never carries to the next.
+    var newWorktree = false
+    var current: CommandPaletteConfig? {
+        if case .search(let config, _) = presentation { return config }
+        return nil
+    }
+    var tagFilter: Tag? {
+        if case .search(_, let tag) = presentation { return tag }
+        return nil
+    }
+    var flow: PaletteFlow? {
+        if case .flow(let flow) = presentation { return flow }
+        return nil
+    }
+    var moving: TmuxWindow? {
+        if case .move(let draft) = flow { return draft.window }
+        return nil
+    }
+    var query = "" {
+        didSet {
+            if query != oldValue {
+                selectedID = nil
+                queryRevision += 1
+                // Any change of the text, also one that is not a key press, puts the caret back in the text.
+                if let flow = flow?.receiving(.toText) { presentation = .flow(flow) }
+            }
+        }
+    }
+    private(set) var queryRevision = 0
+    var suggestionRequest = UUID()
     /// nil selects the first result.
     var selectedID: String?
-    /// The chips that are on: the palette's `sources` when it opens.
+    /// The Source buttons that are on: the palette's `sources` when it opens.
     var selection: Set<PaletteSource> = [] {
         didSet { if selection != oldValue { selectedID = nil } }
     }
@@ -260,15 +74,30 @@ final class CommandPalette {
         #endif
     }
 
-    var isOpen: Bool { current != nil }
+    var isOpen: Bool { presentation != nil }
+
+    var placeholder: String {
+        if let flow { return flow.placeholder }
+        if let tagFilter { return "Topics with \(tagFilter)" }
+        return current?.placeholder ?? ""
+    }
 
     var theme: PaletteTheme { PaletteTheme(store?.theme) }
 
-    /// One chip per Source; ⌘1… switch them on and off.
-    var chips: [PaletteSource] { current?.chips ?? [] }
+    /// One button per Source this App Window has; ⌘1… switch them on and off.
+    var sourceButtons: [PaletteSource] {
+        guard let current else { return [] }
+        return current.allSources.filter { $0 != .topics || catalog?.offersTopics == true }
+    }
 
-    /// The last chip that is on stays on.
-    func toggleChip(_ source: PaletteSource) {
+    /// The palette's own Sources that this App Window has, else every Source button.
+    private var openingSelection: Set<PaletteSource> {
+        let own = Set(current?.sources ?? []).intersection(sourceButtons)
+        return own.isEmpty ? Set(sourceButtons) : own
+    }
+
+    /// The last Source button that is on stays on.
+    func toggleSource(_ source: PaletteSource) {
         if !selection.contains(source) {
             selection.insert(source)
         } else if selection.count > 1 {
@@ -278,34 +107,117 @@ final class CommandPalette {
 
     // MARK: Results
 
-    var results: [PaletteItem] {
-        guard let current, let store else { return [] }
-        let catalog = PaletteCatalog(windows: store.windows, agents: store.agents, sessionPaths: store.sessionPaths,
-                                     selectedWindowID: store.selectedWindowID, homeDirectory: store.homeDirectory)
-        return PaletteSearch.results(sources: chips.filter(selection.contains), query: query, catalog: catalog)
+    var catalog: PaletteCatalog? {
+        guard let store else { return nil }
+        return PaletteCatalog(windows: store.windows, agents: store.agents, projects: store.projects, folders: store.folders,
+                              selectedWindowID: store.selectedWindowID, homeDirectory: store.homeDirectory,
+                              topics: store.isRemote ? nil : store.topics, records: store.topicWatcher.records,
+                              lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,
+                              commandShortcuts: Dictionary(uniqueKeysWithValues: commands.compactMap { command in
+                                  shortcut(for: command).map { (command, $0) }
+                              }), agentMarks: store.topics.agentMarks)
     }
 
-    func selected(in items: [PaletteItem]) -> PaletteItem? {
-        items.first { $0.id == selectedID } ?? items.first
+    var results: PickList<PaletteItem> {
+        guard let catalog else { return .empty }
+        if let flow { return flowResults(flow) }
+        return catalog.list(sourceButtons.filter(selection.contains), query: query, tagFilter: tagFilter)
     }
 
-    /// The actions menu's entries; Jump To is the first.
-    func actions(for item: PaletteItem) -> [PaletteAction] {
-        item.target == nil ? [.jumpTo, .copyPath] : [.jumpTo, .copyPath, .copyTarget]
+    func selected(in list: PickList<PaletteItem>) -> PickRow<PaletteItem>? {
+        list.rows.first { $0.id == selectedID } ?? list.rows.first { $0.pick.payload != nil }
     }
 
-    func title(of action: PaletteAction, for item: PaletteItem) -> String {
+    /// The actions menu's entries; Jump To is the first. A blocked row has none.
+    func actions(for row: PickRow<PaletteItem>) -> [PaletteAction] {
+        guard let item = row.pick.payload else { return [] }
+        if flow != nil || item.kind == .command { return [.jumpTo] }
+        if case .tag = item.ref { return [.jumpTo, .snoozeTopic] }
+        var actions: [PaletteAction] = [.jumpTo]
+        if store?.canChangeRead(.read, in: item.readTarget) == true { actions.append(.markRead) }
+        if store?.canChangeRead(.unread, in: item.readTarget) == true { actions.append(.markUnread) }
+        switch item.ref {
+        case .topic(let id, _):
+            guard let store, !store.isRemote, let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return actions }
+            if topic.settledAt == nil {
+                actions += topic.snoozedUntil == nil ? [.snoozeTopic] : [.unsnoozeTopic]
+                // Zen starts only in Topics mode; while it is on, the action ends it.
+                actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
+                actions += [.settleTopic, .addProjectToTopic, .rename, .editTags, .suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
+            }
+            if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
+                actions += [.reopenTopic, .startTopicFresh]
+            }
+            actions += [.forgetTopic]
+        case .session(let session):
+            if store?.isRemote == false {
+                actions += [.move]
+                if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
+            }
+            if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
+            actions += [.rename, .newWindow, .killSession]
+        case .window(let window):
+            if store?.isRemote == false { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
+            actions += [.rename, .newWindow, .killWindow]
+        case .agent:
+            if store?.isRemote == false { actions += [.move] }
+        case .project: actions += [.newSession]
+        case .choice, .command, .tag: break
+        }
+        if !item.path.isEmpty { actions += [.copyFolder]; if store?.isRemote == false { actions += [.revealFolder] } }
+        if item.target != nil { actions += [.copyTmuxTarget] }
+        if row.paste != nil { actions += [.pasteFolder] }
+        return actions
+    }
+
+    func title(of action: PaletteAction, for row: PickRow<PaletteItem>) -> String {
+        guard let item = row.pick.payload else { return action.rawValue }
         switch action {
         case .jumpTo:
             switch item.kind {
-            case .session: "Switch to Session"
-            case .sessionPath: "Open as Session"
-            case .window: "Open Window"
-            case .agent: "Jump to Agent"
+            case _ where moving != nil: return "Move Here"
+            case .topic, .snoozedTopic:
+                guard case .topic(let id, nil) = item.ref,
+                      store?.topicWatcher.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
+                return "Reopen Topic"
+            case .settledTopic: return "Reopen Topic"
+            case .tag: return flow == nil ? "Show its Topics" : "Choose Tag"
+            case .session: return "Switch to Session"
+            // A Project row's target is the Session ↩ goes to; without one, ↩ starts it.
+            case .project, .worktree: return item.target == nil ? "Open as Session" : "Switch to Session"
+            case .window: return "Open Window"
+            case .agent: return "Jump to Agent"
+            case .command: return "Run"
             }
-        case .copyPath: "Copy Path"
-        case .copyTarget: item.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"
-        case .selectNext, .selectPrev, .showActions: action.rawValue
+        case .markRead: return "Mark Read"
+        case .markUnread: return "Mark Unread"
+        case .newSession: return "New Session"
+        case .copyFolder: return "Copy Path"
+        case .copyTmuxTarget: return item.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"
+        case .pasteFolder: return "Paste Path"
+        case .snoozeTopic: return item.kind == .tag ? "Snooze its Topics…" : "Snooze Topic"
+        case .move: return "Move to…"
+        case .addProjectToTopic: return "Add a Project"
+        case .rename: return "Rename"
+        case .editTags: return "Edit Tags…"
+        case .suggestTopicTitle: return "Suggest title from Agents"
+        case .startZen: return store?.topicWatcher.zen == nil ? "Zen" : "End Zen"
+        case .settleTopic: return "Settle"
+        case .forgetTopic: return "Forget"
+        case .unsnoozeTopic: return "Unsnooze"
+        case .reopenTopic: return "Reopen"
+        case .startTopicFresh: return "Start Fresh"
+        case .pinTopic: return "Pin"
+        case .unpinTopic: return "Unpin"
+        case .removeFromTopic: return "Remove from Topic"
+        case .removeFromTopicAndKill: return "Remove from Topic and Kill…"
+        case .newWindow: return "New Window"
+        case .revealFolder: return "Reveal in Finder"
+        case .killWindow: return "Kill Window"
+        case .killSession: return "Kill Session"
+        case .lockSession: return "Lock"
+        case .unlockSession: return "Unlock"
+        default: return action.rawValue
         }
     }
 
@@ -323,27 +235,78 @@ final class CommandPalette {
             close()
             return
         }
-        if current == nil {
+        open()
+        history = []
+        invocation = UUID()
+        presentation = .search(palette)
+        store?.paletteDidOpen(palette)
+        selection = openingSelection
+    }
+
+    func openMove(_ window: TmuxWindow, scope: MoveDraft.Scope = .session, paneID: String? = nil,
+                  includesTab: Bool = false, keepingHistory: Bool = false) {
+        begin(.move(MoveDraft(window: window, paneID: paneID ?? window.activePaneID, scope: scope, includesTab: includesTab)),
+              keepingHistory: keepingHistory)
+    }
+
+    func begin(_ flow: PaletteFlow, text: String = "", keepingHistory: Bool = false) {
+        guard store?.changingTopic != true else { return }
+        if keepingHistory, let presentation {
+            history.append(PreviousStep(presentation: presentation, query: query, selectedID: selectedID, selection: selection))
+        } else {
+            history = []
+        }
+        open()
+        invocation = UUID()
+        presentation = .flow(flow)
+        query = text
+        selectedID = nil
+        newWorktree = false
+        loadFlow()
+    }
+
+    func back() {
+        guard query.isEmpty else { return }
+        if showsActions { showsActions = false; return }
+        if receiveChipKey(.deleteBackward(textIsEmpty: true)) { return }
+        if case .search(let config, _?) = presentation { presentation = .search(config); selectedID = nil; return }
+        invocation = UUID()
+        if let earlier = flow?.earlierStep { replaceFlow(earlier); return }
+        guard let previous = history.popLast() else { close(); return }
+        presentation = previous.presentation
+        query = previous.query
+        selectedID = previous.selectedID
+        selection = previous.selection
+        showsActions = false
+    }
+
+    func replaceFlow(_ flow: PaletteFlow) {
+        presentation = .flow(flow)
+        selectedID = nil
+    }
+
+    private func open() {
+        store?.hintHold.receive(.reset)
+        if !isOpen {
             previousResponder = store?.terminalHost.window?.firstResponder
             query = ""
             selectedID = nil
         }
-        current = palette
-        selection = Set(palette.sources)
         showsActions = false
         actionIndex = 0
-        store?.paletteDidOpen(palette)
     }
 
     func close(restoringFocus: Bool = true) {
-        guard current != nil else { return }
-        current = nil
+        guard isOpen else { return }
+        presentation = nil
+        history = []
+        invocation = UUID()
         showsActions = false
         let responder = previousResponder
         previousResponder = nil
         guard restoringFocus, let store else { return }
         DispatchQueue.main.async { [weak store] in
-            guard let store else { return }
+            guard let store, !store.palette.isOpen else { return }
             if let responder, let window = store.terminalHost.window, window.makeFirstResponder(responder) { return }
             store.focusTerminal()
         }
@@ -351,25 +314,51 @@ final class CommandPalette {
 
     // MARK: Running actions
 
-    func perform(_ action: PaletteAction, on item: PaletteItem) {
-        guard let store else { return }
+    func perform(_ action: PaletteAction, on row: PickRow<PaletteItem>) {
+        guard let store, let item = row.pick.payload else { return }
+        if case .choice(let choice) = item.ref {
+            if choice == .accept { acceptSelected() } else { accept(choice) }
+            return
+        }
+        if action == .jumpTo, case .tag(let tag) = item.ref, let current {
+            presentation = .search(current, tagFilter: tag)
+            query = ""
+            selectedID = nil
+            return
+        }
         switch action {
         case .jumpTo:
+            if case .command(let command) = item.ref {
+                run(command)
+                return
+            }
             close(restoringFocus: false)
             switch item.ref {
+            case .topic(let id, let window):
+                if let window { store.select(window) } else { store.goToTopic(.topic(id)) }
             case .agent(let agent): store.select(agent)
             case .window(let window): store.select(window)
             case .session(let session):
-                if let window = session.windows.first(where: \.isActive) ?? session.windows.first { store.select(window) }
-            case .sessionPath(let path): store.open(path)
+                if let window = EntryWindow.ofSession(session.windows) { store.select(window) }
+            case .project(let target): store.openDirectory(target)
+            case .tag: break
+            case .choice: break
+            case .command: break
             }
-        case .copyPath:
+        case .newSession:
+            guard case .project(let target) = item.ref else { return }
+            close(restoringFocus: false)
+            store.newSession(in: target)
+        case .copyFolder:
             copy(item.path, title: "Copied Path", shown: Paths.tildify(item.path, home: store.homeDirectory))
-        case .copyTarget:
+        case .copyTmuxTarget:
             guard let target = item.target else { return }
             copy(target, title: item.kind == .agent ? "Copied Pane ID" : "Copied tmux Target", shown: target)
-        case .selectNext, .selectPrev, .showActions:
-            break
+        case .pasteFolder:
+            guard let paste = row.paste else { return }
+            close()
+            store.pasteIntoTerminal(paste)
+        default: performRowAction(action, item: item)
         }
     }
 
@@ -381,7 +370,7 @@ final class CommandPalette {
         showCopied(title: title, value: shown)
     }
 
-    /// Shared by palette and Browser copies, without taking keyboard focus.
+    /// Shared by palette and Browser copies, without taking Focus.
     func showCopied(title: String, value: String) {
         copiedWork?.cancel()
         let confirmation = PaletteCopy(title: title, value: value)
@@ -399,50 +388,47 @@ final class CommandPalette {
     // MARK: Keys
 
     /// Sees each key in the App Window before the other keybinds while a
-    /// palette is open and its search field has focus. ⎋ and ⌘1–⌘3 are fixed;
+    /// palette is open and its search field has focus. ⎋ and ⌘1–⌘9 are fixed;
     /// the rest come from `keybindings.command_palette`.
     func handle(_ trigger: KeyTrigger, in event: NSEvent) -> Bool {
-        guard current != nil, let store else { return false }
+        guard isOpen, let store else { return false }
         // Clicked away (into the terminal or a page): typing goes there.
         guard (event.window?.firstResponder as? NSTextView)?.isFieldEditor == true else {
             close(restoringFocus: false)
             return false
         }
-        // As in Spotlight, ⎋ clears before it closes.
-        if trigger == Self.escape {
-            if showsActions {
-                showsActions = false
-            } else if !query.isEmpty || selection != Set(current?.sources ?? []) {
-                query = ""
-                selection = Set(current?.sources ?? [])
-            } else {
-                close()
-            }
+        if trigger == Self.escape { close(); return true }
+        if let editor = event.window?.firstResponder as? NSTextView, handleChipKey(trigger, editor: editor) { return true }
+        if trigger == KeyTrigger(modifiers: [], key: .special(.backspace)), query.isEmpty {
+            back()
             return true
         }
-        let items = results
-        let item = selected(in: items)
+        if flow != nil, handleFlow(trigger) { return true }
+        let list = results
+        let item = selected(in: list)
+        if trigger == KeyTrigger(modifiers: .command, key: .special(.enter)), case .command(let command)? = item?.pick.payload?.ref,
+           command.commandReturnTitle != nil {
+            acceptSelected(commandReturn: true)
+            return true
+        }
         if let action = store.config.paletteKeybinds.action(for: trigger) {
             switch action {
             case .selectNext, .selectPrev:
                 let delta = action == .selectNext ? 1 : -1
-                if showsActions, let item {
-                    let count = actions(for: item).count
+                if showsActions, let item, case let count = actions(for: item).count, count > 0 {
                     actionIndex = (actionIndex + delta + count) % count
                 } else {
-                    move(delta, in: items)
+                    move(delta, in: list)
                 }
                 return true
             case .showActions:
-                guard item != nil else { return true }
-                showsActions.toggle()
-                actionIndex = 0
+                toggleActions(for: item)
                 return true
-            case .jumpTo, .copyPath, .copyTarget:
+            default:
                 // With nothing to act on, ⌘C still copies the search text.
                 guard let item else { return false }
                 let available = actions(for: item)
-                if showsActions, action == .jumpTo {
+                if showsActions, action == .jumpTo, !available.isEmpty {
                     perform(available[min(actionIndex, available.count - 1)], on: item)
                 } else if available.contains(action) {
                     perform(action, on: item)
@@ -450,17 +436,30 @@ final class CommandPalette {
                 return true
             }
         }
-        if let index = Self.commandDigits.firstIndex(of: trigger), chips.indices.contains(index) {
-            toggleChip(chips[index])
+        if let index = Self.commandDigits.firstIndex(of: trigger), sourceButtons.indices.contains(index) {
+            toggleSource(sourceButtons[index])
             return true
         }
         return false
     }
 
-    private func move(_ delta: Int, in items: [PaletteItem]) {
-        guard !items.isEmpty else { return }
-        let current = items.firstIndex { $0.id == selectedID } ?? 0
-        selectedID = items[(current + delta + items.count) % items.count].id
+    /// The menu opens only over a row it has actions for; a blocked row has none.
+    func toggleActions(for row: PickRow<PaletteItem>?) {
+        actionIndex = 0
+        guard let row, !actions(for: row).isEmpty else {
+            showsActions = false
+            return
+        }
+        showsActions.toggle()
+    }
+
+    /// Steps over blocked rows, as the first selection does.
+    func move(_ delta: Int, in list: PickList<PaletteItem>) {
+        let rows = list.rows.filter { $0.pick.payload != nil }
+        guard !rows.isEmpty else { return }
+        if let flow = flow?.receiving(.toText) { presentation = .flow(flow) }
+        let current = rows.firstIndex { $0.id == selected(in: list)?.id } ?? 0
+        selectedID = rows[(current + delta + rows.count) % rows.count].id
         showsActions = false
     }
 
@@ -555,10 +554,4 @@ struct PaletteTheme {
     var blue: Color { ansi(4) }
     var magenta: Color { ansi(5) }
     var cyan: Color { ansi(6) }
-
-    /// Status hues keep the same meaning as the Sidebar, independent of ANSI
-    /// colors: monochrome working, blue Unread, orange blocked or failed.
-    func status(_ status: AgentStatus?, unread: Bool) -> Color? {
-        AgentStatusMarker(status: status, unread: unread)?.color
-    }
 }

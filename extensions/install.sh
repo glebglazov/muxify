@@ -85,13 +85,20 @@ install_claude() {
 
 # Codex CLI: one hook script for every event, registered in hooks.json.
 install_codex() {
-	codex_dir=$HOME/.codex
+	codex_dir=${CODEX_HOME:-$HOME/.codex}
 	if [ ! -d "$codex_dir" ]; then
 		echo "codex: not found"
 		return 0
 	fi
-	if ! command -v jq >/dev/null 2>&1; then
-		echo "codex: failed (jq not found)"
+	for dependency in jq python3 codex; do
+		if ! command -v "$dependency" >/dev/null 2>&1; then
+			echo "codex: failed ($dependency not found)"
+			return 1
+		fi
+	done
+	codex_dir=$(CDPATH= cd -- "$codex_dir" && pwd) || return 1
+	if ! python3 "$here/codex/install-title.py" "$codex_dir"; then
+		echo "codex: failed (could not configure the conversation title)"
 		return 1
 	fi
 
@@ -100,6 +107,14 @@ install_codex() {
 	# the command is a plain line every shell reads the same way; that shell
 	# expands $HOME.
 	codex_command='sh "$HOME/.codex/muxify-status.sh"'
+	if [ -n "${CODEX_HOME:-}" ]; then
+		codex_command=$(python3 - "$codex_script" <<'PY'
+import re
+import sys
+print('sh "' + re.sub(r'([\\$`\"])', r'\\\1', sys.argv[1]) + '"')
+PY
+		) || return 1
+	fi
 	# No matcher (every tool), synchronous so events stay in order.
 	codex_entries=$(jq -n --arg cmd "$codex_command" '
 		reduce ("SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest",
@@ -120,7 +135,7 @@ install_codex() {
 	fi
 	echo "codex: $result"
 	echo "  Trust the new hooks once: run /hooks in Codex and approve them."
-	echo "  Launch Codex with codex --no-daemon (fish: alias codex 'command codex --no-daemon'), or it can't report its Status."
+	echo "  Restart running Codex TUIs to load the conversation title. Default daemon mode is supported."
 }
 
 # OpenCode 2: a TUI plugin directory, which OpenCode discovers in its plugins

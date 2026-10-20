@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
+import MuxifyCore
 
-/// Two sections stacked vertically: Sessions on top, Agents below. Each can be
+/// Two sections stacked vertically: Topics or Sessions on top, Agents below. Each can be
 /// hidden from the View menu; with both shown, a divider between them sets
 /// their split. With neither, the sidebar stays open but empty.
 struct SidebarView: View {
@@ -17,11 +18,12 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var content: some View {
+        Group {
         if store.sessionsVisible && store.agentsVisible {
             GeometryReader { proxy in
                 let total = proxy.size.height
                 VStack(spacing: 0) {
-                    SessionsSection(store: store)
+                    WorkSection(store: store)
                         .frame(maxHeight: .infinity)
                     SectionResizeHandle(fraction: $agentsFraction, total: total)
                     AgentsSection(store: store)
@@ -29,13 +31,778 @@ struct SidebarView: View {
                 }
             }
         } else if store.sessionsVisible {
-            SessionsSection(store: store)
+            WorkSection(store: store)
         } else if store.agentsVisible {
             AgentsSection(store: store)
         } else {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        }
+        .onChange(of: store.selectedWindowID, initial: true) { _, _ in store.updateTopicSelection() }
+        .onChange(of: store.topics.activeTopic) { _, _ in store.updateTopicSelection() }
+        // Moving to another Session (click, tmux navigation, new Window) opens its card.
+        .onChange(of: store.selectedWindow?.sessionName, initial: true) { _, name in
+            guard let name, !store.openSessionCards.contains(name) else { return }
+            withAnimation(.easeOut(duration: 0.15)) { _ = store.openSessionCards.insert(name) }
+        }
+    }
+}
+
+private struct WorkSection: View {
+    let store: WorkspaceStore
+
+    var body: some View {
+        let model = store.topics
+        let showsTopics = model.mode == .topics
+        VStack(spacing: 0) {
+            if model.showsToggle {
+                HStack(spacing: 4) {
+                    viewButton(.topics, selected: showsTopics)
+                    viewButton(.sessions, selected: !showsTopics)
+                }
+                .padding(6)
+            }
+            if showsTopics {
+                TopicsSection(store: store, model: model)
+            } else if model.sessionsEnabled {
+                SessionsSection(store: store)
+            } else {
+                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private func viewButton(_ mode: SidebarMode, selected: Bool) -> some View {
+        Button { store.sidebarMode = mode } label: {
+            Text(mode.rawValue)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .background(selected ? Color.primary.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar-view-" + mode.rawValue.lowercased())
+        .accessibilityValue(selected ? "selected" : "")
+    }
+}
+
+private struct TopicsSection: View {
+    @Environment(\.sidebarTypography) private var typography
+    let store: WorkspaceStore
+    let model: TopicsModel
+    @State private var drag: LongPressDrag<TopicListID> = .idle
+    /// Each Topic and Locked card's frame in the list, for the drop position of a drag.
+    @State private var cardFrames: [TopicListID: CGRect] = [:]
+    @State private var groupsHeight: CGFloat = 0
+    /// The cards whose "N more…" the user pressed.
+    @State private var showingAllRows: Set<TopicGroupID> = []
+    /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
+    @State private var showingAllSessionRows: Set<String> = []
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                if let zen = store.topicWatcher.zen { zenLine(zen) }
+                ScrollView {
+                    // Not lazy: a lazy stack is one more accessibility element over all the cards, and a click tool
+                    // such as Homerow clicks its centre, on whichever card is there.
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(model.rows) { topic in
+                            let order = orderedCardIDs(pinned: topic.isPinned)
+                            let onFrame = { (id: TopicListID, frame: CGRect) in if drag.translation(of: id) == nil { cardFrames[id] = frame } }
+                            let placement = { (id: TopicListID, y: CGFloat) in
+                                DropPlacement.at(y, frames: cardFrames.filter { order.contains($0.key) }, dragging: id)
+                            }
+                            if case .locked(let sessionID) = topic.id {
+                                LockedCard(store: store, row: topic, sessionID: sessionID, titles: model.titles,
+                                           holdsSelection: topic.id == model.activeTopic,
+                                           showsAllRows: showingAllRows.contains(topic.id),
+                                           onShowAllRows: { showingAllRows.insert(topic.id) },
+                                           drag: $drag, neighbors: neighbors(of: topic.id, in: order), onFrame: onFrame, placement: placement)
+                            } else {
+                                TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
+                                          showsAllRows: showingAllRows.contains(topic.id),
+                                          onShowAllRows: { showingAllRows.insert(topic.id) },
+                                          drag: $drag, neighbors: neighbors(of: topic.id, in: order), rename: renameTopic,
+                                          onFrame: onFrame, placement: placement)
+                            }
+                        }
+                        if let opened = model.openedNoTopicSession { noTopicCard(opened) }
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 4)
+                    .coordinateSpace(.named(TopicCard.listSpace))
+                }
+                .coordinateSpace(.named(TopicCard.viewport))
+                .scrollIndicators(.never)
+                .accessibilityIdentifier("topics-list")
+                .overlay {
+                    if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
+                        Text("No Topics").font(typography.font(for: .title)).foregroundStyle(.secondary)
+                    }
+                }
+                if !model.groups.isEmpty {
+                    // The groups stay at the bottom of the panel, so an opened group pushes its row up. They take
+                    // their own height up to a third of the panel, and scroll when an open group is taller.
+                    ScrollView {
+                        groupRows.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { groupsHeight = $0 }
+                    }
+                    .scrollIndicators(.never)
+                    .frame(height: min(groupsHeight, proxy.size.height / 3))
+                }
+            }
+        }
+    }
+
+    private func zenLine(_ zen: ZenRecord) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "moon.stars").font(.system(size: 11))
+            Group {
+                if let deadline = zen.deadline, deadline != .never { Text("Zen until " + deadline.wakeLabel) } else { Text("Zen") }
+            }
+            .font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            .accessibilityIdentifier("zen-status")
+            Spacer(minLength: 4)
+            Button("End Zen") { store.endZen() }
+                .topicLink()
+                .disabled(store.changingTopic)
+                .accessibilityIdentifier("end-zen")
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14).frame(height: 26)
+    }
+
+    /// The No Topic Session the user opened, as the card Sessions mode shows. No Topic has no group row.
+    @ViewBuilder
+    private func noTopicCard(_ opened: TopicsModel.Session) -> some View {
+        if let session = store.sessions.first(where: { $0.id == opened.id.session }) {
+            SessionCard(store: store, model: model, session: session,
+                        identifier: "\(TopicGroupID.noTopic.accessibilityID)-session-\(session.id)", viewport: TopicCard.viewport,
+                        showsAllRows: showingAllSessionRows.contains(session.id),
+                        onShowAllRows: { showingAllSessionRows.insert(session.id) }) { item in
+                TopicItemRow(store: store, item: item, titles: model.titles, isDimmed: false)
+            }
+        }
+    }
+
+    private var groupRows: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(model.groups) { group in
+                GroupHeader(icon: group.kind == .snoozed ? "moon" : "checkmark.circle", title: group.kind.title,
+                            count: group.count, isExpanded: group.isExpanded) {
+                    store.topicGroups.toggle(group.kind)
+                }
+                .padding(.top, 4)
+                .accessibilityIdentifier(group.kind.accessibilityID)
+                .accessibilityValue(group.isExpanded ? "expanded" : "collapsed")
+                if group.isExpanded {
+                    ForEach(group.topics) { topic in
+                        GroupedTopicRow(store: store, topic: topic)
+                        if topic.isExpanded { TopicChildren(store: store, topic: topic, titles: model.titles) }
+                    }
+                    if group.hiddenCount > 0 {
+                        Button("Show \(min(group.hiddenCount, TopicGroupsState.pageSize)) more") { store.topicGroups.showMoreSettled() }
+                            .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                            .padding(.leading, 24).frame(height: 24)
+                            .accessibilityIdentifier("settled-show-more")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 6).padding(.vertical, 4)
+    }
+
+    /// The Pinned Topic cards, or the Topic and Locked cards that are not Pinned, in list order: a drag or Move Up
+    /// and Move Down reorders a card among these only.
+    private func orderedCardIDs(pinned: Bool) -> [TopicListID] {
+        model.rows.compactMap { row in row.isPinned == pinned ? row.id.listID : nil }
+    }
+
+    private func neighbors(of id: TopicGroupID, in order: [TopicListID]) -> CardNeighbors {
+        guard let id = id.listID, let index = order.firstIndex(of: id) else { return CardNeighbors(above: nil, below: nil) }
+        return CardNeighbors(above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil)
+    }
+
+    private func renameTopic(_ id: String, suggest: Bool = false) {
+        guard let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return }
+        store.palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "")
+        if suggest { store.palette.suggestTitle() }
+    }
+}
+
+private extension View {
+    /// A press in a window that is not key reaches this view's gestures, so a press or a long press works on the first click.
+    @ViewBuilder
+    func takesFirstClick() -> some View {
+        if #available(macOS 15, *) { allowsWindowActivationEvents(true) } else { self }
+    }
+
+    /// The look of a Topic's own action (Settle, Unsnooze, Reopen): a link, so the row stays quiet.
+    func topicLink() -> some View {
+        buttonStyle(.link).font(.system(size: 11))
+    }
+}
+
+/// The Sessions of a Snoozed or Settled Topic row the user opened, each with its Window and Pane rows.
+/// A Settled Topic's Sessions are remembered ones: their rows are dimmed and do nothing on click.
+private struct TopicChildren: View {
+    let store: WorkspaceStore
+    let topic: TopicsModel.Row
+    let titles: [String: String]
+
+    var body: some View {
+        ForEach(topic.sessions) { session in
+            SessionHeading(store: store, topic: topic, session: session)
+            switch session.contents {
+            case .live(let children):
+                ForEach(children.items) { item in
+                    TopicItemRow(store: store, item: item, titles: titles, isDimmed: topic.kind != .open)
+                }
+            case .remembered(let windows):
+                ForEach(windows) { window in
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.arrow.circlepath").font(.system(size: 11)).frame(width: 14)
+                        Text(window.name).font(.system(size: 12)).lineLimit(1).hoverLabelTitle()
+                        Spacer(minLength: 4)
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 24).padding(.trailing, 6).padding(.vertical, 4)
+                    .accessibilityElement(children: .combine)
+                    .hoverLabel(title: window.name, titleFont: .systemFont(ofSize: 12), detail: Paths.tildify(window.directory))
+                    .accessibilityIdentifier("remembered-window-\(window.id)")
+                }
+            }
+        }
+        .padding(.leading, 12)
+    }
+}
+
+/// What a Session line of an open Topic card needs to move the Session within its Topic.
+private struct SessionOrdering {
+    let drag: Binding<LongPressDrag<String>>
+    /// The coordinate space of the card, in which `placement` reads a height.
+    let space: String
+    /// The Sessions right above and below this one, where Move Up and Move Down put it.
+    let above: String?
+    let below: String?
+    /// The Topic keeps an order the user gave, which Sort Sessions by Creation ends.
+    let isManual: Bool
+    let placement: (String, CGFloat) -> DropPlacement<String>?
+}
+
+/// The heading of one Session inside a Topic: its Project and pills. Pressing it goes to the Session's
+/// active Window. In an open Topic card a long press moves the Session within its Topic.
+private struct SessionHeading: View {
+    let store: WorkspaceStore
+    let topic: TopicsModel.Row
+    let session: TopicsModel.Session
+    var ordering: SessionOrdering? = nil
+
+    var body: some View {
+        line
+            .takesFirstClick()
+            .opacity(topic.kind == .open ? 1 : 0.5)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, go)
+            .accessibilityIdentifier("\(topic.id.accessibilityID)-session-\(session.id.session)")
+            .accessibilityActions { orderButtons }
+            .contextMenu {
+                orderButtons
+                if let window = session.windows.first {
+                    if ordering != nil { Divider() }
+                    TopicMembershipMenu(store: store, source: .session(window))
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var line: some View {
+        let label = HStack(spacing: 6) {
+            Text(session.projectName).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+            SessionPills(isHome: session.isHome, branch: session.branch)
+            Spacer(minLength: 4)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.leading, 8).padding(.trailing, 6).padding(.top, 4).padding(.bottom, 1)
+        .contentShape(Rectangle())
+        if let ordering {
+            let id = session.id.session
+            label
+                .longPressDrag(id, state: ordering.drag, in: ordering.space, isEnabled: !store.changingTopic,
+                               placement: { ordering.placement(id, $0) }, onTap: go) { drop in
+                    if let placement = drop.sessionPlacement { store.moveSession(id, to: placement) }
+                }
+                .longPressDragLook(id, state: ordering.drag.wrappedValue, lineOffset: 1)
+        } else {
+            label.onTapGesture(perform: go)
+        }
+    }
+
+    @ViewBuilder
+    private var orderButtons: some View {
+        if let ordering, case .topic(let topicID) = topic.id {
+            let id = session.id.session
+            Button("Move Up") { if let above = ordering.above.flatMap(SessionID.init) { store.moveSession(id, to: .before(above)) } }
+                .disabled(ordering.above == nil || store.changingTopic)
+            Button("Move Down") { if let below = ordering.below.flatMap(SessionID.init) { store.moveSession(id, to: .after(below)) } }
+                .disabled(ordering.below == nil || store.changingTopic)
+            if ordering.isManual {
+                Button("Sort Sessions by Creation") { store.sortSessionsByCreation(ofTopic: topicID) }
+                    .disabled(store.changingTopic)
+            }
+        }
+    }
+
+    private func go() {
+        if case .live = session.contents { store.goToSession(session.id.session) }
+    }
+}
+
+/// The "home" and branch pills of a Session.
+private struct SessionPills: View {
+    let isHome: Bool
+    let branch: String?
+
+    var body: some View {
+        if isHome {
+            Text("home").font(.system(size: 9)).foregroundStyle(.secondary)
+                .padding(.horizontal, 4).background(.quaternary, in: Capsule())
+        }
+        if let branch {
+            Text(branch).font(.system(size: 9)).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle).frame(maxWidth: 100)
+                .padding(.horizontal, 4).background(.quaternary, in: Capsule())
+                .help(branch)
+        }
+    }
+}
+
+/// A Window or Pane row of a Topic.
+private struct TopicItemRow: View {
+    let store: WorkspaceStore
+    let item: TopicsModel.SessionChildren.Item
+    let titles: [String: String]
+    let isDimmed: Bool
+
+    var body: some View {
+        switch item {
+        case .window(let window):
+            Button { store.select(window) } label: {
+                WindowRow(window: window, content: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
+                          tabCount: store.tabCount(for: window), topicsView: true,
+                          usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
+                              window, record: store.topicWatcher.records.first { $0.id == window.topicID }, projects: store.projects))
+            }
+            .buttonStyle(.plain)
+            .opacity(isDimmed ? 0.5 : 1)
+            .id("\(window.sessionID):\(window.id):\(window.topicID ?? "")")
+            .accessibilityIdentifier("topic-window-\(window.id)")
+            .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
+            .contextMenu { TopicMembershipMenu(store: store, source: .window(window)) }
+            .topicMembershipActions(store: store, source: .window(window))
+        case .pane(let row):
+            PaneRow(store: store, row: row)
+                .opacity(isDimmed ? 0.5 : 1)
+        }
+    }
+}
+
+/// A group row: Snoozed or Settled.
+private struct GroupHeader: View {
+    let icon: String
+    let title: String
+    let count: Int
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 6) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .bold)).frame(width: 10)
+                Image(systemName: icon).font(.system(size: 11))
+                Text("\(title) (\(count))").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Spacer(minLength: 4)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8).frame(height: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A Topic row inside the Snoozed or Settled group. Its Unsnooze or Reopen button is always shown.
+private struct GroupedTopicRow: View {
+    let store: WorkspaceStore
+    let topic: TopicsModel.Row
+
+    private var topicID: String? {
+        if case .topic(let id) = topic.id { return id }
+        return nil
+    }
+
+    private var details: [String] {
+        switch topic.kind {
+        case .open: return []
+        case .snoozed(let wake): return [wake] + (topic.idleLabel.map { [$0] } ?? [])
+        case .settled(let detail): return detail.isEmpty ? [] : [detail]
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button {
+                store.updateTopicSelection()
+                store.topicSelection.setTopic(topic.id, open: !topic.isExpanded)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: topic.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .bold)).frame(width: 10)
+                    Text(topic.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    if let mark = topic.mark { RowMarkView(mark: mark) }
+                    if topic.isPinned { PinMark() }
+                    Spacer(minLength: 4)
+                    Text(details.joined(separator: " · ")).font(.system(size: 10)).lineLimit(1).truncationMode(.tail)
+                }
+                .padding(.leading, 8).frame(height: 26)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(topic.id.accessibilityID)
+            .accessibilityValue(([topic.isExpanded ? "expanded" : "collapsed"] + (topic.isPinned ? ["Pinned"] : []) + details + [topic.mark?.rawValue].compactMap { $0 })
+                .joined(separator: ", "))
+            .accessibilityActions {
+                if let topicID { Button("Forget Topic…") { store.presentForgetTopic(topicID) }.disabled(store.changingTopic) }
+                if case .snoozed = topic.kind, let topicID {
+                    Button("Settle…") { store.presentSettleTopic(topicID) }.disabled(store.changingTopic)
+                    Button("Snooze again…") { store.presentSnooze([.topic(topicID)], from: .until) }.disabled(store.changingTopic)
+                }
+            }
+            if let topicID {
+                switch topic.kind {
+                case .snoozed:
+                    Button("Unsnooze") { store.unsnoozeTopic(topicID) }
+                        .topicLink()
+                        .accessibilityIdentifier("unsnooze-topic-" + topicID)
+                case .settled:
+                    Button("Reopen…") { store.showEmptyTopic(topicID) }
+                        .topicLink()
+                        .accessibilityIdentifier("reopen-topic-" + topicID)
+                case .open:
+                    EmptyView()
+                }
+            }
+        }
+        .controlSize(.small)
+        .disabled(store.changingTopic)
+        .padding(.trailing, 8)
+        .opacity(0.5)
+        .contextMenu {
+            if let topicID { Button("Forget Topic…") { store.presentForgetTopic(topicID) }.disabled(store.changingTopic) }
+            if case .snoozed = topic.kind, let topicID {
+                Button("Settle…") { store.presentSettleTopic(topicID) }.disabled(store.changingTopic)
+                Button("Snooze again…") { store.presentSnooze([.topic(topicID)], from: .until) }.disabled(store.changingTopic)
+            }
+        }
+    }
+}
+
+private struct TopicCard: View {
+    @Environment(\.quickSwitchHints) private var hints
+    let store: WorkspaceStore
+    let topic: TopicsModel.Row
+    let titles: [String: String]
+    let holdsSelection: Bool
+    let showsAllRows: Bool
+    let onShowAllRows: () -> Void
+    @Binding var drag: LongPressDrag<TopicListID>
+    let neighbors: CardNeighbors
+    let rename: (String, Bool) -> Void
+    let onFrame: (TopicListID, CGRect) -> Void
+    /// Where this Topic, dragged to a height in `listSpace`, would land.
+    let placement: (TopicListID, CGFloat) -> DropPlacement<TopicListID>?
+    @State private var sessionDrag: LongPressDrag<String> = .idle
+    /// Each Session line's frame in the card, by Session ID, for the drop position of a Session drag.
+    @State private var sessionFrames: [String: CGRect] = [:]
+
+    static let listSpace = "topics-list"
+    /// The Topic list's scroll view, in which an open card's header sticks to the top.
+    static let viewport = "topics-viewport"
+
+    var body: some View {
+        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.mark, viewport: Self.viewport, restingOpacity: topic.hasNoLiveSession ? 0.55 : 1) {
+            header
+        } content: {
+            CardList(blocks: topic.sessions.compactMap { session in
+                         guard case .live(let children) = session.contents else { return nil }
+                         return CardBlock(id: session.id.session, items: children.items)
+                     },
+                     identifier: topic.id.accessibilityID, selectedWindowID: store.selectedWindowID,
+                     showsAll: showsAllRows, onShowAll: onShowAllRows, reservesCorner: true) { block in
+                if let session = topic.sessions.first(where: { $0.id.session == block.id }) {
+                    SessionHeading(store: store, topic: topic, session: session, ordering: ordering(of: session.id.session))
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(sessionSpace)) } action: { frame in
+                            if sessionDrag.translation(of: block.id) == nil { sessionFrames[block.id] = frame }
+                        }
+                }
+            } row: { item in
+                TopicItemRow(store: store, item: item, titles: titles, isDimmed: topic.kind != .open)
+            }
+        }
+        .coordinateSpace(.named(sessionSpace))
+        .cardCorner {
+            if case .topic(let id) = topic.id {
+                Button("Settle") { store.presentSettleTopic(id) }
+                    .topicLink()
+                    .disabled(store.changingTopic)
+                    .accessibilityIdentifier("settle-topic-" + id)
+                    .opacity(hints.sidebarActive ? 0.5 : (topic.hasNoLiveSession ? 0.55 : 1))
+            }
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.listSpace)) } action: { frame in
+            if let listID { onFrame(listID, frame) }
+        }
+        .longPressDragLook(listID ?? .topic(""), state: drag, lineOffset: 4)
+    }
+
+    private var sessionSpace: String { "sessions-" + topic.id.accessibilityID }
+
+    /// How a Session line moves within this Topic. A Snoozed or Settled Topic's lines do not move.
+    private func ordering(of sessionID: String) -> SessionOrdering? {
+        guard topic.kind == .open, case .topic(let id) = topic.id else { return nil }
+        let order = topic.sessions.map(\.id.session)
+        guard let index = order.firstIndex(of: sessionID) else { return nil }
+        return SessionOrdering(drag: $sessionDrag, space: sessionSpace,
+                               above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil,
+                               isManual: store.topicWatcher.records.first { $0.id == id }?.hasManualSessionOrder ?? false,
+                               placement: { id, y in DropPlacement.at(y, frames: sessionFrames.filter { order.contains($0.key) }, dragging: id) })
+    }
+
+    private var formatted: SidebarFormats.Text {
+        store.sidebarText(.topic, context: store.sidebarFormatContexts.topics[topic.id])
+    }
+
+    private var header: some View {
+        CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned,
+                   hintTarget: namedTopicID.map { .topic($0) },
+                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.idleLabel.map { [$0] } ?? []),
+                   summary: formatted.summary, reservesCorner: true) {
+            if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
+        }
+        .longPressDrag(listID ?? .topic(""), state: $drag, in: Self.listSpace, isEnabled: listID != nil && !store.changingTopic,
+                       placement: { placement(listID ?? .topic(""), $0) }, onTap: press) { drop in
+            if let listID { store.moveTopic(listID, to: drop.topicPlacement) }
+        }
+        .takesFirstClick()
+        .accessibilityAction(.default, press)
+        .accessibilityIdentifier(topic.id.accessibilityID)
+        .accessibilityActions {
+            Button("Go to Topic") { store.goToTopic(topic.id) }
+            if case .topic(let id) = topic.id {
+                Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
+                pinButton(id)
+                CardMoveButtons(store: store, id: .topic(id), neighbors: neighbors)
+                if !store.topicConfig.titleCommandFallbacks.isEmpty {
+                    Button("Suggest title from Agents") {
+                        DispatchQueue.main.async { rename(id, true) }
+                    }
+                    .disabled(store.changingTopic)
+                }
+                Button("Rename Topic…") {
+                    DispatchQueue.main.async { rename(id, false) }
+                }
+                .disabled(store.changingTopic)
+                Button("Add a Project…") { store.presentAddProject(toTopic: id) }
+                    .disabled(store.changingTopic)
+                Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
+                    .disabled(store.changingTopic)
+            }
+        }
+        .contextMenu {
+            Button("Go to Topic") { store.goToTopic(topic.id) }
+                .accessibilityIdentifier("go-to-topic")
+            if case .topic(let id) = topic.id {
+                Divider()
+                if topic.isDormant {
+                    Button("Reopen") { store.reopenTopic(id, .reopen) }
+                        .accessibilityIdentifier("reopen-topic-" + id)
+                        .disabled(store.changingTopic)
+                    Button("Start Fresh") { store.reopenTopic(id, .startFresh) }
+                        .accessibilityIdentifier("start-fresh-topic-" + id)
+                        .disabled(store.changingTopic)
+                }
+                Button("Snooze…") { store.presentSnooze([.topic(id)], from: .until) }
+                    .accessibilityIdentifier("snooze-topic").disabled(store.changingTopic)
+                Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
+                    .accessibilityIdentifier("zen-topic").disabled(store.changingTopic)
+                Button("Forget Topic…") { store.presentForgetTopic(id) }
+                    .accessibilityIdentifier("forget-topic").disabled(store.changingTopic)
+                Button("Settle Topic…") { store.presentSettleTopic(id) }
+                    .accessibilityIdentifier("settle-topic")
+                    .disabled(store.changingTopic)
+                Divider()
+                if !store.topicConfig.titleCommandFallbacks.isEmpty {
+                    Button("Suggest title from Agents") { rename(id, true) }
+                        .accessibilityIdentifier("suggest-topic-title")
+                        .disabled(store.changingTopic)
+                }
+                Button("Rename Topic…") { rename(id, false) }
+                    .accessibilityIdentifier("rename-topic")
+                    .disabled(store.changingTopic)
+                Button("Add a Project…") { store.presentAddProject(toTopic: id) }
+                    .accessibilityIdentifier("add-topic-project")
+                    .disabled(store.changingTopic)
+                Divider()
+                pinButton(id)
+                CardMoveButtons(store: store, id: .topic(id), neighbors: neighbors)
+            }
+        }
+    }
+
+    private func pinButton(_ id: String) -> some View {
+        Button(topic.isPinned ? "Unpin Topic" : "Pin Topic") { store.pinTopic(id, !topic.isPinned) }
+            .accessibilityIdentifier("pin-topic")
+            .disabled(store.changingTopic)
+    }
+
+    /// A press on the Active Topic's header opens or closes its card; on another Topic's header it goes to that
+    /// Topic, whose card then opens as the Active Topic's.
+    private func press() {
+        guard !holdsSelection else { return toggle() }
+        store.updateTopicSelection()
+        withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(topic.id, open: true) }
+        store.goToTopic(topic.id)
+    }
+
+    private func toggle() {
+        store.updateTopicSelection()
+        withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(topic.id, open: !topic.isExpanded) }
+    }
+
+    private var namedTopicID: String? {
+        if case .topic(let id) = topic.id { return id }
+        return nil
+    }
+
+    private var listID: TopicListID? { topic.id.listID }
+}
+
+/// The Topic and Locked cards right above and below a card, among those with its pin.
+private struct CardNeighbors {
+    let above: TopicListID?
+    let below: TopicListID?
+}
+
+/// Move Up and Move Down of a Topic or Locked card: the Sidebar's own order change, which the palette does not show.
+private struct CardMoveButtons: View {
+    let store: WorkspaceStore
+    let id: TopicListID
+    let neighbors: CardNeighbors
+
+    var body: some View {
+        Button("Move Up") { if let above = neighbors.above { store.moveTopic(id, to: .before(above)) } }
+            .disabled(neighbors.above == nil || store.changingTopic)
+        Button("Move Down") { if let below = neighbors.below { store.moveTopic(id, to: .after(below)) } }
+            .disabled(neighbors.below == nil || store.changingTopic)
+    }
+}
+
+/// A Locked Session among the Topic cards (ADR 0018). It has a Topic card's shape and its place in the order, but it
+/// is a No Topic Session: its title and Summary come from the Session card Formats, its rows are its Windows with no
+/// Project heading, and it offers only what a Session can do.
+private struct LockedCard: View {
+    let store: WorkspaceStore
+    let row: TopicsModel.Row
+    let sessionID: String
+    let titles: [String: String]
+    let holdsSelection: Bool
+    let showsAllRows: Bool
+    let onShowAllRows: () -> Void
+    @Binding var drag: LongPressDrag<TopicListID>
+    let neighbors: CardNeighbors
+    let onFrame: (TopicListID, CGRect) -> Void
+    let placement: (TopicListID, CGFloat) -> DropPlacement<TopicListID>?
+
+    private var id: TopicListID { .lock(sessionID: sessionID) }
+    private var window: TmuxWindow? { row.sessions.first?.windows.first }
+
+    private var formatted: SidebarFormats.Text {
+        store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[sessionID])
+    }
+
+    var body: some View {
+        SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, mark: row.mark, viewport: TopicCard.viewport) {
+            header
+        } content: {
+            CardList(blocks: row.sessions.compactMap { session in
+                         guard case .live(let children) = session.contents else { return nil }
+                         return CardBlock(id: session.id.session, items: children.items)
+                     },
+                     identifier: row.id.accessibilityID, selectedWindowID: store.selectedWindowID,
+                     showsAll: showsAllRows, onShowAll: onShowAllRows) { _ in
+                EmptyView()
+            } row: { item in
+                TopicItemRow(store: store, item: item, titles: titles, isDimmed: false)
+            }
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TopicCard.listSpace)) } action: { onFrame(id, $0) }
+        .longPressDragLook(id, state: drag, lineOffset: 4)
+    }
+
+    private var header: some View {
+        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isLocked: true, hintTarget: .locked(sessionID),
+                   notes: ["Locked"], summary: formatted.summary) {
+            if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
+                BellMark()
+            }
+        }
+        .longPressDrag(id, state: $drag, in: TopicCard.listSpace, isEnabled: !store.changingTopic,
+                       placement: { placement(id, $0) }, onTap: press) { drop in
+            store.moveTopic(id, to: drop.topicPlacement)
+        }
+        .takesFirstClick()
+        .accessibilityAction(.default, press)
+        .accessibilityIdentifier(row.id.accessibilityID)
+        .accessibilityActions {
+            Button("Go to Session") { store.goToTopic(row.id) }
+            actions
+        }
+        .contextMenu {
+            Button("Go to Session") { store.goToTopic(row.id) }
+            Divider()
+            actions
+        }
+    }
+
+    /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Snooze, Pin, Forget or Zen.
+    @ViewBuilder
+    private var actions: some View {
+        Button("Unlock Session") { store.setLock(ofSession: sessionID, false) }
+            .disabled(store.changingTopic)
+        if let window {
+            Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }
+            Button("Move to Topic…") { store.palette.openMove(window, scope: .session) }
+                .disabled(store.changingTopic)
+            Button("New Topic from this Session") { store.palette.openMove(window, scope: .session) }
+                .disabled(store.changingTopic)
+            Button("Kill Session…", role: .destructive) { store.palette.begin(.confirm(PaletteConfirmation(.killSession(window)))) }
+        }
+        CardMoveButtons(store: store, id: id, neighbors: neighbors)
+    }
+
+    /// As on a Topic card: a press on the Active card opens or closes it; on another card it goes there.
+    private func press() {
+        guard !holdsSelection else {
+            store.updateTopicSelection()
+            withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(row.id, open: !row.isExpanded) }
+            return
+        }
+        store.updateTopicSelection()
+        withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(row.id, open: true) }
+        store.goToTopic(row.id)
     }
 }
 
@@ -87,41 +854,35 @@ private struct SessionsSection: View {
     let store: WorkspaceStore
     @Environment(\.sidebarTypography) private var typography
 
-    /// Expanded sessions, by name (names survive tmux server restarts, ids don't).
-    @State private var expanded: Set<String> = Self.loadExpanded()
+    /// The cards whose "N more…" the user pressed, by Session ID.
+    @State private var showingAllRows: Set<String> = []
+
+    static let viewport = "sessions-viewport"
 
     var body: some View {
+        let model = store.topics
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
+                    // Not lazy, for the same reason as the Topics list.
+                    VStack(alignment: .leading, spacing: 6) {
                         ForEach(store.sessions) { session in
-                            let isExpanded = expanded.contains(session.name)
-                            SessionHeader(
-                                session: session,
-                                isExpanded: isExpanded,
-                                containsSelection: session.windows.contains { $0.id == store.selectedWindowID },
-                                onToggle: { toggle(session.name) }
-                            )
-                            if isExpanded {
-                                ForEach(session.windows) { window in
-                                    WindowRow(
-                                        window: window,
-                                        isSelected: window.id == store.selectedWindowID,
-                                        tabCount: store.tabCount(for: window)
-                                    )
-                                        .id(window.id)
-                                        .onTapGesture { store.select(window) }
-                                        .contextMenu { menu(for: window) }
-                                }
+                            SessionCard(store: store, model: model, session: session, identifier: "session-\(session.id)",
+                                        viewport: Self.viewport,
+                                        showsAllRows: showingAllRows.contains(session.id),
+                                        onShowAllRows: { showingAllRows.insert(session.id) }) { item in
+                                row(item, model: model)
                             }
                         }
                     }
                     .padding(.horizontal, 6)
                     .padding(.vertical, 4)
                 }
+                .coordinateSpace(.named(Self.viewport))
                 .scrollIndicators(.never)
-                .onChange(of: store.selectedWindowID) { _, id in
+                .accessibilityIdentifier("sessions-list")
+                // The list scrolls to the card that holds the Window.
+                .onChange(of: store.selectedWindow?.sessionID) { _, id in
                     guard let id else { return }
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
                 }
@@ -134,30 +895,37 @@ private struct SessionsSection: View {
                     .foregroundStyle(.secondary)
             }
         }
-        // Moving to another session (click, tmux navigation, new window) opens it.
-        .onChange(of: store.selectedWindow?.sessionName, initial: true) { _, name in
-            guard let name, !expanded.contains(name) else { return }
-            withAnimation(.easeOut(duration: 0.15)) { _ = expanded.insert(name) }
-        }
-        .onChange(of: expanded) { _, value in
-            UserDefaults.standard.set(Array(value), forKey: Self.expandedKey)
-        }
     }
 
-    private static let expandedKey = "expandedSessions"
-
-    private static func loadExpanded() -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: expandedKey) ?? [])
-    }
-
-    private func toggle(_ name: String) {
-        withAnimation(.easeOut(duration: 0.15)) {
-            if expanded.contains(name) { expanded.remove(name) } else { expanded.insert(name) }
+    @ViewBuilder
+    private func row(_ item: TopicsModel.SessionChildren.Item, model: TopicsModel) -> some View {
+        let dimmed = item.window.topicID.map { model.snoozedTopicIDs.contains($0) } == true
+        switch item {
+        case .window(let window):
+            WindowRow(
+                window: window,
+                content: store.sidebarWindowRow(window),
+                isSelected: window.id == store.selectedWindowID,
+                tabCount: store.tabCount(for: window),
+                usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
+                    window, record: store.topicWatcher.records.first { $0.id == window.topicID },
+                    projects: store.projects)
+            )
+                .opacity(dimmed ? 0.45 : 1)
+                .accessibilityIdentifier("session-window-\(window.id)")
+                .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
+                .onTapGesture { store.select(window) }
+                .contextMenu { menu(for: window) }
+        case .pane(let row):
+            PaneRow(store: store, row: row)
+                .opacity(dimmed ? 0.45 : 1)
         }
     }
 
     @ViewBuilder
     private func menu(for window: TmuxWindow) -> some View {
+        TopicMembershipMenu(store: store, source: .window(window))
+        Divider()
         Button("Rename Window…") { rename(window) }
         Button("New Window in \(window.sessionName)") { store.newWindow(beside: window) }
         Divider()
@@ -174,142 +942,284 @@ private struct SessionsSection: View {
     }
 
     private func rename(_ window: TmuxWindow) {
-        let alert = NSAlert()
-        alert.messageText = "Rename tmux window"
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.stringValue = window.name
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        if alert.runModal() == .alertFirstButtonReturn, !field.stringValue.isEmpty {
-            store.renameWindow(window, to: field.stringValue)
-        }
+        store.palette.begin(.text(.renameWindow(window)), text: window.name)
     }
 
     private func confirmKill(_ window: TmuxWindow) {
-        let alert = NSAlert()
-        alert.messageText = "Kill \"\(window.displayTitle)\"?"
-        alert.informativeText = "This closes tmux window \(window.sessionName):\(window.index) and every process in its \(window.paneCount) pane(s)."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Kill Window")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
-            store.killWindow(window)
-        }
+        store.palette.begin(.confirm(PaletteConfirmation(.killWindow(window))))
     }
 }
 
-struct SessionHeader: View {
+/// A Session card, in Sessions mode and as the opened No Topic Session in Topics mode. Each place gives its own Window and Pane rows.
+private struct SessionCard<Row: View>: View {
+    let store: WorkspaceStore
+    let model: TopicsModel
     let session: SessionGroup
-    let isExpanded: Bool
-    let containsSelection: Bool
-    let onToggle: () -> Void
-    @Environment(\.sidebarTypography) private var typography
-
-    @State private var hovering = false
+    let identifier: String
+    /// The coordinate space of the list's scroll view.
+    let viewport: String
+    let showsAllRows: Bool
+    let onShowAllRows: () -> Void
+    @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.tertiary)
-                .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                .frame(width: 10)
-            Text(session.name)
-                .font(typography.font(for: .session))
-                .foregroundStyle(highlighted ? Color.accentColor : Color.primary)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            if !isExpanded, session.windows.contains(where: \.hasBell) {
-                Circle()
-                    .fill(Color.orange)
-                    .frame(width: 5, height: 5)
+        let isOpen = store.openSessionCards.contains(session.name)
+        let isSnoozed = session.windows.first?.topicID.map { model.snoozedTopicIDs.contains($0) } ?? false
+        let mark = model.sessionMarks[session.id].map(RowMark.agent)
+        let isLocked = model.lockedSessionIDs.contains(session.id)
+        SidebarCard(isOpen: isOpen, holdsSelection: holdsSelection, mark: mark,
+                    viewport: viewport, restingOpacity: isSnoozed ? 0.45 : 1) {
+            CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, hintTarget: .session(session.id),
+                       notes: (isSnoozed ? ["snoozed"] : []) + (isLocked ? ["Locked"] : []),
+                       summary: formatted.summary) {
+                if isSnoozed { Text("snoozed").font(.system(size: 10)).foregroundStyle(.secondary) }
+                if let topicSession = model.topicSessions[session.id] {
+                    SessionPills(isHome: topicSession.isHome, branch: topicSession.branch)
+                }
+                if !isOpen, session.windows.contains(where: \.hasBell) {
+                    BellMark()
+                }
+            }
+            .onTapGesture(perform: press)
+            .takesFirstClick()
+            .accessibilityAction(.default, press)
+            .accessibilityIdentifier(identifier)
+            .accessibilityActions {
+                Button("Go to Session") { store.goToSession(session.id) }
+                lockButton
+            }
+            .contextMenu {
+                Button("Go to Session") { store.goToSession(session.id) }
+                if let window = session.windows.first {
+                    Divider()
+                    TopicMembershipMenu(store: store, source: .session(window))
+                }
+                lockButton
+            }
+        } content: {
+            CardList(blocks: [CardBlock(id: session.id, items: model.sessionChildren[session.id]?.items ?? [])],
+                     identifier: identifier, selectedWindowID: store.selectedWindowID,
+                     showsAll: showsAllRows, onShowAll: onShowAllRows) { _ in
+                EmptyView()
+            } row: { item in
+                row(item)
             }
         }
-        .padding(.horizontal, 8)
-        .frame(minHeight: 24)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(background)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onToggle)
-        .onHover { hovering = $0 }
-        .padding(.top, 1)
     }
 
-    /// A collapsed session hiding the current window still shows where you are.
-    private var highlighted: Bool { containsSelection && !isExpanded }
+    private var formatted: SidebarFormats.Text {
+        store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id])
+    }
 
-    private var background: Color {
-        if highlighted { return Color.accentColor.opacity(0.12) }
-        return hovering ? Color.primary.opacity(0.06) : .clear
+    /// Only a No Topic Session of a Local App Window can be Locked.
+    @ViewBuilder
+    private var lockButton: some View {
+        if let locked = store.lockState(ofSession: session.id) {
+            Button(locked ? "Unlock Session" : "Lock Session") { store.setLock(ofSession: session.id, !locked) }
+                .disabled(store.changingTopic)
+        }
+    }
+
+    private var holdsSelection: Bool { session.windows.contains { $0.id == store.selectedWindowID } }
+
+    /// As on a Topic card: a press on the card of the selected Window's Session opens or closes it; on another card
+    /// it goes to that Session, whose card then opens.
+    private func press() {
+        guard !holdsSelection else { return toggle() }
+        withAnimation(.easeOut(duration: 0.15)) { _ = store.openSessionCards.insert(session.name) }
+        store.goToSession(session.id)
+    }
+
+    private func toggle() {
+        withAnimation(.easeOut(duration: 0.15)) {
+            if store.openSessionCards.remove(session.name) == nil { store.openSessionCards.insert(session.name) }
+        }
     }
 }
 
 struct WindowRow: View {
+    @Environment(\.quickSwitchHints) private var hints
     let window: TmuxWindow
+    var content: SidebarFormats.WindowRowContent? = nil
     let isSelected: Bool
     let tabCount: Int
+    var topicsView = false
+    var usesMainWorkingCopy = false
     @Environment(\.sidebarTypography) private var typography
 
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Logo(name: window.logoName)
-            Text(window.displayTitle)
-                .font(typography.font(for: .title))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            if hints.windowSlotReserved { Color.clear.frame(width: 10) }
+            if let left = content?.left {
+                if !left.isEmpty { customPart(left, side: "left") }
+            } else {
+                Logo(name: window.logoName)
+                    .accessibilityIdentifier("window-left-app-icon-\(window.id)")
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(content?.text.title ?? window.displayTitle)
+                    .font(typography.font(for: .title))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .hoverLabelTitle()
+                if let summary = content?.text.summary, !summary.isEmpty {
+                    Text(summary)
+                        .font(typography.font(for: .location))
+                        .foregroundStyle(secondaryStyle)
+                        .lineLimit(1)
+                }
+                if usesMainWorkingCopy {
+                    Text("Main working copy")
+                        .font(typography.font(for: .location))
+                        .foregroundStyle(secondaryStyle)
+                        .accessibilityIdentifier("main-working-copy-\(window.id)")
+                }
+            }
             Spacer(minLength: 4)
-            if window.hasBell {
-                Circle()
-                    .fill(isSelected ? Color.white : Color.orange)
-                    .frame(width: 5, height: 5)
+            if window.hasBell && !topicsView {
+                BellMark()
+                    .accessibilityIdentifier("window-bell-\(window.id)")
             }
-            if tabCount > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 10, weight: .medium))
-                    Text("\(tabCount)")
-                        .font(typography.font(for: .badge))
+            if let right = content?.right {
+                if !right.isEmpty { customPart(right, side: "right") }
+            } else {
+                if tabCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 10, weight: .medium))
+                        Text("\(tabCount)")
+                            .font(typography.font(for: .badge))
+                    }
+                    .foregroundStyle(secondaryStyle)
+                    .help("\(tabCount) browser tab(s)")
+                    .accessibilityIdentifier("window-right-tabs-\(window.id)")
                 }
-                .foregroundStyle(secondaryStyle)
-                .help("\(tabCount) browser tab(s)")
-            }
-            if window.paneCount > 1 {
-                HStack(spacing: 2) {
-                    Image(systemName: "rectangle.split.2x1")
-                        .font(.system(size: 10, weight: .medium))
-                    Text("\(window.paneCount)")
-                        .font(typography.font(for: .badge))
+                if topicsView || window.paneCount > 1 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "rectangle.split.2x1")
+                            .font(.system(size: 10, weight: .medium))
+                        Text("\(window.paneCount)")
+                            .font(typography.font(for: .badge))
+                    }
+                    .foregroundStyle(secondaryStyle)
+                    .accessibilityIdentifier("window-right-panes-\(window.id)")
                 }
-                .foregroundStyle(secondaryStyle)
             }
         }
-        .foregroundStyle(isSelected ? Color.white : Color.primary)
-        .padding(.leading, 20)
+        .foregroundStyle(Color.primary)
+        .padding(.leading, 8)
         .padding(.trailing, 6)
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(background)
+                .animation(.easeOut(duration: SelectedRow.fade), value: isSelected)
         )
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
-        .help("\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
+        .hintAnchor(.window(window.id))
+        .hoverLabel(title: window.displayTitle, titleFont: .systemFont(ofSize: 12),
+                    detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
     }
 
-    private var secondaryStyle: Color {
-        isSelected ? Color.white.opacity(0.85) : Color.secondary
+    private func customPart(_ parts: [SidebarPart], side: String) -> some View {
+        HStack(spacing: 0) {
+            ForEach(parts.indices, id: \.self) { index in
+                switch parts[index] {
+                case .text(let text):
+                    Text(text)
+                        .font(typography.font(for: side == "left" ? .title : .badge))
+                        .lineLimit(1)
+                        .accessibilityIdentifier("window-\(side)-text-\(window.id)-\(index)")
+                case .currentAppIcon:
+                    Logo(name: window.logoName)
+                        .accessibilityIdentifier("window-\(side)-app-icon-\(window.id)-\(index)")
+                case .symbol(let name):
+                    Image(systemName: name)
+                        .font(.system(size: 10, weight: .medium))
+                        .accessibilityIdentifier("window-\(side)-symbol-\(window.id)-\(index)")
+                        .accessibilityLabel(name)
+                }
+            }
+        }
+        .foregroundStyle(side == "left" ? Color.primary : secondaryStyle)
     }
+
+    private var secondaryStyle: Color { .secondary }
 
     private var background: Color {
-        if isSelected { return .accentColor }
+        if isSelected { return SelectedRow.fill }
         return hovering ? Color.primary.opacity(0.07) : .clear
+    }
+}
+
+/// How the Sidebar marks the selected Window or Pane row: a soft accent tint that fades in, so moving
+/// between Windows does not flash a block of full colour from row to row.
+private enum SelectedRow {
+    static let fill = Color.accentColor.opacity(0.22)
+    static let fade = 0.14
+}
+
+/// A terminal bell in a Window. It is not an Agent mark, so it is gray, and no Config changes it.
+private struct BellMark: View {
+    var body: some View {
+        Image(systemName: "bell.fill")
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Bell")
+    }
+}
+
+/// The row of one Pane of a split Window.
+private struct PaneRow: View {
+    let store: WorkspaceStore
+    let row: TopicsModel.PaneRow
+
+    @State private var hovering = false
+
+    /// With no Window row above it, the active Pane row shows where the user is.
+    private var isSelected: Bool {
+        !row.isUnderWindowRow && row.pane.isActive && row.window.id == store.selectedWindowID
+    }
+
+    private var formatted: SidebarFormats.Text {
+        store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id])
+    }
+
+    private var mark: AgentMark? { store.topics.agentMarks[row.pane.id] }
+
+    var body: some View {
+        Button { store.select(row) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: row.pane.isActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+                    .font(.system(size: 10)).frame(width: 14)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(formatted.title).font(.system(size: 12)).lineLimit(1).truncationMode(.tail).hoverLabelTitle()
+                    if !formatted.summary.isEmpty {
+                        Text(formatted.summary).font(.system(size: 11)).lineLimit(1).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 4)
+                if let mark { AgentMarkView(mark: mark) }
+            }
+            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            .padding(.leading, row.isUnderWindowRow ? 28 : 8).padding(.trailing, 6).padding(.vertical, 3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSelected ? SelectedRow.fill : hovering ? Color.primary.opacity(0.07) : .clear)
+                .animation(.easeOut(duration: SelectedRow.fade), value: isSelected))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .hoverLabel(title: row.pane.label, titleFont: .systemFont(ofSize: 12),
+                    detail: row.pane.path.isEmpty ? row.pane.label : Paths.tildify(row.pane.path))
+        .accessibilityIdentifier("pane-" + row.pane.id)
+        .accessibilityValue([row.pane.isActive ? "active" : nil, mark?.rawValue].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -318,15 +1228,26 @@ private struct AgentsSection: View {
     let store: WorkspaceStore
     @Environment(\.sidebarTypography) private var typography
 
+    private var scopeName: String? {
+        let scope = store.topics.agentsScope
+        if case .window(let id, _) = scope, let window = store.windows.first(where: { $0.id == id }) {
+            return store.sidebarWindowRow(window).text.title
+        }
+        return scope.name
+    }
+
     var body: some View {
+        let model = store.topics
         VStack(alignment: .leading, spacing: 0) {
-            Text("Agents")
+            Text(["Agents", scopeName].compactMap { $0 }.joined(separator: " · "))
                 .font(typography.font(for: .section))
+                .lineLimit(1)
+                .accessibilityIdentifier("agents-header")
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
-            if store.agents.isEmpty {
+            if model.visibleAgents.isEmpty {
                 Text("No agents")
                     .font(typography.font(for: .title))
                     .foregroundStyle(.secondary)
@@ -334,9 +1255,16 @@ private struct AgentsSection: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(store.agents) { agent in
-                            AgentRow(agent: agent)
+                        ForEach(model.visibleAgents) { agent in
+                            AgentRow(agent: agent,
+                                     text: store.sidebarText(.agent, context: store.sidebarFormatContexts.panes[agent.paneID]),
+                                     mark: model.agentMarks[agent.paneID])
                                 .onTapGesture { store.select(agent) }
+                                .accessibilityIdentifier("agent-" + agent.paneID)
+                                .contextMenu {
+                                    Button("New Topic from this Pane") { store.presentMovePane(PaneID(rawValue: agent.paneID).map(TopicTarget.pane)) }
+                                        .disabled(store.changingTopic)
+                                }
                         }
                     }
                     .padding(.horizontal, 8)
@@ -351,6 +1279,12 @@ private struct AgentsSection: View {
 
 struct AgentRow: View {
     let agent: Agent
+    let text: SidebarFormats.Text
+    let mark: AgentMark?
+
+    private var detail: String {
+        "\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")\(agent.unread ? ", unread" : "")"
+    }
     @Environment(\.sidebarTypography) private var typography
 
     @State private var hovering = false
@@ -359,19 +1293,20 @@ struct AgentRow: View {
         HStack(spacing: 8) {
             Logo(name: agent.kind.rawValue)
             VStack(alignment: .leading, spacing: 1) {
-                Text(agent.windowTitle)
+                Text(text.title)
                     .font(typography.font(for: .title))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(agent.location)
-                    .font(typography.font(for: .location))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .hoverLabelTitle()
+                if !text.summary.isEmpty {
+                    Text(text.summary)
+                        .font(typography.font(for: .location))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
-            if let marker = AgentStatusMarker(status: agent.status, unread: agent.unread) {
-                AgentStatusIndicator(marker: marker)
-            }
+            if let mark { AgentMarkView(mark: mark) }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -382,7 +1317,9 @@ struct AgentRow: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
-        .help("\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")\(agent.unread ? ", unread" : "")")
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(detail)
+        .hoverLabel(title: text.title, titleFont: .systemFont(ofSize: 12), detail: detail)
     }
 }
 

@@ -1,4 +1,5 @@
 import XCTest
+@testable import MuxifyCore
 
 final class CommandPaletteConfigTests: XCTestCase {
     private let root = "/cfg/muxify/config.yaml"
@@ -11,22 +12,33 @@ final class CommandPaletteConfigTests: XCTestCase {
         try! KeyTrigger(string)
     }
 
-    func testDefaultsAreOneGoToPaletteAndThePaletteKeys() throws {
+    func testDefaultsAreCommandsAndGoToPalettesAndThePaletteKeys() throws {
         let config = try load("")
-        XCTAssertEqual(config.commandPalettes, [CommandPaletteConfig(
-            name: "Go to…", triggers: [trigger("cmd+shift+p")], sources: [.agents, .sessions, .windows]
-        )])
-        XCTAssertEqual(config.commandPalettes[0].placeholder, "Go to…")
+        XCTAssertEqual(config.commandPalettes, [
+            CommandPaletteConfig(name: "Commands", triggers: [trigger("cmd+shift+p")], sources: [.commands]),
+            CommandPaletteConfig(name: "Go to…", triggers: [trigger("cmd+p")], sources: [.topics, .sessions]),
+        ])
+        XCTAssertEqual(config.commandPalettes[0].placeholder, "Search Commands")
+        XCTAssertEqual(config.commandPalettes[1].placeholder, "Go to…")
         let keys = config.paletteKeybinds
         XCTAssertEqual(keys.action(for: trigger("enter")), .jumpTo)
+        XCTAssertEqual(keys.action(for: trigger("cmd+enter")), .newSession)
         XCTAssertEqual(keys.action(for: trigger("down")), .selectNext)
         XCTAssertEqual(keys.action(for: trigger("ctrl+j")), .selectNext)
         XCTAssertEqual(keys.action(for: trigger("up")), .selectPrev)
         XCTAssertEqual(keys.action(for: trigger("ctrl+k")), .selectPrev)
         XCTAssertEqual(keys.action(for: trigger("cmd+k")), .showActions)
-        XCTAssertEqual(keys.action(for: trigger("cmd+c")), .copyPath)
-        XCTAssertEqual(keys.action(for: trigger("cmd+shift+c")), .copyTarget)
-        XCTAssertEqual(config.sessionPaths, [])
+        XCTAssertEqual(keys.action(for: trigger("cmd+c")), .copyFolder)
+        XCTAssertEqual(keys.action(for: trigger("cmd+shift+c")), .copyTmuxTarget)
+        XCTAssertEqual(keys.action(for: trigger("ctrl+y")), .pasteFolder)
+        XCTAssertEqual(keys.action(for: trigger("ctrl+s")), .snoozeTopic)
+        XCTAssertEqual(keys.action(for: trigger("alt+1")), .choosePane)
+        XCTAssertEqual(keys.action(for: trigger("alt+2")), .chooseWindow)
+        XCTAssertEqual(keys.action(for: trigger("alt+3")), .chooseSession)
+        XCTAssertEqual(keys.action(for: trigger("alt+t")), .toggleIncludeTab)
+        XCTAssertEqual(keys.action(for: trigger("alt+w")), .toggleNewWorktree)
+        XCTAssertEqual(keys.action(for: trigger("alt+s")), .suggestTopicTitle)
+        XCTAssertEqual(config.projectRoots, [])
         XCTAssertEqual(config.problems, [])
     }
 
@@ -34,7 +46,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         let config = try load("""
         keybindings:
           command_palette:
-            copy_path: cmd+c
+            copy_folder: cmd+c
             jump_to: enter
 
         sessions:
@@ -52,7 +64,7 @@ final class CommandPaletteConfigTests: XCTestCase {
             sources: [agents]
         """)
         XCTAssertEqual(config.problems, [])
-        XCTAssertEqual(config.sessionPaths, [SessionPathRoot(path: "~/projects", depth: 1), SessionPathRoot(path: "~/.dotfiles", depth: 0)])
+        XCTAssertEqual(config.projectRoots, [ProjectRoot(path: "~/projects", depth: 1), ProjectRoot(path: "~/.dotfiles")])
         XCTAssertEqual(config.commandPalettes, [
             CommandPaletteConfig(name: "Sessions", triggers: [trigger("cmd+p")], sources: [.sessions, .windows]),
             CommandPaletteConfig(name: "Agents", triggers: [trigger("cmd+shift+o")], sources: [.agents]),
@@ -60,6 +72,51 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(config.commandPalettes[0].placeholder, "Search Sessions")
         XCTAssertEqual(config.paletteKeybinds, .defaults)
         XCTAssertEqual(config.keybinds, .defaults)
+    }
+
+    func testCommandsCanBeMixedWithOtherSources() throws {
+        let config = try load("""
+        command_palettes:
+          - name: Everything
+            keybinding: cmd+p
+            sources: [commands, topics, commands]
+        """)
+        let palette = try XCTUnwrap(config.commandPalettes.first)
+        XCTAssertEqual(palette.sources, [.commands, .topics])
+        XCTAssertEqual(palette.allSources, [.commands, .topics, .sessions, .windows, .agents])
+        XCTAssertEqual(config.problems, [])
+    }
+
+    func testMoveKeysCanBeReboundAndDisabled() throws {
+        let config = try load("""
+        keybindings:
+          command_palette:
+            toggle_include_tab: alt+1
+            choose_window: []
+            suggest_topic_title: alt+r
+        """)
+        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+1")), .toggleIncludeTab)
+        XCTAssertEqual(config.paletteKeybinds.triggers[.choosePane], [])
+        XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+2")))
+        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+r")), .suggestTopicTitle)
+        XCTAssertEqual(config.problems, [])
+    }
+
+    func testRowActionsCanBeBoundWithoutDefaultShortcuts() throws {
+        let defaults = try load("")
+        XCTAssertNil(defaults.paletteKeybinds.firstTrigger(for: .killWindow))
+        XCTAssertNil(defaults.paletteKeybinds.firstTrigger(for: .rename))
+        let config = try load("""
+        keybindings:
+          command_palette:
+            kill_window: cmd+backspace
+            rename: alt+r
+            remove_from_topic: alt+x
+        """)
+        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("cmd+backspace")), .killWindow)
+        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+r")), .rename)
+        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+x")), .removeFromTopic)
+        XCTAssertEqual(config.problems, [])
     }
 
     func testAnEmptyListRemovesEveryPalette() throws {
@@ -117,8 +174,9 @@ final class CommandPaletteConfigTests: XCTestCase {
 
     func testAnActionCanTakeTheDefaultPalettesKeybinding() throws {
         let config = try load("keybindings:\n  toggle_sidebar: cmd+shift+p")
-        XCTAssertEqual(config.commandPalettes.first?.name, "Go to…")
+        XCTAssertEqual(config.commandPalettes.first?.name, "Commands")
         XCTAssertEqual(config.commandPalettes.first?.triggers, [])
+        XCTAssertEqual(config.commandPalettes.last?.triggers, [trigger("cmd+p")])
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+p")), .toggleSidebar)
         XCTAssertEqual(config.problems, [])
     }
@@ -147,8 +205,8 @@ final class CommandPaletteConfigTests: XCTestCase {
         ])
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 4, message: "Command Palette name \"Sessions\" is already used"),
-            ConfigProblem(path: root, line: 7, message: "Command Palette sources: expected sessions, windows or agents"),
-            ConfigProblem(path: root, line: 8, message: "Command Palette sources: expected a list of sessions, windows or agents"),
+            ConfigProblem(path: root, line: 7, message: "Command Palette sources: expected topics, sessions, windows, agents or commands"),
+            ConfigProblem(path: root, line: 8, message: "Command Palette sources: expected a list of topics, sessions, windows, agents or commands"),
             ConfigProblem(path: root, line: 9, message: "Command Palette name: expected a nonempty string"),
             ConfigProblem(path: root, line: 12, message: "unknown Command Palette key \"color\""),
             ConfigProblem(path: root, line: 14, message: "bad trigger \"hyper+a\": unknown modifier \"hyper\""),
@@ -165,57 +223,22 @@ final class CommandPaletteConfigTests: XCTestCase {
           command_palette:
             jump_to: [enter, cmd+b]
             select_next: ctrl+n
-            copy_target: []
-            copy_path: ctrl+n
+            copy_tmux_target: []
+            copy_folder: ctrl+n
             reveal_in_finder: cmd+r
         """)
         let keys = config.paletteKeybinds
         XCTAssertEqual(keys.triggers[.jumpTo], [trigger("enter"), trigger("cmd+b")])
         XCTAssertEqual(keys.triggers[.selectNext], [trigger("ctrl+n")])
         XCTAssertEqual(keys.triggers[.selectPrev], [trigger("up"), trigger("ctrl+k")])
-        XCTAssertEqual(keys.triggers[.copyTarget], [])
-        XCTAssertEqual(keys.triggers[.copyPath], [])
+        XCTAssertEqual(keys.triggers[.copyTmuxTarget], [])
+        XCTAssertEqual(keys.triggers[.copyFolder], [])
         XCTAssertEqual(keys.triggers[.showActions], [trigger("cmd+k")])
         // Only while a palette is open: the global keybinds are untouched.
         XCTAssertEqual(config.keybinds.triggers[.toggleBrowser], [trigger("cmd+e")])
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 7, message: "ctrl+n is already bound to select_next"),
             ConfigProblem(path: root, line: 8, message: "unknown Command Palette action \"reveal_in_finder\""),
-        ])
-    }
-
-    func testSessionPathsNeedAFolderAndAWholeDepth() throws {
-        let config = try load("""
-        sessions:
-          paths:
-            - path: ~/projects/Defold/
-              depth: 1
-            - path: /srv/repos
-              depth: 2
-            - path: "~"
-            - path: projects
-            - path: ~/work
-              depth: -1
-            - path: ~/work
-              depth: 1.5
-            - path: ~/gems
-              recursive: true
-            - depth: 1
-          roots: []
-        """)
-        XCTAssertEqual(config.sessionPaths, [
-            SessionPathRoot(path: "~/projects/Defold/", depth: 1),
-            SessionPathRoot(path: "/srv/repos", depth: 2),
-            SessionPathRoot(path: "~", depth: 0),
-        ])
-        XCTAssertEqual(config.problems.map(\.line), [8, 10, 12, 14, 15, 16])
-        XCTAssertEqual(config.problems.map(\.message), [
-            "Session Path path: expected an absolute path or one starting with ~/",
-            "Session Path depth: expected a whole number of 0 or more",
-            "Session Path depth: expected a whole number of 0 or more",
-            "unknown Session Path key \"recursive\"",
-            "Session Path path: expected an absolute path or one starting with ~/",
-            "unknown key \"sessions.roots\"",
         ])
     }
 
@@ -238,7 +261,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertNil(remote.ghosttyConfigFile)
         XCTAssertEqual(remote.remoteEnvironments, [])
         XCTAssertEqual(remote.headerHeight, 40)
-        XCTAssertEqual(remote.sessionPaths, [SessionPathRoot(path: "~/src", depth: 1)])
+        XCTAssertEqual(remote.projectRoots, [ProjectRoot(path: "~/src", depth: 1)])
         XCTAssertEqual(remote.problems, [])
 
         let local = try load(text)

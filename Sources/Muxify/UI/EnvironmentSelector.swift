@@ -1,4 +1,5 @@
 import SwiftUI
+import MuxifyCore
 
 /// Keep the badge in a SwiftUI button-style Menu. macOS's borderless menu
 /// extracts only its label's image/text and discards the capsule and colors.

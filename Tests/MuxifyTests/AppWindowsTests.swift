@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+@testable import MuxifyCore
 
 final class AppWindowsTests: XCTestCase {
     private static let config = """
@@ -368,6 +369,67 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertNil(first.handleKeyEvent(commandN))
             XCTAssertEqual(first.sidebarVisible, !wasVisible)
             XCTAssertEqual(opened.count, 2)
+        }
+    }
+
+    @MainActor func testHintInputBelongsToItsNativeWindowAndConfiguredKeysActBeforeDelay() throws {
+        try withWindows { windows, path in
+            try (Self.config + "\nkeybindings:\n  toggle_sidebar: ctrl+1\n")
+                .write(toFile: path, atomically: true, encoding: .utf8)
+            windows.configStore.reload()
+            let first = windows.store(for: AppWindowRequest())
+            let second = windows.store(for: AppWindowRequest())
+            let native = FocusWindow()
+            native.contentView = first.terminalHost
+            defer { native.contentView = nil }
+            let held = try XCTUnwrap(NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: .control,
+                timestamp: 0, windowNumber: native.windowNumber, context: nil, characters: "",
+                charactersIgnoringModifiers: "", isARepeat: false, keyCode: 59))
+            let beforeHold = first.sidebarVisible
+            XCTAssertTrue(first.handleKeyEvent(held) === held)
+            XCTAssertTrue(second.handleKeyEvent(held) === held)
+            XCTAssertEqual(first.sidebarVisible, beforeHold)
+            XCTAssertFalse(native.isKeyWindow)
+            let shown = expectation(description: "Only the event's App Window shows Hints")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                XCTAssertEqual(first.hintHold.visibleModifiers, .control)
+                XCTAssertNil(second.hintHold.visibleModifiers)
+                shown.fulfill()
+            }
+            wait(for: [shown], timeout: 2)
+            let release = try XCTUnwrap(NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: [],
+                timestamp: 1, windowNumber: native.windowNumber, context: nil, characters: "",
+                charactersIgnoringModifiers: "", isARepeat: false, keyCode: 59))
+            _ = first.handleKeyEvent(release)
+            _ = first.handleKeyEvent(held)
+            let visible = first.sidebarVisible
+            let key = try keyEvent(window: native, flags: .control, characters: "1", keyCode: 18)
+            XCTAssertTrue(second.handleKeyEvent(key) === key)
+            XCTAssertNil(first.handleKeyEvent(key))
+            XCTAssertEqual(first.sidebarVisible, !visible)
+            XCTAssertNil(first.hintHold.visibleModifiers)
+        }
+    }
+
+    @MainActor func testPaletteBindingPrecedesTheSameConfiguredAppShortcut() throws {
+        try withWindows { windows, path in
+            try (Self.config + "\nkeybindings:\n  toggle_sidebar: ctrl+1\n  command_palette:\n    select_next: ctrl+1\n")
+                .write(toFile: path, atomically: true, encoding: .utf8)
+            windows.configStore.reload()
+            let store = windows.store(for: AppWindowRequest())
+            let native = FocusWindow()
+            native.contentView = store.terminalHost
+            defer { native.contentView = nil }
+            let editor = NSTextView(frame: native.contentView!.bounds)
+            editor.isFieldEditor = true
+            store.terminalHost.addSubview(editor)
+            XCTAssertTrue(native.makeFirstResponder(editor))
+            store.palette.toggle(try XCTUnwrap(store.config.commandPalettes.first))
+            let visible = store.sidebarVisible
+            let key = try keyEvent(window: native, flags: .control, characters: "1", keyCode: 18)
+            XCTAssertNil(store.handleKeyEvent(key))
+            XCTAssertTrue(store.palette.isOpen)
+            XCTAssertEqual(store.sidebarVisible, visible)
         }
     }
 

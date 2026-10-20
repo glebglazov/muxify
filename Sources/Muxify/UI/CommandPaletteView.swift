@@ -1,4 +1,5 @@
 import SwiftUI
+import MuxifyCore
 
 /// Hosts the Command Palette and its "Copied" pill over the App Window.
 struct CommandPaletteOverlay: View {
@@ -9,8 +10,8 @@ struct CommandPaletteOverlay: View {
         // width and sits at the bottom.
         GeometryReader { proxy in
             ZStack {
-                if let current = palette.current {
-                    SpotlightPalette(palette: palette, current: current)
+                if palette.isOpen {
+                    SpotlightPalette(palette: palette)
                         .transition(.opacity)
                 }
                 VStack {
@@ -36,8 +37,8 @@ struct CommandPaletteOverlay: View {
 /// come in, with the actions in a menu that opens by the selected row.
 private struct SpotlightPalette: View {
     @Bindable var palette: CommandPalette
-    let current: CommandPaletteConfig
     @FocusState private var focused: Bool
+    @Environment(\.agentColors) private var agentColors
 
     private let rowHeight: CGFloat = 52
     private let fieldFont = Font.system(size: 24)
@@ -54,20 +55,34 @@ private struct SpotlightPalette: View {
                     .contentShape(Rectangle())
                     .onTapGesture { palette.close() }
                 VStack(spacing: 0) {
+                    if let breadcrumb = palette.breadcrumb {
+                        Text(breadcrumb).font(.system(size: 13, weight: .medium))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20).padding(.top, 14)
+                            .accessibilityIdentifier("palette-breadcrumb")
+                    }
                     field(selected)
                     Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1).padding(.horizontal, 20)
-                    chips(hasSelection: selected != nil)
-                    if !results.isEmpty {
+                    if palette.flow == nil { sourceButtons(selected: selected) }
+                    else { flowControls(selected) }
+                    if !results.rows.isEmpty {
                         list(results, selected: selected, theme: theme)
-                    } else if !palette.query.isEmpty {
+                    } else if !palette.query.isEmpty && !palette.acceptsText {
                         Text("No Results")
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 18)
                     }
+                    if let note = palette.stepNote {
+                        Text(note).font(.system(size: 12)).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20).padding(.vertical, 8)
+                            .accessibilityIdentifier("palette-note")
+                    }
+                    if palette.flow != nil { flowFooter }
                 }
-                .padding(.bottom, results.isEmpty ? 2 : 10)
+                .padding(.bottom, results.rows.isEmpty ? 2 : 10)
                 .frame(width: Self.width(in: proxy.size))
                 .spotlightGlass(theme)
                 .overlayPreferenceValue(SelectedRowBounds.self) { anchor in
@@ -87,38 +102,119 @@ private struct SpotlightPalette: View {
         // Ghostty foreground (Solarized's is a mid gray).
         .foregroundStyle(.primary)
         .environment(\.colorScheme, theme.colorScheme)
-        .onAppear { focused = true; DispatchQueue.main.async { focused = true } }
+        .onAppear { focusField() }
+        .onChange(of: palette.invocation) { _, _ in focusField() }
+    }
+
+    private func focusField() {
+        focused = true
+        DispatchQueue.main.async {
+            focused = true
+            if palette.acceptsText, let field = palette.store?.terminalHost.window?.firstResponder as? NSTextView,
+               field.isFieldEditor {
+                field.setSelectedRange(NSRange(location: 0, length: field.string.utf16.count))
+            }
+        }
     }
 
     // MARK: Field
 
-    private func field(_ selected: PaletteItem?) -> some View {
+    private func field(_ selected: PickRow<PaletteItem>?) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 22))
                 .foregroundStyle(.secondary)
+            ForEach(palette.fieldChips) { chip in
+                FieldChipView(chip: chip, theme: palette.theme)
+            }
             ZStack(alignment: .leading) {
-                ghost(selected)
-                TextField("", text: $palette.query, prompt: Text(current.placeholder).foregroundColor(.secondary))
+                if !palette.acceptsText { ghost(selected) }
+                TextField("", text: $palette.query, prompt: Text(palette.placeholder).foregroundColor(.secondary))
                     .textFieldStyle(.plain)
                     .font(fieldFont)
                     .focused($focused)
+                    .accessibilityIdentifier("palette-search")
+                    .accessibilityAction(named: "Close") { palette.close() }
+                    .accessibilityAction(named: "Back") { palette.back() }
+                    .accessibilityAction(named: "Accept") { palette.acceptSelected() }
+                    .accessibilityAction(named: "Confirm") { palette.acceptSelected(commandReturn: true) }
+                    .accessibilityAction(named: "Toggle Choice") { palette.toggleSelected() }
+                    .accessibilityAction(named: "Space") { _ = palette.handleFlow(KeyTrigger(modifiers: [], key: .character(" "))) }
+                    // ← with the caret at the start of the text, →, and ⌫ and ⌦ on a chip.
+                    .accessibilityAction(named: "Select Previous Chip") { palette.receiveChipKey(.left(caretAtStart: true)) }
+                    .accessibilityAction(named: "Select Next Chip") { palette.receiveChipKey(.right) }
+                    .accessibilityAction(named: "Select Next Row") { palette.move(1, in: palette.results) }
+                    .accessibilityAction(named: "Remove Selected Chip Backward") {
+                        if palette.fieldChips.contains(where: \.isSelected) { palette.receiveChipKey(.deleteBackward(textIsEmpty: palette.query.isEmpty)) }
+                    }
+                    .accessibilityAction(named: "Remove Selected Chip Forward") { palette.receiveChipKey(.deleteForward) }
             }
         }
         .padding(.horizontal, 20)
         .frame(height: 62)
     }
 
+    private func controlTitle(_ title: String, _ action: PaletteAction) -> String {
+        palette.shortcut(for: action).map { title + " " + $0 } ?? title
+    }
+
+    @ViewBuilder private func flowControls(_ selected: PickRow<PaletteItem>?) -> some View {
+        HStack(spacing: 8) {
+            if case .move(let draft) = palette.flow {
+                ForEach(Array(MoveDraft.Scope.allCases.enumerated()), id: \.element) { index, scope in
+                    Button(controlTitle(scope.rawValue, [.choosePane, .chooseWindow, .chooseSession][index])) { palette.changeMoveScope(scope) }
+                        .buttonStyle(.bordered)
+                        .tint(draft.scope == scope ? .accentColor : .secondary)
+                        .accessibilityIdentifier("palette-scope-" + scope.rawValue.lowercased())
+                }
+                if draft.scope == .pane, palette.store?.browser(for: draft.window.id).activeTab != nil {
+                    Button(controlTitle(draft.includesTab ? "✓ Tab" : "＋ Tab", .toggleIncludeTab)) { palette.toggleTab() }
+                        .accessibilityIdentifier("palette-include-tab")
+                        .accessibilityValue(draft.includesTab ? "on" : "off")
+                }
+            }
+            if case .addProject = palette.flow,
+               case .choice(.project(let project)) = selected?.pick.payload?.ref, project.worktree != nil {
+                Button(controlTitle((palette.newWorktree ? "✓ " : "") + "New Worktree", .toggleNewWorktree)) { palette.newWorktree.toggle() }
+                    .buttonStyle(.bordered)
+                    .tint(palette.newWorktree ? .accentColor : .secondary)
+                    .accessibilityIdentifier("palette-new-worktree")
+                    .accessibilityValue(palette.newWorktree ? "on" : "off")
+            }
+            if palette.canSuggestTitle {
+                Button(controlTitle("Suggest title", .suggestTopicTitle)) { palette.suggestTitle() }
+                    .accessibilityIdentifier("palette-suggest-title")
+            }
+            Spacer()
+        }
+        .font(.system(size: 12)).padding(.horizontal, 20).padding(.vertical, 6)
+    }
+
+    private var flowFooter: some View {
+        HStack(spacing: 12) {
+            if case .confirm = palette.flow { Text("Empty field: Space changes a row").foregroundStyle(.secondary) }
+            Spacer()
+            Button("Cancel · esc") { palette.close() }.accessibilityIdentifier("palette-cancel")
+            Button(palette.requiresCommandReturn ? "Confirm · ⌘↩" : "Accept · ↩") {
+                palette.acceptSelected(commandReturn: palette.requiresCommandReturn)
+            }
+            .accessibilityIdentifier("palette-accept")
+            .disabled(!palette.canAccept)
+        }
+        .font(.system(size: 12)).padding(.horizontal, 20).padding(.vertical, 8)
+    }
+
     /// Spotlight's completion after the caret: the rest of the selected title.
-    private func ghost(_ selected: PaletteItem?) -> some View {
+    private func ghost(_ selected: PickRow<PaletteItem>?) -> some View {
         let query = palette.query
+        let title = selected?.title.text ?? ""
         return HStack(spacing: 0) {
             Text(query).hidden()
-            if !query.isEmpty, let selected {
-                if selected.title.lowercased().hasPrefix(query.lowercased()) {
-                    Text(selected.title.dropFirst(query.count)).foregroundStyle(.secondary)
+            if !query.isEmpty, selected != nil {
+                if title.lowercased().hasPrefix(query.lowercased()) {
+                    Text(title.dropFirst(query.count)).foregroundStyle(.secondary)
                 } else {
-                    Text(" – \(selected.title)").foregroundStyle(.secondary)
+                    Text(" – \(title)").foregroundStyle(.secondary)
                 }
             }
         }
@@ -127,13 +223,13 @@ private struct SpotlightPalette: View {
         .allowsHitTesting(false)
     }
 
-    // MARK: Chips and results
+    // MARK: Source buttons and results
 
-    /// The Source chips, on or off, and at the far end the way into the actions menu
+    /// The Source buttons, on or off, and at the far end the way into the actions menu
     /// (whose first entry is Jump To).
-    private func chips(hasSelection: Bool) -> some View {
+    private func sourceButtons(selected: PickRow<PaletteItem>?) -> some View {
         HStack(spacing: 7) {
-            ForEach(Array(palette.chips.enumerated()), id: \.element) { offset, source in
+            ForEach(Array(palette.sourceButtons.enumerated()), id: \.element) { offset, source in
                 let isOn = palette.selection.contains(source)
                 Text(source.title)
                     .font(.system(size: 13))
@@ -142,11 +238,11 @@ private struct SpotlightPalette: View {
                     .frame(height: 26)
                     .background(Capsule().fill(Color.primary.opacity(isOn ? 0.16 : 0.06)))
                     .contentShape(Capsule())
-                    .onTapGesture { palette.toggleChip(source) }
+                    .onTapGesture { palette.toggleSource(source) }
                     .help("⌘\(offset + 1)")
             }
             Spacer()
-            if hasSelection {
+            if selected != nil {
                 HStack(spacing: 5) {
                     Text("Actions")
                         .font(.system(size: 12))
@@ -154,10 +250,7 @@ private struct SpotlightPalette: View {
                     if let shortcut = palette.shortcut(for: .showActions) { KeyCap(text: shortcut) }
                 }
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    palette.actionIndex = 0
-                    palette.showsActions.toggle()
-                }
+                .onTapGesture { palette.toggleActions(for: selected) }
             }
         }
         .frame(height: 26)
@@ -165,56 +258,107 @@ private struct SpotlightPalette: View {
         .padding(.vertical, 10)
     }
 
-    private func list(_ results: [PaletteItem], selected: PaletteItem?, theme: PaletteTheme) -> some View {
-        ScrollViewReader { proxy in
+    private func list(_ results: PickList<PaletteItem>, selected: PickRow<PaletteItem>?, theme: PaletteTheme) -> some View {
+        let headers = results.sections.filter { $0.title != nil }.count
+        let height = CGFloat(results.rows.count) * rowHeight + CGFloat(headers) * headerHeight
+        return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(results) { item in
-                        row(item, isSelected: item.id == selected?.id, theme: theme)
-                            .id(item.id)
-                            .onTapGesture { palette.perform(.jumpTo, on: item) }
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(results.sections) { section in
+                        if let title = section.title {
+                            Text(title)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 12)
+                                .frame(height: headerHeight, alignment: .bottomLeading)
+                                .accessibilityIdentifier("palette-section-" + section.id)
+                        }
+                        ForEach(section.rows) { row in
+                            self.row(row, isSelected: row.id == selected?.id, theme: theme)
+                                .id(row.id)
+                                .onTapGesture { palette.perform(.jumpTo, on: row) }
+                        }
                     }
                 }
                 .padding(.horizontal, 10)
             }
             .scrollIndicators(.never)
             // A half row shows there is more.
-            .frame(height: (results.count > 7 ? 6.5 : CGFloat(results.count)) * rowHeight)
+            .frame(height: min(height, 6.5 * rowHeight))
             .onChange(of: selected?.id) { _, id in
                 if let id { proxy.scrollTo(id) }
             }
         }
     }
 
-    private func row(_ item: PaletteItem, isSelected: Bool, theme: PaletteTheme) -> some View {
-        HStack(spacing: 12) {
-            PaletteIcon(source: .item(item), theme: theme)
+    private let headerHeight: CGFloat = 24
+
+    private func accessibilityLabel(_ row: PickRow<PaletteItem>) -> String {
+        let parts: [String] = [row.mark?.rawValue ?? "", row.title.text] + row.tags.map(\.text) + [row.detail.text, row.trailing]
+        return parts.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    /// The title, then the Topic's Tags as chips. The title is cut off before a chip is.
+    private func titleLine(_ row: PickRow<PaletteItem>, theme: PaletteTheme) -> some View {
+        HStack(spacing: 6) {
+            Text(row.title.attributed).font(.system(size: 15)).lineLimit(1)
+            ForEach(row.tags, id: \.text) { tag in
+                Text(tag.attributed)
+                    .lineLimit(1)
+                    .chip(color: theme.magenta, isSelected: false, theme: theme, size: 12, cornerRadius: 5)
+                    .fixedSize()
+            }
+        }
+    }
+
+    private func row(_ row: PickRow<PaletteItem>, isSelected: Bool, theme: PaletteTheme) -> some View {
+        let item = row.pick.payload
+        let isCovered = palette.isCovered(row)
+        return HStack(spacing: 12) {
+            if let item { PaletteIcon(source: .item(item), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.title).font(.system(size: 15)).lineLimit(1)
-                Text(item.subtitle).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
+                titleLine(row, theme: theme)
+                let detail = row.pick.reason.map(Highlighted.plain) ?? row.detail
+                if !detail.text.isEmpty {
+                    Text(detail.attributed).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer(minLength: 12)
-            if let status = item.status {
-                Text(item.unread && status == .done ? "Done · Unread" : status.rawValue.capitalized)
+            if let mark = row.mark { RowMarkView(mark: mark) }
+            if let item, let status = item.status {
+                Text(item.mark == .agent(.done) ? "Done · Unread" : status.rawValue.capitalized)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(theme.status(status, unread: item.unread) ?? .secondary)
-            } else if item.isCurrent {
-                Text("Current").font(.system(size: 12.5)).foregroundStyle(.secondary)
+                    .foregroundStyle(item.mark.map { $0.color(agentColors) } ?? .secondary)
+            } else if !row.trailing.isEmpty {
+                Text(row.trailing).font(.system(size: 12.5)).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 12)
         .frame(height: rowHeight)
+        .opacity(item == nil || isCovered ? 0.45 : 1)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(isSelected ? 0.09 : 0)))
         .contentShape(Rectangle())
         .anchorPreference(key: SelectedRowBounds.self, value: .bounds) { isSelected ? $0 : nil }
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("palette-row-" + row.id)
+        .accessibilityLabel(accessibilityLabel(row))
+        .accessibilityValue(row.pick.reason ?? [isCovered ? "covered" : nil, isSelected ? "selected" : nil]
+                                .compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default) { palette.perform(.jumpTo, on: row) }
+        .accessibilityActions {
+            ForEach(palette.actions(for: row), id: \.self) { action in
+                Button(palette.title(of: action, for: row)) { palette.perform(action, on: row) }
+            }
+        }
     }
 
     // MARK: Actions
 
-    private func actionsMenu(_ item: PaletteItem, theme: PaletteTheme) -> some View {
+    private func actionsMenu(_ item: PickRow<PaletteItem>, theme: PaletteTheme) -> some View {
         let actions = palette.actions(for: item)
         return VStack(alignment: .leading, spacing: 1) {
-            Text(item.title)
+            Text(item.title.text)
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -254,9 +398,9 @@ private struct SelectedRowBounds: PreferenceKey {
 }
 
 /// App-icon sized: Agents and Windows as a little terminal with the
-/// program's logo (and the Agent's Status as a badge), Sessions as a folder,
-/// Session Paths as an empty folder or a branch, actions as a tile in a
-/// theme color.
+/// program's logo (and the Agent's Status as a badge), Topics as a diamond,
+/// Sessions as a folder, Projects as an empty folder and Worktrees as a
+/// branch, actions as a tile in a theme color.
 struct PaletteIcon: View {
     enum Source {
         case item(PaletteItem)
@@ -275,10 +419,20 @@ struct PaletteIcon: View {
                 .font(.system(size: size * 0.78))
                 .foregroundStyle(theme.cyan.gradient)
                 .frame(width: size, height: size)
-        case .item(let item) where item.kind == .sessionPath:
-            Image(systemName: item.ref.isWorktree ? "arrow.triangle.branch" : "folder")
-                .font(.system(size: size * (item.ref.isWorktree ? 0.6 : 0.72)))
+        case .item(let item) where item.kind == .project || item.kind == .worktree:
+            Image(systemName: item.kind == .worktree ? "arrow.triangle.branch" : "folder")
+                .font(.system(size: size * (item.kind == .worktree ? 0.6 : 0.72)))
                 .foregroundStyle(theme.cyan)
+                .frame(width: size, height: size)
+        case .item(let item) where item.kind == .tag:
+            Image(systemName: "number")
+                .font(.system(size: size * 0.5, weight: .semibold))
+                .foregroundStyle(theme.magenta)
+                .frame(width: size, height: size)
+        case .item(let item) where [.topic, .snoozedTopic, .settledTopic].contains(item.kind):
+            Image(systemName: topicSymbol(item))
+                .font(.system(size: size * 0.6))
+                .foregroundStyle(item.kind == .topic ? theme.magenta : Color.secondary)
                 .frame(width: size, height: size)
         case .item(let item):
             tile.fill(theme.background)
@@ -286,16 +440,16 @@ struct PaletteIcon: View {
                 .overlay(Logo(name: item.logo ?? "terminal", size: size * 0.56))
                 .frame(width: size, height: size)
                 .overlay(alignment: .bottomTrailing) {
-                    if let marker = AgentStatusMarker(status: item.status, unread: item.unread) {
-                        AgentStatusIndicator(marker: marker, dotSize: size * 0.36)
-                            .padding(marker == .working ? 2 : 0)
+                    if let mark = item.mark {
+                        RowMarkView(mark: mark, dotSize: size * 0.36)
+                            .padding(mark == .agent(.working) ? 2 : 0)
                             .background {
-                                if marker == .working {
+                                if mark == .agent(.working) {
                                     RoundedRectangle(cornerRadius: 3).fill(theme.background)
                                 }
                             }
                             .overlay {
-                                if marker != .working {
+                                if mark != .agent(.working) {
                                     Circle().strokeBorder(theme.background, lineWidth: 2)
                                 }
                             }
@@ -313,25 +467,35 @@ struct PaletteIcon: View {
 
     private func color(_ action: PaletteAction) -> Color {
         switch action {
-        case .copyPath: theme.cyan
-        case .copyTarget: theme.magenta
+        case .newSession: theme.green
+        case .copyFolder: theme.cyan
+        case .copyTmuxTarget: theme.magenta
+        case .pasteFolder: theme.green
+        case .snoozeTopic: theme.yellow
         default: theme.blue
         }
     }
 
     private func symbol(_ action: PaletteAction) -> String {
         switch action {
-        case .copyPath: "doc.on.doc.fill"
-        case .copyTarget: "number"
+        case .newSession: "plus"
+        case .copyFolder: "doc.on.doc.fill"
+        case .copyTmuxTarget: "number"
+        case .pasteFolder: "text.cursor"
+        case .snoozeTopic: "moon.zzz.fill"
         default: "arrow.up.forward"
         }
     }
-}
 
-private extension PaletteItem.Ref {
-    var isWorktree: Bool {
-        if case .sessionPath(let path) = self { return path.isWorktree }
-        return false
+    /// Open, Dormant (no live Session), Snoozed or Settled.
+    private func topicSymbol(_ item: PaletteItem) -> String {
+        switch item.kind {
+        case .snoozedTopic: return "moon.zzz"
+        case .settledTopic: return "checkmark.circle"
+        default:
+            if case .topic(_, nil) = item.ref { return "diamond" }
+            return "diamond.fill"
+        }
     }
 }
 
@@ -386,6 +550,31 @@ private struct CopiedPill: View {
     }
 }
 
+/// A chip in the search field: a Tag in magenta, a Topic in blue. ⌫ in the empty field removes the last one, and ←
+/// selects one.
+private struct FieldChipView: View {
+    let chip: FieldChip
+    let theme: PaletteTheme
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(chip.title).lineLimit(1)
+            if let count = chip.count { Text("\(count)").font(.system(size: 12, weight: .semibold)).opacity(0.7) }
+        }
+        .chip(color: chip.kind == .tag ? theme.magenta : theme.blue, isSelected: chip.isSelected, theme: theme, size: 17, cornerRadius: 7)
+        // As wide as its text, up to one width for every chip; a cut-off title shows whole on hover.
+        .frame(maxWidth: 180)
+        .fixedSize()
+        .help(chip.title)
+        .accessibilityElement(children: .ignore)
+        // A static text element carries its value into the accessibility tree, where a check reads the selection.
+        .accessibilityAddTraits(.isStaticText)
+        .accessibilityLabel(chip.title)
+        .accessibilityValue(chip.isSelected ? "selected" : "")
+        .accessibilityIdentifier(chip.id)
+    }
+}
+
 private struct KeyCap: View {
     let text: String
 
@@ -399,6 +588,15 @@ private struct KeyCap: View {
 }
 
 private extension View {
+    /// The look of a chip, in the search field and after a row's title, so a Tag looks the same in both.
+    func chip(color: Color, isSelected: Bool, theme: PaletteTheme, size: CGFloat, cornerRadius: CGFloat) -> some View {
+        font(.system(size: size, weight: .medium))
+            .foregroundStyle(isSelected ? theme.background : color)
+            .padding(.horizontal, size * 0.53)
+            .padding(.vertical, size * 0.18)
+            .background(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(isSelected ? color : color.opacity(0.16)))
+    }
+
     /// Liquid Glass tinted with the Sidebar's chrome, or a material before macOS 26.
     @ViewBuilder
     func spotlightGlass(_ theme: PaletteTheme, cornerRadius: CGFloat = 26, tint: Double = 0.45) -> some View {
