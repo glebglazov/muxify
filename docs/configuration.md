@@ -287,6 +287,84 @@ value uses its default and appears with its line in the Config problems banner
 while valid sibling settings still apply. An unavailable family is also a
 problem and uses `system`. A YAML syntax error keeps the entire last good Config.
 
+## Git View
+
+The Git View (⌘G, `toggle_git_view`) is a look at the repository of the current
+Window's folder, where you can stage, discard and commit changes, or lines of
+them, laid out like Xcode's source control navigator and colored with the
+Ghostty theme. A toolbar shows the repository, whether this is
+a linked worktree, and the commits ahead of and behind the upstream (or `main`
+or `master` without one), and a merge, rebase, cherry-pick, revert or bisect in
+progress. Below it, the list pane, with four Git View tabs along its bottom, and
+the selection's diff:
+
+| Git View tab | Lists | The diff shows |
+| --- | --- | --- |
+| Changes | Changed files as a folder tree, with lazygit's two letters: the staged change in green, the unstaged one in red (`M `, ` M`, `MM`, `??`). A file's name is green when all of it is staged, red otherwise | The file's unstaged changes, then its staged ones; an untracked file as new. A folder shows every change in it |
+| History | The last 300 commits of the branch you're on, with their graph: a lane per line of history, a ring for a merge, and the branches and tags at each commit | The commit's message, author, parents and changes; a merge against its first parent |
+| Branches | Local branches, yours first with a check: other worktrees', gone upstreams, and commits ahead of and behind yours | The branch and its latest commits. Clicking a branch, or ↩, goes into its last 300 commits, listed like the History |
+| Stashes | `git stash list` | The stash's changes |
+
+Under the History, a branch's commits and the Stashes, the Diff files list the
+selected commit's or stash's files as a tree. ↩, or a click on a file, goes into
+them, and the diff then shows one file, or a folder of them; ⎋ comes back to the
+commits. A branch's commits have a back button (or ⎋) to the Branches. The Git
+View opens on Changes every time; the other Git View tabs are kept as you left
+them, each with its own filter, and clicking the one shown goes back to its own
+list. The Git View tabs count the changes and stashes.
+
+As in lazygit, space in Changes stages the file or folder, or unstages it once
+all of it is staged, and a stages or unstages everything; a click on a file's
+letters does the same. d asks, as lazygit does, whether to discard all of a
+file's or folder's changes, back to the last commit, or only the unstaged ones,
+keeping what's staged. New and untracked files are deleted; it can't be undone.
+
+In a change's diff, space stages the line under the cursor, the lines selected
+with v, or the hunk selected with a; in its Staged part, it unstages them. d
+there discards the selected unstaged lines, after asking. A new file's lines are
+staged the same way. A conflicted file is staged whole, and only once it has no
+conflict markers left; `git add` in the terminal stages it anyway.
+
+c opens a box for the commit's summary and description: ↩ in the summary or ⌘↩
+commits, and ⎋ closes it, keeping what you wrote until the Window's folder is in
+another repository. A commit takes only what's staged; with nothing staged, c
+does nothing but say so. On a detached HEAD, the box warns that the commit won't
+be on any branch. During a merge, c concludes it once its conflicts are staged,
+with git's message for it unless you've written one; during a rebase,
+cherry-pick, revert or `git am`, c says to continue it in the terminal instead.
+Hooks and signing run as they do in a terminal; when one fails, the box shows
+what it said.
+
+Diffs have line numbers, syntax highlighting, and the enclosing function in each
+hunk's header. The toolbar switches them between Unified and Split (side by
+side); the choice is remembered. A change's hunk headers show the whole file.
+Long lines wrap at the pane's edge. Drag over code to select words or any
+part of it, double-click a word, triple-click or drag the line numbers for whole
+lines, or use the keys; ⌘C or y copies the code. The filter field (/) narrows
+the list shown.
+
+```yaml
+git_view:
+  display: popup      # or fullscreen
+  width: 80%
+  height: 80%
+```
+
+These are the defaults. `popup` floats over the whole App Window, Sidebar and
+Browser too, like `tmux display-popup -w 80% -h 80%`; `width` and `height` are
+its share of the App Window, from 10% to 100% (`80` means `80%`). `fullscreen`
+takes the terminal's place, leaving the Sidebar and Browser. Changes apply live; invalid
+values use the defaults and appear in the Config problems banner.
+
+The Git View reads the repository when it opens, every 10 seconds, when Muxify
+comes to the front, with R, and after you stage or commit. On a Remote
+Environment, git runs on that machine. Code is sized from the terminal's font
+size, in the system's monospaced font. Each Window has its own Git View: select
+another Window and it stays open there, as you left it, until you come back; it
+isn't read again meanwhile. A Window whose Git View is open shows its icon in the
+Sidebar. The Git Views go when Muxify quits. The Git View's keys are in
+[Keybindings](keybindings.md#git-view-keys).
+
 ## Command Palettes
 
 A Command Palette searches Topics, Sessions, Windows, Agents and Commands.
@@ -376,12 +454,13 @@ front of the path. **Open Config** there opens the remote file in the remote's
 
 ## Browser and keybindings
 
-The top-right header has the Maximize button and toggles the Sidebar, Terminal and
-Browser. ⌘J toggles the current Window's Terminal and ⌘B its Browser; the toggle
-of the only side shown does nothing. Maximize (⇧⌘↩) shows the side that has Focus
-alone, with the Sidebar hidden. Press it again to Restore the Window. ⌘⇧J and
-⌘⇧B move Focus to the Terminal or the Browser and show that side if it is hidden.
-Each Window remembers its Browser Tabs, its toggles and its Maximize state.
+The top-right header has the Maximize button and toggles the Sidebar, the Git
+View, the Terminal and the Browser. ⌘J toggles the current Window's Terminal and
+⌘B its Browser; the toggle of the only side shown does nothing. Maximize (⇧⌘↩)
+shows the side that has Focus alone, with the Sidebar hidden. Press it again to
+Restore the Window. ⌘⇧J and ⌘⇧B move Focus to the Terminal or the Browser and
+show that side if it is hidden. Each Window remembers its Browser Tabs, its
+toggles and its Maximize state.
 Browser-opening requests (`muxify browser open …`, terminal Cmd-click links)
 reveal its Browser. The [Simulator](simulator.md) runs in a browser, not a native
 panel.

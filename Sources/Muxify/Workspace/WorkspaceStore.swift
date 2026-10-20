@@ -866,6 +866,17 @@ final class WorkspaceStore {
             rememberSelection()
             recordVisit()
             updateTopicSelection()
+            guard selectedWindowID != oldValue else { return }
+            // Each Window has its own Git View, which stays open or closed,
+            // as it was, while another Window is shown.
+            let previous = oldValue.flatMap { gitViews[$0] }
+            let coveredWindow = previous?.isOpen == true
+            previous?.suspend()
+            if let gitView = selectedWindowID.flatMap({ gitViews[$0] }), gitView.isOpen {
+                gitView.resume()
+            } else if coveredWindow {
+                moveFocusIntoWindow()
+            }
         }
     }
     private(set) var surface: TerminalSurfaceView?
@@ -955,6 +966,9 @@ final class WorkspaceStore {
     /// The record's `sessions` on disk when its pending snapshot was taken.
     @ObservationIgnored private var topicSnapshotBases: [String: [JSONValue]] = [:]
     @ObservationIgnored private var topicPersistWork: [String: DispatchWorkItem] = [:]
+    /// Each Window's Git View, made when it first opens and kept while the
+    /// Window lives. Observed, for the sidebar's Git View icons.
+    private var gitViews: [String: GitView] = [:]
     @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
     /// Keep changes dirty until tmux confirms the write, including commands
     /// already submitted when a window closes. Never flush unchanged Browsers
@@ -998,11 +1012,17 @@ final class WorkspaceStore {
     @ObservationIgnored var onSelectEnvironment: ((String?) -> Void)?
     @ObservationIgnored var onNewAppWindow: (() -> Void)?
     @ObservationIgnored var shouldConsumeOpenRequests: (() -> Bool)?
+    #if DEBUG
+    @ObservationIgnored private var gitDemoObserver: NSObjectProtocol?
+    #endif
 
     init(configStore: ConfigStore, environment: RemoteEnvironment? = nil) {
         self.configStore = configStore
         activeEnvironment = environment
         palette.store = self
+        #if DEBUG
+        observeGitDemoRequests()
+        #endif
         // Browser state used to be kept here, keyed by window id; it now lives
         // on the tmux Windows (ADR 0003).
         UserDefaults.standard.removeObject(forKey: "browserURLs")
@@ -1125,6 +1145,7 @@ final class WorkspaceStore {
         dirtyBrowsers.removeAll()
         browsers.values.forEach { $0.tearDown() }
         browsers.removeAll()
+        removeGitViews()
         consumingOpen.removeAll()
         agentStatuses.removeAll()
         unreadVisit = nil
@@ -1164,6 +1185,7 @@ final class WorkspaceStore {
         generation = UUID()
         timer?.invalidate()
         timer = nil
+        removeGitViews()
         reconnectWork?.cancel()
         reconnectWork = nil
         persistWork.values.forEach { $0.cancel() }
@@ -1285,6 +1307,7 @@ final class WorkspaceStore {
         if serverRunning, !snapshot.serverRunning {
             browsers.values.forEach { $0.tearDown() }
             browsers.removeAll()
+            removeGitViews()
             persistWork.values.forEach { $0.cancel() }
             persistWork.removeAll()
             dirtyBrowsers.removeAll()
@@ -1364,6 +1387,9 @@ final class WorkspaceStore {
                 browsers[id] = nil
                 dirtyBrowsers[id] = nil
                 persistWork.removeValue(forKey: id)?.cancel()
+            }
+            for id in gitViews.keys where !live.contains(id) {
+                gitViews.removeValue(forKey: id)?.close(restoringFocus: false)
             }
         }
     }
@@ -1686,7 +1712,7 @@ final class WorkspaceStore {
 
     /// The current Window's Browser has Focus (its page or omnibox).
     var browserHasFocus: Bool {
-        !terminalHasFocus && panelLayout.shows(.browser)
+        !terminalHasFocus && currentGitView?.hasKeyFocus != true && panelLayout.shows(.browser)
     }
 
     private var focusedSide: PanelLayout.Side { browserHasFocus ? .browser : .terminal }
@@ -1702,6 +1728,9 @@ final class WorkspaceStore {
     /// to its Terminal, or to its Browser while the Terminal is hidden.
     func moveFocusIntoWindow() {
         guard !palette.isOpen else { return }
+        // The Window's Git View, open over its sides; one just selected
+        // takes Focus once it's on screen.
+        if let gitView = selectedWindowID.flatMap({ gitViews[$0] }), gitView.isOpen { return gitView.takeFocus() }
         moveFocus(into: panelLayout.shows(.terminal) ? .terminal : .browser)
     }
 
@@ -1877,6 +1906,79 @@ final class WorkspaceStore {
         }
     }
 
+    // MARK: - Git View
+
+    /// The Window's Git View, made on first use.
+    func gitView(for windowID: String) -> GitView {
+        if let gitView = gitViews[windowID] { return gitView }
+        let gitView = GitView(windowID: windowID)
+        gitView.store = self
+        gitViews[windowID] = gitView
+        return gitView
+    }
+
+    /// The selected Window's Git View, once it has opened there. Views
+    /// don't make one, so `gitViews` changes only in actions.
+    var currentGitView: GitView? {
+        selectedWindowID.flatMap { gitViews[$0] }
+    }
+
+    func toggleGitView() {
+        guard let id = selectedWindowID else { return }
+        gitView(for: id).toggle()
+    }
+
+    /// For the sidebar's Git View icon.
+    func isGitViewOpen(in windowID: String) -> Bool {
+        gitViews[windowID]?.isOpen == true
+    }
+
+    private func removeGitViews() {
+        gitViews.values.forEach { $0.close(restoringFocus: false) }
+        gitViews.removeAll()
+    }
+
+    #if DEBUG
+    /// Drives the Git View without keystrokes, for screenshots of a build in
+    /// the background: post `dev.muxify.git` with this process's pid as the
+    /// object and a `spec` (see `GitView.applyDemo`). `window=@12` selects
+    /// that Window first.
+    private func observeGitDemoRequests() {
+        gitDemoObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("dev.muxify.git"),
+            object: String(ProcessInfo.processInfo.processIdentifier), queue: .main
+        ) { [weak self] note in
+            let spec = note.userInfo?["spec"] as? String ?? ""
+            MainActor.assumeIsolated { self?.applyGitDemo(spec) }
+        }
+    }
+
+    private func applyGitDemo(_ spec: String) {
+        guard terminalHost.window?.isVisible == true else { return }
+        let fields = Dictionary(spec.split(separator: ";").compactMap { pair -> (String, String)? in
+            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            return parts.count == 2 ? (parts[0], parts[1]) : nil
+        }, uniquingKeysWith: { _, last in last })
+        if let id = fields["window"], let window = windows.first(where: { $0.id == id }) { select(window) }
+        selectedWindowID.map(gitView(for:))?.applyDemo(fields)
+    }
+    #endif
+
+    /// Runs a Git View script on the Environment's machine, like the
+    /// Session Paths scan.
+    func runGitScript(_ script: String, arguments: [String], timeout: TimeInterval = 30,
+                      completion: @escaping (Result<String, Error>) -> Void) {
+        guard let connection, !isTransitioning, !isRemote || isConnected else {
+            completion(.failure(GitViewError(message: "Not connected to \(environmentName).")))
+            return
+        }
+        let current = generation
+        connection.runScriptAsync(script, arguments: arguments, timeout: timeout) { [weak self] result in
+            guard let self, self.generation == current else { return }
+            completion(result)
+        }
+    }
+
     // MARK: - Browser
 
     /// What the current Window shows of its Terminal and Browser.
@@ -1976,7 +2078,7 @@ final class WorkspaceStore {
     /// outside the terminal, where Ghostty/tmux bindings own the keys;
     /// clicking the menu item always works.
     func browserCommand(opensBrowser: Bool = false, _ body: (Browser) -> Void) {
-        if NSApp.currentEvent?.type == .keyDown, terminalHasFocus { return }
+        if NSApp.currentEvent?.type == .keyDown, terminalHasFocus || currentGitView?.hasKeyFocus == true { return }
         if NSApp.currentEvent?.type == .keyDown, !opensBrowser, !panelLayout.shows(.browser) { return }
         guard let browser = currentBrowser else { return }
         if opensBrowser, !browser.layout.shows(.browser) { commitMaximize() }
@@ -2105,6 +2207,7 @@ final class WorkspaceStore {
         case .toggleSidebar: toggleSidebar()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)
+        case .toggleGitView: toggleGitView()
         case .toggleMaximize: toggleMaximize()
         case .toggleMaximizeTerminal: toggleMaximize(.terminal)
         case .toggleMaximizeBrowser: toggleMaximize(.browser)
@@ -2138,11 +2241,14 @@ final class WorkspaceStore {
     @discardableResult
     func performConfiguredShortcut(_ trigger: KeyTrigger) -> Bool {
         guard !isShuttingDown, let action = config.keybinds.action(for: trigger) else { return false }
+        // ⌘G, the Git View's, is Find Next while the Browser is finding.
+        if trigger == Self.findNext, browserHasFocus, currentBrowser?.activeTab?.isFindShown == true { return false }
         perform(action)
         return true
     }
 
     private static let closeTab = KeyTrigger(modifiers: .command, key: .character("w"))
+    private static let findNext = KeyTrigger(modifiers: .command, key: .character("g"))
 
     func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         guard !isShuttingDown, let window = terminalHost.window, event.window === window else { return event }
@@ -2158,6 +2264,7 @@ final class WorkspaceStore {
         receiveHintInput(.keyDown(event.keyCode))
         if let trigger = KeyTrigger(event) {
             if palette.handle(trigger, in: event) { return nil }
+            if currentGitView?.handle(trigger, in: event) == true { return nil }
             let config = self.config
             if let target = config.commandPalettes.first(where: { $0.triggers.contains(trigger) }) {
                 palette.toggle(target)
