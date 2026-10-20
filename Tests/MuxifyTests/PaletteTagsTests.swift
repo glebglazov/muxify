@@ -17,13 +17,14 @@ final class PaletteTagsTests: XCTestCase {
             PickCandidate(id: "tag", title: "#backend", pick: .available("tag"), titlePlace: .tag),
         ])], query: FuzzyQuery("#ba"))
         XCTAssertEqual(tagged.rows.map(\.id), ["t", "tag"])
-        XCTAssertEqual(tagged.rows[0].detail, Highlighted(text: "#backend", marks: [0, 1, 2]), "the matched Tag shows in the detail line")
+        XCTAssertEqual(tagged.rows[0].tags, [Highlighted(text: "#backend", marks: [0, 1, 2])], "the matched Tag shows after the title")
+        XCTAssertEqual(tagged.rows[0].detail.text, "", "a Tag is not in the detail line")
         XCTAssertEqual(tagged.rows[1].title, Highlighted(text: "#backend", marks: [0, 1, 2]))
-        XCTAssertEqual(tagged.rows[1].detail.text, "", "a Tag row's title is not repeated in its detail line")
+        XCTAssertEqual(tagged.rows[1].tags, [], "a Tag row's title is not repeated as a chip")
         let unmatched = FuzzyRanker.list([PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true), candidates: [
             PickCandidate(id: "t", title: "Fix reward drop", fields: [.tag(tag("backend")), .tag(tag("release"))], pick: .available("t")),
         ])], query: FuzzyQuery(""))
-        XCTAssertEqual(unmatched.rows[0].detail, Highlighted(text: "#backend · #release", marks: []), "a Topic's Tags show with no query")
+        XCTAssertEqual(unmatched.rows[0].tags, [.plain("#backend"), .plain("#release")], "a Topic's Tags show with no query")
     }
 
     func testNewTopicTextKeepsTagWordsOutOfTheTitle() {

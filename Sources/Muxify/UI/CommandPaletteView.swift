@@ -293,13 +293,31 @@ private struct SpotlightPalette: View {
 
     private let headerHeight: CGFloat = 24
 
+    private func accessibilityLabel(_ row: PickRow<PaletteItem>) -> String {
+        let parts: [String] = [row.mark?.rawValue ?? "", row.title.text] + row.tags.map(\.text) + [row.detail.text, row.trailing]
+        return parts.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    /// The title, then the Topic's Tags as chips. The title is cut off before a chip is.
+    private func titleLine(_ row: PickRow<PaletteItem>, theme: PaletteTheme) -> some View {
+        HStack(spacing: 6) {
+            Text(row.title.attributed).font(.system(size: 15)).lineLimit(1)
+            ForEach(row.tags, id: \.text) { tag in
+                Text(tag.attributed)
+                    .lineLimit(1)
+                    .chip(color: theme.magenta, isSelected: false, theme: theme, size: 12, cornerRadius: 5)
+                    .fixedSize()
+            }
+        }
+    }
+
     private func row(_ row: PickRow<PaletteItem>, isSelected: Bool, theme: PaletteTheme) -> some View {
         let item = row.pick.payload
         let isCovered = palette.isCovered(row)
         return HStack(spacing: 12) {
             if let item { PaletteIcon(source: .item(item), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
             VStack(alignment: .leading, spacing: 1) {
-                Text(row.title.attributed).font(.system(size: 15)).lineLimit(1)
+                titleLine(row, theme: theme)
                 let detail = row.pick.reason.map(Highlighted.plain) ?? row.detail
                 if !detail.text.isEmpty {
                     Text(detail.attributed).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
@@ -323,8 +341,7 @@ private struct SpotlightPalette: View {
         .anchorPreference(key: SelectedRowBounds.self, value: .bounds) { isSelected ? $0 : nil }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("palette-row-" + row.id)
-        .accessibilityLabel([row.mark?.rawValue ?? "", row.title.text, row.detail.text, row.trailing].filter { !$0.isEmpty }
-                                .joined(separator: ", "))
+        .accessibilityLabel(accessibilityLabel(row))
         .accessibilityValue(row.pick.reason ?? [isCovered ? "covered" : nil, isSelected ? "selected" : nil]
                                 .compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
@@ -540,18 +557,15 @@ private struct FieldChipView: View {
     let theme: PaletteTheme
 
     var body: some View {
-        let color = chip.kind == .tag ? theme.magenta : theme.blue
         HStack(spacing: 5) {
             Text(chip.title).lineLimit(1)
             if let count = chip.count { Text("\(count)").font(.system(size: 12, weight: .semibold)).opacity(0.7) }
         }
-        .font(.system(size: 17, weight: .medium))
-        .foregroundStyle(chip.isSelected ? theme.background : color)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 3)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(chip.isSelected ? color : color.opacity(0.16)))
-        .fixedSize(horizontal: chip.kind == .tag, vertical: true)
-        .frame(maxWidth: chip.kind == .topic ? 180 : nil)
+        .chip(color: chip.kind == .tag ? theme.magenta : theme.blue, isSelected: chip.isSelected, theme: theme, size: 17, cornerRadius: 7)
+        // As wide as its text, up to one width for every chip; a cut-off title shows whole on hover.
+        .frame(maxWidth: 180)
+        .fixedSize()
+        .help(chip.title)
         .accessibilityElement(children: .ignore)
         // A static text element carries its value into the accessibility tree, where a check reads the selection.
         .accessibilityAddTraits(.isStaticText)
@@ -574,6 +588,15 @@ private struct KeyCap: View {
 }
 
 private extension View {
+    /// The look of a chip, in the search field and after a row's title, so a Tag looks the same in both.
+    func chip(color: Color, isSelected: Bool, theme: PaletteTheme, size: CGFloat, cornerRadius: CGFloat) -> some View {
+        font(.system(size: size, weight: .medium))
+            .foregroundStyle(isSelected ? theme.background : color)
+            .padding(.horizontal, size * 0.53)
+            .padding(.vertical, size * 0.18)
+            .background(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(isSelected ? color : color.opacity(0.16)))
+    }
+
     /// Liquid Glass tinted with the Sidebar's chrome, or a material before macOS 26.
     @ViewBuilder
     func spotlightGlass(_ theme: PaletteTheme, cornerRadius: CGFloat = 26, tint: Double = 0.45) -> some View {

@@ -14,7 +14,7 @@ struct SearchField: Equatable {
         /// Shown in the detail line only when it matched: a joined Session name.
         case hidden
         /// A Tag, such as "#backend". Only a word that starts with `#` matches it, and such a word matches nothing
-        /// else. Always in the detail line, so a row shows which Tags its Topic has.
+        /// else. Always shown, as a chip after the title, so a row shows which Tags its Topic has.
         case tag
     }
 
@@ -127,6 +127,8 @@ struct PickRow<Payload: Equatable>: Identifiable, Equatable {
     let symbol: String?
     let title: Highlighted
     let detail: Highlighted
+    /// The Tags of the row's Topic, each with the marks of the query.
+    var tags: [Highlighted] = []
     let trailing: String
     let mark: RowMark?
     let pick: Pick<Payload>
@@ -208,8 +210,16 @@ enum FuzzyRanker {
         PickRow(id: candidate.id, symbol: candidate.symbol,
                 title: Highlighted(text: candidate.title, marks: match?.positions[0] ?? []),
                 detail: detail(candidate.searchFields, note: candidate.note, match: match),
+                tags: tags(candidate.searchFields, match: match),
                 trailing: candidate.trailing, mark: candidate.mark,
                 pick: candidate.pick, paste: candidate.paste, snooze: candidate.snooze)
+    }
+
+    /// The Tag fields after the title, and their marks.
+    static func tags(_ fields: [SearchField], match: FieldsMatch?) -> [Highlighted] {
+        fields.enumerated().dropFirst().filter { $0.element.place == .tag }.map { index, field in
+            Highlighted(text: field.text, marks: match?.positions[index] ?? [])
+        }
     }
 
     /// The detail line and its marks: what matched, and what always shows.
@@ -223,7 +233,6 @@ enum FuzzyRanker {
                 parts.append(Highlighted(text: field.text, marks: marks))
             }
         }
-        shown(.tag, onlyWhenMatched: false)
         shown(.typeWord, onlyWhenMatched: true)
         shown(.detail, onlyWhenMatched: false)
         shown(.label, onlyWhenMatched: false)
