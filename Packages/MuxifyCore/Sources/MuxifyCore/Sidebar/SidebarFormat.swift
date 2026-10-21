@@ -3,7 +3,7 @@ import Foundation
 /// A parsed plain-text Format. Config owns parsing; rendering only evaluates the expression tree.
 public struct SidebarFormat: Equatable {
     public enum Variable: String, CaseIterable {
-        case topic_title, topic_pinned_flag, topic_dormant_flag
+        case topic_title, topic_pinned_flag, topic_dormant_flag, topic_tags, tag_count, tag
         case session_count, window_count, pane_count, agent_count, agents_working, agents_unread
         case session_name, project, branch
         case window_index, window_name, window_title, window_panes, tab_count
@@ -12,7 +12,7 @@ public struct SidebarFormat: Equatable {
         case loop_index, loop_first_flag, loop_last_flag
     }
 
-    public enum Loop: String { case sessions = "S", windows = "W", panes = "P" }
+    public enum Loop: String { case sessions = "S", windows = "W", panes = "P", tags = "T" }
 
     public struct Context {
         public var values: [Variable: String]
@@ -21,6 +21,18 @@ public struct SidebarFormat: Equatable {
         public init(values: [Variable: String] = [:], loops: [Loop: [Context]] = [:]) {
             self.values = values
             self.loops = loops
+        }
+
+        /// Each child of `loop`, with its place in the loop.
+        fileprivate func children(of loop: Loop) -> [Context] {
+            let children = loops[loop] ?? []
+            return children.enumerated().map { index, child in
+                var child = child
+                child.values[.loop_index] = String(index)
+                child.values[.loop_first_flag] = index == 0 ? "1" : "0"
+                child.values[.loop_last_flag] = index == children.count - 1 ? "1" : "0"
+                return child
+            }
         }
     }
 
@@ -55,14 +67,22 @@ public struct SidebarFormat: Equatable {
                 let value = expression.evaluate(context)
                 return value.split(separator: "/").last.map(String.init) ?? value
             case .loop(let loop, let expression):
-                let children = context.loops[loop] ?? []
-                return children.enumerated().map { index, child in
-                    var child = child
-                    child.values[.loop_index] = String(index)
-                    child.values[.loop_first_flag] = index == 0 ? "1" : "0"
-                    child.values[.loop_last_flag] = index == children.count - 1 ? "1" : "0"
-                    return expression.evaluate(child)
-                }.joined()
+                return context.children(of: loop).map(expression.evaluate).joined()
+            }
+        }
+
+        /// One item for each pass of a `T` loop, with the Tag's place in the loop. Text outside a `T` loop gives no item.
+        func tagItems(_ context: Context) -> [SidebarTagsFormat.Item] {
+            switch self {
+            case .text, .variable, .equal, .truncate, .basename: return []
+            case .sequence(let parts): return parts.flatMap { $0.tagItems(context) }
+            case .conditional(let condition, let yes, let no):
+                let value = condition.evaluate(context)
+                return (value.isEmpty || value == "0" ? no : yes).tagItems(context)
+            case .loop(.tags, let body):
+                return context.children(of: .tags).enumerated().map { SidebarTagsFormat.Item(index: $0.offset, text: body.evaluate($0.element)) }
+            case .loop(let loop, let body):
+                return context.children(of: loop).flatMap(body.tagItems)
             }
         }
     }
@@ -97,14 +117,7 @@ public struct SidebarFormat: Equatable {
                 let value = condition.evaluate(context)
                 return (value.isEmpty || value == "0" ? no : yes).evaluate(context)
             case .loop(let loop, let body):
-                let children = context.loops[loop] ?? []
-                return children.enumerated().flatMap { index, child in
-                    var child = child
-                    child.values[.loop_index] = String(index)
-                    child.values[.loop_first_flag] = index == 0 ? "1" : "0"
-                    child.values[.loop_last_flag] = index == children.count - 1 ? "1" : "0"
-                    return body.evaluate(child)
-                }
+                return context.children(of: loop).flatMap(body.evaluate)
             }
         }
 
@@ -266,5 +279,28 @@ public struct SidebarPartFormat: Equatable {
             result.append(part)
         }
         return result
+    }
+}
+
+/// `sidebar.formats.topic.tags`: what each Tag of a Topic card says. Each pass of the `T` loop is one Tag Mark's
+/// hover text or one chip; Muxify draws the "+N" itself, so the Format stays the same in every `tag_placement`.
+public struct SidebarTagsFormat: Equatable {
+    /// `index` is the Tag's place among the Topic's Tags, in the order of the `T` loop.
+    public struct Item: Equatable {
+        public let index: Int
+        public let text: String
+    }
+
+    public let source: String
+    private let expression: SidebarFormat.Scalar
+
+    public init(_ source: String) throws {
+        self.source = source
+        expression = try SidebarFormat.Parser.parse(source).scalar()
+    }
+
+    /// An item with no text shows no Tag, so a Format can leave out some Tags.
+    public func items(in context: SidebarFormat.Context) -> [Item] {
+        expression.tagItems(context).filter { !$0.text.isEmpty }
     }
 }

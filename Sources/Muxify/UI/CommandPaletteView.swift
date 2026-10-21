@@ -140,6 +140,7 @@ private struct SpotlightPalette: View {
                     .accessibilityAction(named: "Confirm") { palette.acceptSelected(commandReturn: true) }
                     .accessibilityAction(named: "Toggle Choice") { palette.toggleSelected() }
                     .accessibilityAction(named: "Space") { _ = palette.handleFlow(KeyTrigger(modifiers: [], key: .character(" "))) }
+                    .accessibilityAction(named: "Check All Shown") { _ = palette.handleFlow(KeyTrigger(modifiers: .command, key: .character("a"))) }
                     // ← with the caret at the start of the text, →, and ⌫ and ⌦ on a chip.
                     .accessibilityAction(named: "Select Previous Chip") { palette.receiveChipKey(.left(caretAtStart: true)) }
                     .accessibilityAction(named: "Select Next Chip") { palette.receiveChipKey(.right) }
@@ -193,6 +194,7 @@ private struct SpotlightPalette: View {
     private var flowFooter: some View {
         HStack(spacing: 12) {
             if case .confirm = palette.flow { Text("Empty field: Space changes a row").foregroundStyle(.secondary) }
+            if case .check = palette.flow { Text("Space or ⇥ checks a row · ⌘A checks all shown").foregroundStyle(.secondary) }
             Spacer()
             Button("Cancel · esc") { palette.close() }.accessibilityIdentifier("palette-cancel")
             Button(palette.requiresCommandReturn ? "Confirm · ⌘↩" : "Accept · ↩") {
@@ -294,7 +296,7 @@ private struct SpotlightPalette: View {
     private let headerHeight: CGFloat = 24
 
     private func accessibilityLabel(_ row: PickRow<PaletteItem>) -> String {
-        let parts: [String] = [row.mark?.rawValue ?? "", row.title.text] + row.tags.map(\.text) + [row.detail.text, row.trailing]
+        let parts: [String] = [row.mark?.rawValue ?? "", row.title.text] + row.tags.map(\.text.text) + [row.detail.text, row.trailing]
         return parts.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
@@ -302,10 +304,10 @@ private struct SpotlightPalette: View {
     private func titleLine(_ row: PickRow<PaletteItem>, theme: PaletteTheme) -> some View {
         HStack(spacing: 6) {
             Text(row.title.attributed).font(.system(size: 15)).lineLimit(1)
-            ForEach(row.tags, id: \.text) { tag in
-                Text(tag.attributed)
+            ForEach(row.tags, id: \.text.text) { tag in
+                Text(tag.text.attributed)
                     .lineLimit(1)
-                    .chip(color: theme.magenta, isSelected: false, theme: theme, size: 12, cornerRadius: 5)
+                    .chip(color: tag.color?.color ?? theme.magenta, isSelected: false, theme: theme, size: 12, cornerRadius: 5)
                     .fixedSize()
             }
         }
@@ -313,8 +315,9 @@ private struct SpotlightPalette: View {
 
     private func row(_ row: PickRow<PaletteItem>, isSelected: Bool, theme: PaletteTheme) -> some View {
         let item = row.pick.payload
-        let isCovered = palette.isCovered(row)
+        let check = palette.rowCheck(row)
         return HStack(spacing: 12) {
+            if let check { CheckBoxView(check: check) }
             if let item { PaletteIcon(source: .item(item), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
             VStack(alignment: .leading, spacing: 1) {
                 titleLine(row, theme: theme)
@@ -335,14 +338,14 @@ private struct SpotlightPalette: View {
         }
         .padding(.horizontal, 12)
         .frame(height: rowHeight)
-        .opacity(item == nil || isCovered ? 0.45 : 1)
+        .opacity(item == nil ? 0.45 : 1)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(isSelected ? 0.09 : 0)))
         .contentShape(Rectangle())
         .anchorPreference(key: SelectedRowBounds.self, value: .bounds) { isSelected ? $0 : nil }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("palette-row-" + row.id)
         .accessibilityLabel(accessibilityLabel(row))
-        .accessibilityValue(row.pick.reason ?? [isCovered ? "covered" : nil, isSelected ? "selected" : nil]
+        .accessibilityValue(row.pick.reason ?? [check?.box.accessibilityValue, isSelected ? "selected" : nil]
                                 .compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default) { palette.perform(.jumpTo, on: row) }
@@ -427,7 +430,7 @@ struct PaletteIcon: View {
         case .item(let item) where item.kind == .tag:
             Image(systemName: "number")
                 .font(.system(size: size * 0.5, weight: .semibold))
-                .foregroundStyle(theme.magenta)
+                .foregroundStyle(item.color?.color ?? theme.magenta)
                 .frame(width: size, height: size)
         case .item(let item) where [.topic, .snoozedTopic, .settledTopic].contains(item.kind):
             Image(systemName: topicSymbol(item))
@@ -550,28 +553,56 @@ private struct CopiedPill: View {
     }
 }
 
-/// A chip in the search field: a Tag in magenta, a Topic in blue. ⌫ in the empty field removes the last one, and ←
-/// selects one.
+/// A Tag chip in the search field, in its Tag's colour. ⌫ in the empty field removes the last one, and ← selects one.
 private struct FieldChipView: View {
     let chip: FieldChip
     let theme: PaletteTheme
 
     var body: some View {
-        HStack(spacing: 5) {
-            Text(chip.title).lineLimit(1)
-            if let count = chip.count { Text("\(count)").font(.system(size: 12, weight: .semibold)).opacity(0.7) }
+        Text(chip.title).lineLimit(1)
+            .chip(color: chip.color?.color ?? theme.magenta, isSelected: chip.isSelected, theme: theme, size: 17, cornerRadius: 7)
+            // As wide as its text, up to one width for every chip; a cut-off title shows whole on hover.
+            .frame(maxWidth: 180)
+            .fixedSize()
+            .help(chip.title)
+            .accessibilityElement(children: .ignore)
+            // A static text element carries its value into the accessibility tree, where a check reads the selection.
+            .accessibilityAddTraits(.isStaticText)
+            .accessibilityLabel(chip.title)
+            .accessibilityValue(chip.isSelected ? "selected" : "")
+            .accessibilityIdentifier(chip.id)
+    }
+}
+
+/// The box of a check step's row: empty, a dash when some of a Tag's Topics are checked, a check mark when all are.
+/// A Tag row's box has the Tag's colour, as its Tag Mark on a card has.
+private struct CheckBoxView: View {
+    let check: RowCheck
+
+    var body: some View {
+        let color = check.color?.color ?? Color.accentColor
+        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
+        ZStack {
+            if check.box == .none {
+                shape.strokeBorder(Color.secondary.opacity(0.7), lineWidth: 1.5)
+            } else {
+                shape.fill(color)
+                Image(systemName: check.box == .all ? "checkmark" : "minus")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+            }
         }
-        .chip(color: chip.kind == .tag ? theme.magenta : theme.blue, isSelected: chip.isSelected, theme: theme, size: 17, cornerRadius: 7)
-        // As wide as its text, up to one width for every chip; a cut-off title shows whole on hover.
-        .frame(maxWidth: 180)
-        .fixedSize()
-        .help(chip.title)
-        .accessibilityElement(children: .ignore)
-        // A static text element carries its value into the accessibility tree, where a check reads the selection.
-        .accessibilityAddTraits(.isStaticText)
-        .accessibilityLabel(chip.title)
-        .accessibilityValue(chip.isSelected ? "selected" : "")
-        .accessibilityIdentifier(chip.id)
+        .frame(width: 16, height: 16)
+    }
+}
+
+extension CheckBox {
+    var accessibilityValue: String? {
+        switch self {
+        case .none: nil
+        case .some: "partly checked"
+        case .all: "checked"
+        }
     }
 }
 

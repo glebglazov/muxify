@@ -11,10 +11,13 @@ struct TagField {
     }
 
     let mode: Mode
+    /// `topics.tags` when the step began. Nil: Tags are off, so New Topic reads `#` as title text.
+    let defined: ConfigTags?
     var chipField: ChipField<Tag>
 
-    init(mode: Mode, chips: [Tag] = []) {
+    init(mode: Mode, defined: ConfigTags?, chips: [Tag] = []) {
         self.mode = mode
+        self.defined = defined
         chipField = ChipField(chips: chips)
     }
 
@@ -29,14 +32,18 @@ struct TagText {
 
     private var words: [String] { text.split(whereSeparator: \.isWhitespace).map(String.init) }
 
+    /// A lone `#` in New Topic is title text, except as the draft, where it lists every Tag.
     private func isTagWord(_ word: String) -> Bool {
+        guard field.defined != nil else { return false }
         if case .editTags = field.mode { return true }
-        return word.hasPrefix("#")
+        return word.hasPrefix("#") && word.count > 1
     }
+
+    private func tag(_ word: String) -> Tag? { field.defined?.tag(typed: word) }
 
     /// The word being typed, with its `#`; nil when the caret is not after a Tag word.
     var draft: String? {
-        guard let last = words.last, text.last?.isWhitespace == false, isTagWord(last) else { return nil }
+        guard let last = words.last, text.last?.isWhitespace == false, isTagWord(last) || (last == "#" && field.defined != nil) else { return nil }
         return last.hasPrefix("#") ? last : "#" + last
     }
 
@@ -46,21 +53,18 @@ struct TagText {
         return String(text[..<range.lowerBound])
     }
 
-    /// The Tag words that ↩ cannot take, such as `#a.b`. New Topic keeps them in the title, so it refuses none.
-    var refusedWords: [String] {
-        guard case .editTags = field.mode else { return [] }
-        return words.filter { Tag(typed: $0) == nil }
-    }
+    /// The Tag words that no Tag of the Config matches. ↩ does nothing while one is in the field.
+    var refusedWords: [String] { words.filter { isTagWord($0) && tag($0) == nil } }
 
     /// The chips, then each Tag word, once each.
     var tags: [Tag] {
         var tags = field.chipField.chips
-        for tag in words.compactMap({ isTagWord($0) ? Tag(typed: $0) : nil }) where !tags.contains(tag) { tags.append(tag) }
+        for tag in words.compactMap({ isTagWord($0) ? tag($0) : nil }) where !tags.contains(tag) { tags.append(tag) }
         return tags
     }
 
     /// New Topic: the words that are not Tags.
-    var title: String { words.filter { !isTagWord($0) || Tag(typed: $0) == nil }.joined(separator: " ") }
+    var title: String { words.filter { !isTagWord($0) }.joined(separator: " ") }
 }
 
 extension PaletteFlow {
@@ -72,24 +76,25 @@ extension PaletteFlow {
 }
 
 extension CommandPalette {
-    /// The Tags that match the draft, A→Z, without the chips, then a New Tag row when the draft is a Tag that no
-    /// record has. Empty while there is no draft.
+    /// The Tags of `topics.tags` that match the draft, in Config order, without the chips. A Tag with no Topic is
+    /// listed too. When none matches, one row says so. Empty while there is no draft.
     func tagRows(_ field: TagField) -> PickList<PaletteItem> {
-        guard let store, let draft = field.text(query).draft else { return .empty }
+        guard let store, let defined = field.defined, let draft = field.text(query).draft else { return .empty }
         let records = store.topicWatcher.records
-        let suggested = Tag.suggestions(from: records)
-        let candidates = suggested.filter { !field.chipField.chips.contains($0) }.map { tag in
-            let count = records.filter { $0.tags.contains(tag) }.count
-            return PickCandidate(id: "tag-" + tag.name, title: tag.description, trailing: count == 1 ? "1 Topic" : "\(count) Topics",
-                                 pick: .available(PaletteItem(kind: .tag, ref: .choice(.tag(tag)))), titlePlace: .tag)
+        let candidates = defined.definitions.filter { !field.chipField.chips.contains($0.tag) }.map { definition in
+            let count = records.filter { $0.tags.contains(definition.tag) }.count
+            return PickCandidate(id: "tag-" + definition.tag.name, title: definition.tag.description,
+                                 trailing: count == 1 ? "1 Topic" : "\(count) Topics",
+                                 pick: .available(PaletteItem(kind: .tag, ref: .choice(.tag(definition.tag)), color: definition.color)),
+                                 titlePlace: .tag)
         }
-        var new: [PickCandidate<PaletteItem>] = []
-        if let tag = Tag(typed: draft), !suggested.contains(tag), !field.chipField.chips.contains(tag) {
-            new.append(PickCandidate(id: "new-tag", symbol: "＋", title: "New Tag “\(tag.name)”",
-                                     pick: .available(PaletteItem(kind: .tag, ref: .choice(.tag(tag))))))
-        }
-        return FuzzyRanker.list([PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: true), candidates: candidates),
-                                 PickSectionInput(id: "new-tag", rule: .fixed, candidates: new)], query: FuzzyQuery(draft))
+        let list = FuzzyRanker.list([PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: true), candidates: candidates)],
+                                    query: FuzzyQuery(draft))
+        guard list.rows.isEmpty else { return list }
+        return FuzzyRanker.list([PickSectionInput(id: "no-tag", rule: .fixed, candidates: [
+            PickCandidate(id: "no-tag", title: "No Tag “\(draft.dropFirst())” matches", note: "The Config defines the Tags in topics.tags",
+                          pick: .blocked(reason: "")),
+        ])], query: FuzzyQuery(""))
     }
 
     /// ⇥ or ↩ on a Tag row, or a space after a complete Tag word: the draft becomes a chip.
@@ -100,10 +105,10 @@ extension CommandPalette {
         replaceFlow(.text(.tags(field)))
     }
 
-    /// A space after a draft that is a Tag makes it a chip at once, so ⌫ then removes it whole. False when the
-    /// draft is not a Tag, and the space goes into the field.
+    /// A space after a draft that names a Tag of the Config makes it a chip at once, so ⌫ then removes it whole.
+    /// False when the draft names no Tag, and the space goes into the field.
     func completeTagDraft() -> Bool {
-        guard let field = flow?.tagField, let tag = field.text(query).draft.flatMap(Tag.init(typed:)) else { return false }
+        guard let field = flow?.tagField, let draft = field.text(query).draft, let tag = field.defined?.tag(typed: draft) else { return false }
         addTagChip(tag)
         return true
     }
@@ -113,6 +118,7 @@ extension CommandPalette {
     func tagNote(_ field: TagField) -> String? {
         let text = field.text(query)
         if text.draft != nil { return "⇥ or ↩ makes a chip · ⌫ in an empty field removes a chip" }
+        if let word = text.refusedWords.first { return "\(word) is not a Tag in topics.tags. Remove it, or add the Tag to the Config." }
         func list(_ tags: [Tag]) -> String { tags.map(\.description).joined(separator: " ") }
         let tags = text.tags
         switch field.mode {
@@ -121,7 +127,6 @@ extension CommandPalette {
             let title = text.title.isEmpty ? "Untitled" : text.title
             return "Title: \(title) · Tags: \(list(tags)) · ↩ makes the Topic. Its first Project comes next."
         case .editTags(let topic):
-            if let word = text.refusedWords.first { return "\(word) is not a Tag. Use lower case letters, digits and -." }
             let changes = [("Removes", topic.tags.sorted().filter { !tags.contains($0) }), ("Adds", tags.filter { !topic.tags.contains($0) })]
                 .filter { !$0.1.isEmpty }.map { "\($0.0): \(list($0.1))" }
             let keys = field.chipField.selection == nil ? "← selects a Tag" : "← → move · ⌫ ⌦ remove the selected Tag"

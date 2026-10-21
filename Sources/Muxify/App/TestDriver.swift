@@ -125,6 +125,7 @@ enum TestDriver {
     private static var pending: Steps?
 
     /// `click` presses the target at its centre and lets go there, without moving: a plain click of the mouse.
+    /// The option `command_key` holds ⌘ through the click, as a ⌘-click does.
     /// `drag` presses the target, moves to the element named by `text` and lets go there: in its upper quarter,
     /// or its lower quarter with the option `edge: "bottom"`. The option `hold` keeps the press still for that many
     /// seconds before it moves, as a long press does. Each tick hands one mouse event to the window, never through
@@ -137,11 +138,13 @@ enum TestDriver {
         private var moves: [(type: NSEvent.EventType, point: NSPoint)] = []
         private var holdUntil: Date?
         private let hold: TimeInterval
+        private let modifierFlags: NSEvent.ModifierFlags
         private var pressed = false
 
         init(nonce: String, command: [String: Any]) {
             self.nonce = nonce
             hold = command["hold"] as? Double ?? 0
+            modifierFlags = command["command_key"] as? Bool == true ? .command : []
             let elements = TestDriver.dump()
             func frame(_ identifier: String?) -> NSRect? {
                 guard let identifier else { return nil }
@@ -174,7 +177,7 @@ enum TestDriver {
             let (type, point) = moves.removeFirst()
             if type == .leftMouseDown, hold > 0 { holdUntil = Date().addingTimeInterval(hold) }
             // Each event takes the time it is sent, so a gesture that measures how long the press lasted sees the hold.
-            NSEvent.mouseEvent(with: type, location: window.convertPoint(fromScreen: point), modifierFlags: [],
+            NSEvent.mouseEvent(with: type, location: window.convertPoint(fromScreen: point), modifierFlags: modifierFlags,
                                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
                                eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)
                 .map(window.sendEvent)
@@ -378,8 +381,14 @@ enum TestDriver {
         return (try? png.write(to: URL(fileURLWithPath: path))) != nil
     }
 
+    /// The tracking areas that the last `hover` entered, with their owners and window, so the next one can exit them.
+    private static var hovered: [(owner: NSResponder, area: NSTrackingArea, window: NSWindow)] = []
+
     /// Puts the pointer on the element for the views under it, without moving the real pointer: each tracking area
-    /// there gets a synthesized entered and moved event, as the window server would send. SwiftUI's `onHover` follows.
+    /// that the last `hover` entered gets a synthesized exited event, and each tracking area under the new point an
+    /// entered and a moved event. A SwiftUI window has one tracking area for all its views, and a moved event alone
+    /// does not end the hover of the view the pointer left, so the pointer leaves and comes back, and `onHover`
+    /// follows.
     private static func hover(_ target: String) -> Bool {
         guard let screen = (dump().first { $0.row["accessibilityIdentifier"] == target }?.object
                                 .value(forKey: "accessibilityFrame") as? NSValue)?.rectValue,
@@ -388,19 +397,29 @@ enum TestDriver {
         let point = window.convertPoint(fromScreen: NSPoint(x: screen.midX, y: screen.midY))
         guard let event = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) else { return false }
+        func crossing(_ type: NSEvent.EventType, _ area: NSTrackingArea, in window: NSWindow) -> NSEvent? {
+            NSEvent.enterExitEvent(with: type, location: window.convertPoint(fromScreen: NSPoint(x: screen.midX, y: screen.midY)),
+                                   modifierFlags: [], timestamp: event.timestamp, windowNumber: window.windowNumber, context: nil,
+                                   eventNumber: 0, trackingNumber: unsafeBitCast(area, to: Int.self), userData: nil)
+        }
+        var entered: [(owner: NSResponder, area: NSTrackingArea, window: NSWindow)] = []
         var view = window.contentView?.hitTest(window.contentView?.convert(point, from: nil) ?? point)
         while let current = view {
             let local = current.convert(point, from: nil)
             for area in current.trackingAreas where area.rect.contains(local) || area.options.contains(.inVisibleRect) {
-                guard let owner = area.owner as? NSResponder,
-                      let enter = NSEvent.enterExitEvent(with: .mouseEntered, location: point, modifierFlags: [], timestamp: event.timestamp,
-                                                         windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-                                                         trackingNumber: unsafeBitCast(area, to: Int.self), userData: nil) else { continue }
-                owner.mouseEntered(with: enter)
-                if area.options.contains(.mouseMoved) { owner.mouseMoved(with: event) }
+                if let owner = area.owner as? NSResponder { entered.append((owner, area, window)) }
             }
             view = current.superview
         }
+        for left in hovered {
+            if let exit = crossing(.mouseExited, left.area, in: left.window) { left.owner.mouseExited(with: exit) }
+        }
+        for (owner, area, _) in entered {
+            guard let enter = crossing(.mouseEntered, area, in: window) else { continue }
+            owner.mouseEntered(with: enter)
+            if area.options.contains(.mouseMoved) { owner.mouseMoved(with: event) }
+        }
+        hovered = entered
         return true
     }
 

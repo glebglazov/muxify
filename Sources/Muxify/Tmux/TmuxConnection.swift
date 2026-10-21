@@ -1,6 +1,17 @@
 import Foundation
 import MuxifyCore
 
+extension TmuxServer {
+    /// The local server the app works on. A verify run's server starts without the user's tmux config: its
+    /// hooks act on the app's clients and leave errors in the throwaway server's Panes.
+    static let app: TmuxServer = {
+        #if DEBUG
+        if TestDriver.isRunning { return TmuxServer(configPath: "/dev/null") }
+        #endif
+        return .local
+    }()
+}
+
 /// The tmux execution seam. Every operation captures this immutable target;
 /// changing the active Environment never retargets work already in flight.
 final class TmuxConnection: @unchecked Sendable {
@@ -20,8 +31,7 @@ final class TmuxConnection: @unchecked Sendable {
 
     func invocation(_ args: [String]) throws -> CommandInvocation {
         if let remote { return remote.command(args) }
-        guard let binary = Tmux.binary else { throw TmuxError.notInstalled }
-        return CommandInvocation(executable: binary, arguments: args)
+        return try TmuxServer.app.invocation(args)
     }
 
     func run(_ args: [String]) throws -> String {

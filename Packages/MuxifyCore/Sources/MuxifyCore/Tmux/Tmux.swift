@@ -294,8 +294,7 @@ public enum Tmux {
 
     /// The `send-keys` arguments that type `keys` into the target's pane as the client `client`, or as no
     /// client when nil. Without `-c` tmux types as its most recently active client, which may be the
-    /// read-only events client, and then refuses with "client is read-only". The empty name matches no
-    /// client, which send-keys accepts.
+    /// events client. The empty name matches no client, which send-keys accepts.
     public static func sendKeysArguments(target: String, keys: [String], literal: Bool, client: String?) -> [String] {
         ["send-keys", "-c", client ?? ""] + (literal ? ["-l", "-t", target, "--"] : ["-t", target]) + keys
     }

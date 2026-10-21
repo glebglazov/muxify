@@ -1,5 +1,7 @@
 # A pick step collects Topics and Tags as chips, and Snooze Topics starts with it
 
+> **Update 2026-10-20:** [ADR 0035](0035-a-check-step-checks-topics-for-snooze-and-unsnooze.md) replaces the pick step with a check step for Snooze Topics…. The Tag field of New Topic and Edit Tags keeps its chips and chip keys.
+
 Snooze Topics… used the "choose rows" step of [ADR 0020](0020-a-palette-step-can-choose-several-rows.md): a mark on each row, Space or ⇥ to mark, ⌘A to mark all shown rows, and ↩ to go on. The marked set showed only as marks in the list, and a filter hid the marked rows. With no mark, ↩ went on with the highlighted row, which was the first Tag. So one ↩ by reflex Snoozed every Topic of that Tag.
 
 We replace "choose rows" with a new kind of palette step: **pick**. The search field holds the picked Topics and Tags as chips, as the Tag field of Edit Tags holds Tags. The rows are suggestions: Tags, then Topics, then Already Snoozed. ↩ on a row picks it: the row becomes a chip, leaves the list, and the query clears. A Tag chip names every Topic that has the Tag, so a Topic that a picked Tag names stays in the list, dim, with "in #tag". The set is the Topics that the chips name, once each, in Topics list order. To go on, the user chooses the first row, "→ Snooze N Topics…". It shows only when the query is empty and one or more chips exist. For a query that is not a Tag, the last row, "＋ All N matches for “query”", picks every Topic that the query matches. In the pick step, ↩ only picks: it never Snoozes.

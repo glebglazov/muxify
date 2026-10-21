@@ -10,7 +10,7 @@ To prove a change in the running app, use the e2e harness in `scripts/verify/`. 
 
 ## Actions and Commands
 
-Design every new Action or Command as steps in the palette's view: run at once, choose a row, pick, type one value, or confirm. Read `docs/adr/0014-every-action-runs-in-the-palettes-view.md` before you add or change one. For an Action on several Topics, use the pick step in `Sources/Muxify/UI/PalettePick.swift`, with its chips in `Sources/Muxify/UI/PaletteChips.swift`, and read `docs/adr/0025-a-pick-step-collects-topics-and-tags-as-chips.md`. A sheet or an alert that takes input needs its own ADR first.
+Design every new Action or Command as steps in the palette's view: run at once, choose a row, check Topics, type one value, or confirm. Read `docs/adr/0014-every-action-runs-in-the-palettes-view.md` before you add or change one. For an Action on several Topics, use the check step in `Sources/Muxify/UI/PaletteCheck.swift`, and read `docs/adr/0035-a-check-step-checks-topics-for-snooze-and-unsnooze.md`. A sheet or an alert that takes input needs its own ADR first.
 
 ## tmux in tests and verification
 

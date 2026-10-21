@@ -174,6 +174,9 @@ class TopicsUnread(TopicsSidebar):
         self.write_topic(topic, topic, self.beta)
         _, window, _ = self.agent_session(topic, topic=topic, status='working')
         self.write_empty_topic('live-auto-away')
+        # Go to Topic shows the Empty Topic view while the app has not yet read the new Window.
+        self.open_card('topic-' + topic)
+        self.s.wait_rows(lambda rs: self.s.has('topic-window-' + window, rs), 'the Topic card does not list ' + window)
         self.enter(topic)
         self.s.wait_shown(window)
         self.command('Mark Unread')

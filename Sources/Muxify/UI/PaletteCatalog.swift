@@ -28,6 +28,8 @@ struct PaletteItem: Equatable {
     var target: String?
     /// A `Resources/Logos` name, for Windows and Agents.
     var logo: String?
+    /// A Tag row's Tag colour in the Config.
+    var color: MarkColor?
     /// An Agent's Status, which its row shows as text.
     var status: AgentStatus?
     var mark: RowMark?
@@ -107,25 +109,25 @@ struct PaletteCatalog {
     private func openTopicSection(only tag: Tag?) -> PickSectionInput<PaletteItem>? {
         guard offersTopics, let topics else { return nil }
         return PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
-                                candidates: topics.rows.filter { tag.map($0.tags.contains) ?? true }.compactMap(topicCandidate))
+                                candidates: topics.rows.filter { $0.has(tag) }.compactMap(topicCandidate))
     }
 
-    /// Each Tag on a Topic record, A→Z. A plain word matches its name too.
+    /// Each Tag of `topics.tags` that a Topic record has, in Config order. A plain word matches its name too.
     private var tagSection: PickSectionInput<PaletteItem>? {
-        guard offersTopics else { return nil }
-        return PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: false),
-                                candidates: Tag.suggestions(from: records).map { tag in
-            let count = records.filter { $0.tags.contains(tag) }.count
-            return PickCandidate(id: "tag-" + tag.name, title: tag.description, fields: [.hidden(tag.name)],
+        guard offersTopics, let definitions = topics?.tags?.definitions else { return nil }
+        return PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: false), candidates: definitions.compactMap { definition in
+            let count = records.filter { $0.tags.contains(definition.tag) }.count
+            guard count > 0 else { return nil }
+            return PickCandidate(id: "tag-" + definition.tag.name, title: definition.tag.description, fields: [.hidden(definition.tag.name)],
                                  trailing: count == 1 ? "1 Topic" : "\(count) Topics",
-                                 pick: .available(PaletteItem(kind: .tag, ref: .tag(tag))), titlePlace: .tag)
+                                 pick: .available(PaletteItem(kind: .tag, ref: .tag(definition.tag), color: definition.color)), titlePlace: .tag)
         })
     }
 
     private func snoozedAndSettledSections(only tag: Tag?) -> [PickSectionInput<PaletteItem>] {
         guard offersTopics, let topics else { return [] }
         let snoozed = (topics.groups.first { $0.kind == .snoozed }?.topics ?? [])
-            .filter { tag.map($0.tags.contains) ?? true }.compactMap(snoozedCandidate)
+            .filter { $0.has(tag) }.compactMap(snoozedCandidate)
         let settled = records.filter { $0.settledAt != nil && (tag.map($0.tags.contains) ?? true) }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
             .map(settledCandidate)
@@ -140,7 +142,7 @@ struct PaletteCatalog {
     }
 
     private func topicFields(_ row: TopicsModel.Row, type: String) -> [SearchField] {
-        [.typeWord(type)] + row.sessions.map { .label($0.projectName) } + row.tags.map(SearchField.tag)
+        [.typeWord(type)] + row.sessions.map { .label($0.projectName) } + SearchField.tags(row.tags)
     }
 
     private func topicCandidate(_ row: TopicsModel.Row) -> PickCandidate<PaletteItem>? {
@@ -169,13 +171,13 @@ struct PaletteCatalog {
     }
 
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {
-        let row = TopicsModel.settledRow(record, projects: projects, expanded: [])
+        let row = TopicsModel.settledRow(record, projects: projects, tags: topics?.tags, expanded: [])
         let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var settledOn: String?
         if outcome.isEmpty, case .settled(let detail) = row.kind { settledOn = detail }
         return PickCandidate(
             id: row.id.accessibilityID, symbol: "✓", title: row.title,
-            fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]) + row.tags.map(SearchField.tag),
+            fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]) + SearchField.tags(row.tags),
             note: settledOn, trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "), mark: row.mark,
             lastVisit: visits.last(.topic(row.id)),
             pick: .available(PaletteItem(kind: .settledTopic, ref: .topic(id: record.id, window: nil))))
@@ -219,7 +221,7 @@ struct PaletteCatalog {
             pick: .available(PaletteItem(kind: choice.isWorktree ? .worktree : .project,
                                          ref: .project(OpenDirectory(directory: choice.directory, name: choice.name, reach: reach)),
                                          path: choice.directory.path, target: names.first)),
-            paste: Self.shellWord(choice.directory.path))
+            paste: choice.directory.path)
     }
 
     private func looseSessionCandidates(_ windows: [TmuxWindow]) -> [PickCandidate<PaletteItem>] {
@@ -241,7 +243,7 @@ struct PaletteCatalog {
                 mark: topics?.sessionMarks[session.id].map(RowMark.agent),
                 lastVisit: visits.last(.session(name: session.name)), isCurrent: isCurrent, activity: active.sessionActivity,
                 pick: .available(PaletteItem(kind: .session, ref: .session(session), path: folder, target: session.name)),
-                paste: Self.shellWord(folder))
+                paste: folder)
         }
     }
 
@@ -255,7 +257,7 @@ struct PaletteCatalog {
             fields: [.typeWord("window"), .detail(target), .detail(window.abbreviatedPath), .hidden(window.command)],
             trailing: isCurrent ? "Current" : "", isCurrent: isCurrent, activity: window.sessionActivity,
             pick: .available(PaletteItem(kind: .window, ref: .window(window), path: window.path, target: target, logo: window.logoName)),
-            paste: Self.shellWord(window.path))
+            paste: window.path)
     }
 
     /// Those with a Notification first, then working ones, then the rest, each in tmux order.
@@ -280,7 +282,7 @@ struct PaletteCatalog {
                 pick: .available(PaletteItem(kind: .agent, ref: .agent(agent), path: path, target: agent.paneID,
                                              logo: agent.kind.rawValue, status: agent.status,
                                              mark: agentMarks[agent.paneID].map(RowMark.agent))),
-                paste: path.isEmpty ? nil : Self.shellWord(path))
+                paste: path.isEmpty ? nil : path)
         }
     }
 

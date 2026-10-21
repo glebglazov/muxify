@@ -143,7 +143,8 @@ final class CommandPalette {
                 actions += topic.snoozedUntil == nil ? [.snoozeTopic] : [.unsnoozeTopic]
                 // Zen starts only in Topics mode; while it is on, the action ends it.
                 actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
-                actions += [.settleTopic, .addProjectToTopic, .rename, .editTags, .suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
+                actions += [.settleTopic, .addProjectToTopic, .rename] + (store.topicConfig.tags == nil ? [] : [.editTags])
+                    + [.suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
                 actions += [.reopenTopic, .startTopicFresh]
@@ -317,7 +318,9 @@ final class CommandPalette {
     func perform(_ action: PaletteAction, on row: PickRow<PaletteItem>) {
         guard let store, let item = row.pick.payload else { return }
         if case .choice(let choice) = item.ref {
-            if choice == .accept { acceptSelected() } else { accept(choice) }
+            // A click on a check step's row checks it, as Space does; ↩ is what goes on.
+            if case .check(let checkRow) = choice { check(checkRow, highlighting: row.id) }
+            else if choice == .accept { acceptSelected() } else { accept(choice) }
             return
         }
         if action == .jumpTo, case .tag(let tag) = item.ref, let current {
@@ -356,8 +359,10 @@ final class CommandPalette {
             copy(target, title: item.kind == .agent ? "Copied Pane ID" : "Copied tmux Target", shown: target)
         case .pasteFolder:
             guard let paste = row.paste else { return }
+            let responder = previousResponder
             close()
-            store.pasteIntoTerminal(paste)
+            // close() gives Focus back on the next turn of the main queue; the text follows it there.
+            DispatchQueue.main.async { [weak store] in store?.paste(paste, into: responder) }
         default: performRowAction(action, item: item)
         }
     }

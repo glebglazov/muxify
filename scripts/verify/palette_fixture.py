@@ -15,6 +15,17 @@ SHELL = '/bin/zsh -f'
 
 
 class PaletteFixture(unittest.TestCase):
+    # The YAML of `topics.tags`: Tag name to its value, in Config order. Empty leaves Tags off.
+    TAGS = {}
+
+    @classmethod
+    def config_text(cls, tags=None):
+        tags = cls.TAGS if tags is None else tags
+        text = 'sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n'
+        if tags:
+            text += 'topics:\n  tags:\n' + ''.join('    %s: %s\n' % (name, value) for name, value in tags.items())
+        return text
+
     @classmethod
     def setUpClass(cls):
         cls.s = s = Sandbox(cls.__module__.rsplit('.', 1)[-1])
@@ -23,7 +34,8 @@ class PaletteFixture(unittest.TestCase):
         cls.project.mkdir(parents=True)
         cls.topics = s.root/'state/muxify/topics'
         cls.topics.mkdir(parents=True, exist_ok=True)
-        (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n')
+        cls.config = s.root/'config/muxify/config.yaml'
+        cls.config.write_text(cls.config_text())
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', 'base', '-c', str(cls.project), SHELL)
         s.tmux('set-option', '-g', 'detach-on-destroy', 'off')
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])

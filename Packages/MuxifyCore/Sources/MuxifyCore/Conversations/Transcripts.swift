@@ -44,9 +44,9 @@ public struct TranscriptRoots: Equatable, Sendable {
 
     /// The kind whose folder holds `file`, through symlinks too.
     public func kind(ofTranscriptAt file: URL) -> AgentKind? {
-        let path = file.resolvingSymlinksInPath().path
+        let transcript = Folder.local(file.path)
         return AgentKind.allCases.first { kind in
-            folder(for: kind).map { path.hasPrefix($0.resolvingSymlinksInPath().path + "/") } ?? false
+            folder(for: kind).map { Folder.local($0.path).contains(transcript) } ?? false
         }
     }
 }

@@ -120,6 +120,46 @@ A Dormant Topic keeps its place, including when it is Pinned.
 A Topic made from a Locked Session takes that Lock's place.
 An unknown value uses `bottom` and appears in the Config problems banner.
 
+## Tags
+
+```yaml
+topics:
+  tags:
+    work:
+      color: blue
+    personal:
+      color: {light: '#5E8C6A', dark: '#7FA88A'}
+    gs: {}
+```
+
+`topics.tags` lists every Tag that a Topic can have, in the order Muxify shows
+them. Each key is a Tag: lower case letters, digits and `-`, as a Topic record
+stores it. A key that breaks this rule is a Config problem with its line
+number, and that Tag does not exist.
+
+A Tag shows as its key everywhere: on cards, in the palette, in Edit Tags and
+in the CLI. Its only setting is `color`, the color of its mark on a Topic card
+and of its chips and rows in the Command Palette, written as in
+[Agent colors](#agent-colors). A Tag without a `color` gets a fixed color made
+from its name. Any other key, such as an old `display_name`, is a Config
+problem with its line number, and the Tag still loads with its color.
+
+Only these Tags can be added: in New Topic, in Edit Tags, and with
+`muxify topic tag`, which fails with an error that names `topics.tags` and
+writes nothing. New Topic and Edit Tags suggest the Tags in Config order, also
+a Tag that no Topic has. A `#word` that no Tag matches cannot become a chip,
+and ↩ does nothing while it is in the field.
+
+A Topic record can hold a Tag that the Config does not define, such as a Tag
+that you removed or renamed here. Muxify does not change the record. The card
+shows that Tag dimmed and with no color. Edit Tags can remove it, but nothing
+can add it again, and Go to… and Snooze Topics do not list it.
+
+Without `topics.tags`, or with an empty one, Tags are off: `#` in New Topic is
+plain title text, Edit Tags is not offered, and no card, palette row or Format
+shows a Tag. Each App Window uses its Environment's Config, so its Tags come
+from that Config.
+
 ## Order of a Topic's Sessions
 
 ```yaml
@@ -244,6 +284,19 @@ ui:
   agent_colors:
     done: '#3366ff'
 ```
+
+To set one color for light appearance and one for dark, write a mapping with
+the keys `light` and `dark`. Each one is a system color name or a `#RRGGBB`
+value. The color changes when the appearance of the App Window changes:
+
+```yaml
+ui:
+  agent_colors:
+    done: {light: '#3366ff', dark: '#88aaff'}
+```
+
+A mapping without `light` or `dark`, with another key, or with an invalid value
+in it is a Config problem.
 
 A color applies to the Sidebar and the Command Palette at once. The Command
 Palette's terminal theme does not change Agent marks. Leave out a key to keep
@@ -473,7 +526,7 @@ reveal its Browser. The [Simulator](simulator.md) runs in a browser, not a nativ
 panel.
 
 [Vim Keys](keybindings.md#vim-keys) scroll a Browser page with h, j, k, l, d,
-u, gg and G. They are on by default. To turn them off:
+u, gg and G, and go back and forward with H and L. They are on by default. To turn them off:
 
 ```yaml
 browser:
@@ -627,9 +680,46 @@ sidebar:
     wrap: false
 ```
 
+
+### Tags on Topic cards
+
+`sidebar.tag_placement` sets where a Topic card shows its [Tags](#tags):
+
+| Value | Tags shown |
+| --- | --- |
+| `none` (default) | No Tags on the cards. |
+| `corner` | One Tag Mark per Tag, a small square in the Tag's color, at the right end of the title's first line, on closed and open cards. |
+| `title` | The first Tag as a chip, then a `+N` chip for the others, at the right end of the title's first line. A long title wraps under them at the full card width. |
+| `line` | Chips on their own line under the title, before Dormant or Empty. When they do not all fit, the line ends with `+N`. |
+
+In `corner` and `title`, the title line is, from left to right: the title, the
+Hint, a Snoozed Topic's wake time, the Pin or Lock, and the Tags. Tag editing
+does not depend on this setting: Edit Tags… and `#` in New Topic work whenever
+`topics.tags` exists.
+
+The hover label and the accessibility value of the Tags name every Tag. A
+closed card in the Snoozed or Settled group shows no Tags; an opened one shows
+them as an open card does. Locked Sessions and Session cards show no Tags.
+
+```yaml
+sidebar:
+  tag_placement: corner
+  formats:
+    topic:
+      tags: '#{T:#{tag}}'
+```
+
+`sidebar.formats.topic.tags` gives the text of each Tag: each pass of the `T`
+loop is one chip, or one Tag Mark's hover text. A pass with no text leaves its
+Tag out, and `''` hides the Tags. Text outside the `T` loop does not show.
+Muxify draws the `+N` itself, so one Format serves every placement. It can
+differ by Sidebar mode, as other parts can; Topic cards show only in Topics
+mode. `null` keeps the default. To show Tags as plain text instead, set
+`tags: ''` and put `#{topic_tags}` in the Summary.
+
 ### Formats
 
-`sidebar.formats` sets the title and Summary of Topic cards, Session cards, Window rows, Pane rows, and Agent rows.
+`sidebar.formats` sets the title and Summary of Topic cards, Session cards, Window rows, Pane rows, and Agent rows, and the Tags of Topic cards.
 Each `title` or `summary` accepts a string, or a mapping with `topics` and `sessions` values.
 An empty Summary hides its line. An empty title uses the default title.
 Card Summaries appear only when the card is closed.
@@ -698,6 +788,7 @@ The built-in right part shows a Tab badge only when Tabs exist. It shows a Pane 
 | `#{=N:name}`, `#{=-N:name}` | The first or last N characters of the variable. A nested expression can replace the variable name. |
 | `#{b:name}` | The last nonempty part of a path. A nested expression can replace the variable name. |
 | `#{S:body}`, `#{W:body}`, `#{P:body}` | Repeat the body for each contained Session, Window, or Pane. |
+| `#{T:body}` | Repeat the body for each Tag of the Topic, in Config order, then the Tags the Config no longer defines. |
 | `#,`, `##`, `#}` | A literal comma, hash, or closing brace. |
 
 Expressions can nest, up to 64 levels. Both branches of a conditional must be valid.
@@ -708,8 +799,9 @@ A loop that the current object does not contain produces no text.
 
 | Object | Variables | Loops |
 | --- | --- | --- |
-| Topic | `topic_title`, `topic_pinned_flag`, `topic_dormant_flag`, `session_count`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | S, W, P |
-| Session | `session_name`, `project`, `branch`, `topic_title`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | W, P |
+| Topic | `topic_title`, `topic_pinned_flag`, `topic_dormant_flag`, `topic_tags`, `tag_count`, `session_count`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | S, W, P, T |
+| Tag, inside `T` | Its Topic's variables, plus `tag` | None |
+| Session | `session_name`, `project`, `branch`, `topic_title`, `topic_tags`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | W, P |
 | Window | Its Session variables, plus `window_index`, `window_name`, `window_title`, `window_panes`, `pane_current_command`, `pane_current_path`, `tab_count`, `agent_kind`, `agent_status` | P |
 | Pane | Its Window and Session variables, plus `pane_index`, `pane_label`, `pane_title`, `pane_current_command`, `pane_current_path`, `pane_active_flag`, `agent_kind`, `agent_status`, `agent_unread_flag`, `agent_group` | None |
 | Agent | Its Pane variables, including its own Window, Session, and Topic values | None |
@@ -728,6 +820,10 @@ Counts include Panes even when Pane rows are hidden. Flags use `1` and `0`.
 Muxify reads the repository files directly and caches each file read for one refresh. It does not start git.
 `branch` is empty on a Remote Environment or a detached HEAD.
 
+`tag` is the Tag's name, as the record stores it. `tag_count` is the number of the Topic's Tags.
+`topic_tags` is the Topic's Tags as plain text, such as `#work #personal`. It is also on Session, Window, Pane and Agent rows, for their Topic. The color of a
+Tag is not a Format value: the card draws it. With Tags off, these values are empty.
+
 The default Formats preserve the existing text. Window and Pane Summaries are empty.
 
 | Line | Default Format |
@@ -740,3 +836,4 @@ The default Formats preserve the existing text. Window and Pane Summaries are em
 | Pane title | `#{pane_label}` |
 | Agent title | `#{pane_label}` |
 | Agent Summary | `#{agent_group}` |
+| Topic Tags | `#{T:#{tag}}` |

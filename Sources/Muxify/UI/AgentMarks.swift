@@ -34,17 +34,31 @@ struct AgentMarkSpine: View {
     }
 }
 
-extension AgentColor {
+extension MarkColor {
+    /// A pair follows the appearance of the view that draws it.
     var color: Color {
+        switch self {
+        case .single(let color):
+            return Color(nsColor: color.nsColor)
+        case .pair(let light, let dark):
+            return Color(nsColor: NSColor(name: nil) { appearance in
+                appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark.nsColor : light.nsColor
+            })
+        }
+    }
+}
+
+extension MarkColor.Single {
+    var nsColor: NSColor {
         switch self {
         case .system(let name):
             let colors: [SystemColorName: NSColor] = [
                 .blue: .systemBlue, .orange: .systemOrange, .red: .systemRed, .green: .systemGreen, .yellow: .systemYellow,
                 .purple: .systemPurple, .pink: .systemPink, .teal: .systemTeal, .gray: .systemGray,
             ]
-            return Color(nsColor: colors[name]!)
+            return colors[name]!
         case .rgb(let red, let green, let blue):
-            return Color(red: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255)
+            return NSColor(srgbRed: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255, alpha: 1)
         }
     }
 }

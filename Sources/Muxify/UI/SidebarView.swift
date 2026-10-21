@@ -42,6 +42,7 @@ struct SidebarView: View {
         }
         .onChange(of: store.selectedWindowID, initial: true) { _, _ in store.updateTopicSelection() }
         .onChange(of: store.topics.activeTopic) { _, _ in store.updateTopicSelection() }
+        .onChange(of: store.topics.activeTopicGroup) { _, _ in store.updateTopicSelection() }
         // Moving to another Session (click, tmux navigation, new Window) opens its card.
         .onChange(of: store.selectedWindow?.sessionName, initial: true) { _, name in
             guard let name, !store.openSessionCards.contains(name) else { return }
@@ -109,18 +110,19 @@ private struct TopicsSection: View {
                     // such as Homerow clicks its centre, on whichever card is there.
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(model.rows) { topic in
-                            let order = orderedCardIDs(pinned: topic.isPinned)
+                            let order = model.cardOrder(pinned: topic.isPinned)
                             if case .locked(let sessionID) = topic.id {
                                 LockedCard(store: store, row: topic, sessionID: sessionID, titles: model.titles,
                                            holdsSelection: topic.id == model.activeTopic,
                                            showsAllRows: showingAllRows.contains(topic.id),
                                            onShowAllRows: { showingAllRows.insert(topic.id) },
-                                           drag: drag, order: order, neighbors: neighbors(of: topic.id, in: order))
+                                           drag: drag, order: order, neighbors: model.neighbors(of: topic.id))
                             } else {
                                 TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
                                           showsAllRows: showingAllRows.contains(topic.id),
                                           onShowAllRows: { showingAllRows.insert(topic.id) },
-                                          drag: drag, order: order, neighbors: neighbors(of: topic.id, in: order), rename: renameTopic)
+                                          place: .list(TopicListPlace(drag: drag, order: order, neighbors: model.neighbors(of: topic.id),
+                                                                      rename: renameTopic)))
                             }
                         }
                         if let opened = model.openedNoTopicSession { noTopicCard(opened) }
@@ -141,6 +143,7 @@ private struct TopicsSection: View {
                     ScrollView {
                         groupRows.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { groupsHeight = $0 }
                     }
+                    .coordinateSpace(.named(TopicCard.groupsViewport))
                     .scrollIndicators(.never)
                     .frame(height: min(groupsHeight, proxy.size.height / 3))
                 }
@@ -190,10 +193,14 @@ private struct TopicsSection: View {
                 .accessibilityIdentifier(group.kind.accessibilityID)
                 .accessibilityValue(group.isExpanded ? "expanded" : "collapsed")
                 if group.isExpanded {
-                    ForEach(group.topics) { topic in
-                        GroupedTopicRow(store: store, topic: topic)
-                        if topic.isExpanded { TopicChildren(store: store, topic: topic, titles: model.titles) }
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(group.topics) { topic in
+                            TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
+                                      showsAllRows: showingAllRows.contains(topic.id),
+                                      onShowAllRows: { showingAllRows.insert(topic.id) }, place: .group)
+                        }
                     }
+                    .padding(.vertical, 2)
                     if group.hiddenCount > 0 {
                         Button("Show \(min(group.hiddenCount, TopicGroupsState.pageSize)) more") { store.topicGroups.showMoreSettled() }
                             .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
@@ -204,17 +211,6 @@ private struct TopicsSection: View {
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
-    }
-
-    /// The Pinned Topic cards, or the Topic and Locked cards that are not Pinned, in list order: a drag or Move Up
-    /// and Move Down reorders a card among these only.
-    private func orderedCardIDs(pinned: Bool) -> [TopicListID] {
-        model.rows.compactMap { row in row.isPinned == pinned ? row.id.listID : nil }
-    }
-
-    private func neighbors(of id: TopicGroupID, in order: [TopicListID]) -> CardNeighbors {
-        guard let id = id.listID, let index = order.firstIndex(of: id) else { return CardNeighbors(above: nil, below: nil) }
-        return CardNeighbors(above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil)
     }
 
     private func renameTopic(_ id: String, suggest: Bool = false) {
@@ -231,22 +227,15 @@ private extension View {
     }
 }
 
-/// The Sessions of a Snoozed or Settled Topic row the user opened, each with its Window and Pane rows.
-/// A Settled Topic's Sessions are remembered ones: their rows are dimmed and do nothing on click.
-private struct TopicChildren: View {
+/// The Sessions a Settled Topic's opened card lists: remembered ones, whose rows are dimmed and do nothing on click.
+private struct RememberedSessions: View {
     let store: WorkspaceStore
     let topic: TopicsModel.Row
-    let titles: [String: String]
 
     var body: some View {
         ForEach(topic.sessions) { session in
-            SessionHeading(store: store, topic: topic, session: session)
-            switch session.contents {
-            case .live(let children):
-                ForEach(children.items) { item in
-                    TopicItemRow(store: store, item: item, titles: titles, isDimmed: topic.kind != .open)
-                }
-            case .remembered(let windows):
+            if case .remembered(let windows) = session.contents {
+                SessionHeading(store: store, topic: topic, session: session)
                 ForEach(windows) { window in
                     HStack(spacing: 6) {
                         Image(systemName: "clock.arrow.circlepath").font(.system(size: 11)).frame(width: 14)
@@ -261,7 +250,7 @@ private struct TopicChildren: View {
                 }
             }
         }
-        .padding(.leading, 12)
+        Color.clear.frame(height: 16)
     }
 }
 
@@ -396,80 +385,21 @@ private struct GroupHeader: View {
     }
 }
 
-/// A Topic row inside the Snoozed or Settled group. Its Unsnooze or Reopen button is always shown.
-private struct GroupedTopicRow: View {
-    let store: WorkspaceStore
-    let topic: TopicsModel.Row
+/// Where a Topic card sits. In the Topics list the card has a Hint, moves by a drag and by Move Up and Move Down, and
+/// offers Settle. In the Snoozed or Settled group it has none of these: closed it shows only its title and wake time,
+/// and a press opens or closes it without going to the Topic.
+private enum TopicCardPlace {
+    case list(TopicListPlace)
+    case group
+}
 
-    private var topicID: String? {
-        if case .topic(let id) = topic.id { return id }
-        return nil
-    }
-
-    private var details: [String] {
-        switch topic.kind {
-        case .open: return []
-        case .snoozed(let wake): return [wake] + (topic.idleLabel.map { [$0] } ?? [])
-        case .settled(let detail): return detail.isEmpty ? [] : [detail]
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Button {
-                store.updateTopicSelection()
-                store.topicSelection.setTopic(topic.id, open: !topic.isExpanded)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: topic.isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .bold)).frame(width: 10)
-                    Text(topic.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                    if let mark = topic.mark { RowMarkView(mark: mark) }
-                    if topic.isPinned { PinMark() }
-                    Spacer(minLength: 4)
-                    Text(details.joined(separator: " · ")).font(.system(size: 10)).lineLimit(1).truncationMode(.tail)
-                }
-                .padding(.leading, 8).frame(height: 26)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier(topic.id.accessibilityID)
-            .accessibilityValue(([topic.isExpanded ? "expanded" : "collapsed"] + (topic.isPinned ? ["Pinned"] : []) + details + [topic.mark?.rawValue].compactMap { $0 })
-                .joined(separator: ", "))
-            .accessibilityActions {
-                if let topicID { Button("Forget Topic…") { store.presentForgetTopic(topicID) }.disabled(store.changingTopic) }
-                if case .snoozed = topic.kind, let topicID {
-                    Button("Settle…") { store.presentSettleTopic(topicID) }.disabled(store.changingTopic)
-                    Button("Snooze again…") { store.presentSnooze([.topic(topicID)], from: .until) }.disabled(store.changingTopic)
-                }
-            }
-            if let topicID {
-                switch topic.kind {
-                case .snoozed:
-                    Button("Unsnooze") { store.unsnoozeTopic(topicID) }
-                        .topicLink()
-                        .accessibilityIdentifier("unsnooze-topic-" + topicID)
-                case .settled:
-                    Button("Reopen…") { store.showEmptyTopic(topicID) }
-                        .topicLink()
-                        .accessibilityIdentifier("reopen-topic-" + topicID)
-                case .open:
-                    EmptyView()
-                }
-            }
-        }
-        .controlSize(.small)
-        .disabled(store.changingTopic)
-        .padding(.trailing, 8)
-        .opacity(0.5)
-        .contextMenu {
-            if let topicID { Button("Forget Topic…") { store.presentForgetTopic(topicID) }.disabled(store.changingTopic) }
-            if case .snoozed = topic.kind, let topicID {
-                Button("Settle…") { store.presentSettleTopic(topicID) }.disabled(store.changingTopic)
-                Button("Snooze again…") { store.presentSnooze([.topic(topicID)], from: .until) }.disabled(store.changingTopic)
-            }
-        }
-    }
+/// What a card in the Topics list needs to move among the cards with its Pin.
+private struct TopicListPlace {
+    let drag: LongPressDrag<TopicListID>
+    /// The Topic and Locked cards with this card's pin, in list order, among which it moves.
+    let order: [TopicListID]
+    let neighbors: CardNeighbors
+    let rename: (String, Bool) -> Void
 }
 
 private struct TopicCard: View {
@@ -479,21 +409,42 @@ private struct TopicCard: View {
     let holdsSelection: Bool
     let showsAllRows: Bool
     let onShowAllRows: () -> Void
-    let drag: LongPressDrag<TopicListID>
-    /// The Topic and Locked cards with this card's pin, in list order, among which it moves.
-    let order: [TopicListID]
-    let neighbors: CardNeighbors
-    let rename: (String, Bool) -> Void
+    let place: TopicCardPlace
     @State private var sessionDrag = LongPressDrag<String>(spacing: CardSpacing.block)
 
     /// The Topic list's scroll view, in which an open card's header sticks to the top.
     static let viewport = "topics-viewport"
+    /// The scroll view of the Snoozed and Settled groups.
+    static let groupsViewport = "topic-groups-viewport"
+
+    private var list: TopicListPlace? {
+        if case .list(let list) = place { return list }
+        return nil
+    }
+
+    /// A closed card in a group is dimmed, as the group is what the user put aside.
+    private var restingOpacity: Double {
+        if list == nil, !topic.isExpanded { return 0.5 }
+        return topic.hasNoLiveSession ? 0.55 : 1
+    }
 
     var body: some View {
-        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.mark, viewport: Self.viewport, restingOpacity: topic.hasNoLiveSession ? 0.55 : 1) {
+        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.mark,
+                    viewport: list == nil ? Self.groupsViewport : Self.viewport, restingOpacity: restingOpacity) {
             header
         } content: {
-            CardList(blocks: topic.sessions.compactMap { session in
+            if case .settled = topic.kind {
+                RememberedSessions(store: store, topic: topic)
+            } else {
+                sessionList
+            }
+        }
+        .cardCorner { corner.opacity(restingOpacity) }
+        .modifier(CardItem(list: list, listID: listID))
+    }
+
+    private var sessionList: some View {
+        CardList(blocks: topic.sessions.compactMap { session in
                          guard case .live(let children) = session.contents else { return nil }
                          return CardBlock(id: session.id.session, items: children.items)
                      },
@@ -506,17 +457,32 @@ private struct TopicCard: View {
             } row: { item in
                 TopicItemRow(store: store, item: item, titles: titles, isDimmed: topic.kind != .open)
             }
-        }
-        .cardCorner {
-            if case .topic(let id) = topic.id {
+    }
+
+    /// The Topic's own action: Settle in the Topics list, Unsnooze or Reopen… in a group.
+    @ViewBuilder
+    private var corner: some View {
+        if case .topic(let id) = topic.id {
+            switch (list, topic.kind) {
+            case (.some, _):
                 Button("Settle") { store.presentSettleTopic(id) }
                     .topicLink()
                     .disabled(store.changingTopic)
                     .accessibilityIdentifier("settle-topic-" + id)
-                    .opacity(topic.hasNoLiveSession ? 0.55 : 1)
+            case (nil, .snoozed):
+                Button("Unsnooze") { store.unsnoozeTopic(id) }
+                    .topicLink()
+                    .disabled(store.changingTopic)
+                    .accessibilityIdentifier("unsnooze-topic-" + id)
+            case (nil, .settled):
+                Button("Reopen…") { store.showEmptyTopic(id) }
+                    .topicLink()
+                    .disabled(store.changingTopic)
+                    .accessibilityIdentifier("reopen-topic-" + id)
+            case (nil, .open):
+                EmptyView()
             }
         }
-        .longPressDragItem(listID ?? .topic(""), drag: drag, shown: order, cornerRadius: 9)
     }
 
     /// How a Session line moves within this Topic. A Snoozed or Settled Topic's lines do not move.
@@ -533,78 +499,126 @@ private struct TopicCard: View {
         store.sidebarText(.topic, context: store.sidebarFormatContexts.topics[topic.id])
     }
 
+    /// The wake time of a Snoozed Topic, or the outcome or settle date of a Settled one.
+    private var groupDetail: String? {
+        switch topic.kind {
+        case .open: return nil
+        case .snoozed(let wake): return wake
+        case .settled(let detail): return detail.isEmpty ? nil : detail
+        }
+    }
+
+    private var wake: String? {
+        if case .snoozed(let wake) = topic.kind { return wake }
+        return nil
+    }
+
     private var header: some View {
         CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned,
-                   hintTarget: namedTopicID.map { .topic($0) },
-                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.idleLabel.map { [$0] } ?? []),
-                   summary: formatted.summary, reservesCorner: true) {
-            if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
+                   hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
+                   notes: (topic.isPinned ? ["Pinned"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
+                   summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth : CardCorner.width,
+                   titleNote: list == nil && !topic.isExpanded ? wake : nil, tags: tags) {
+            if list != nil || topic.isExpanded {
+                if list == nil, let detail = groupDetail {
+                    Text(wake.map { $0 == SnoozeDeadline.never.wakeLabel ? "until Unsnooze" : "wakes " + $0 } ?? detail)
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
+            }
         }
-        .longPressDrag(listID ?? .topic(""), drag: drag, isEnabled: listID != nil && !store.changingTopic, onTap: press) { drop in
+        .modifier(CardHandle(list: list, listID: listID, isEnabled: !store.changingTopic, onTap: press, onDrop: { drop in
             if let listID { store.moveTopic(listID, to: drop.topicPlacement) }
-        }
+        }))
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(topic.id.accessibilityID)
         .accessibilityActions {
-            Button("Go to Topic") { store.goToTopic(topic.id) }
-            if case .topic(let id) = topic.id {
-                Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
-                pinButton(id)
-                CardMoveButtons(store: store, id: .topic(id), neighbors: neighbors)
-                if !store.topicConfig.titleCommandFallbacks.isEmpty {
-                    Button("Suggest title from Agents") {
-                        DispatchQueue.main.async { rename(id, true) }
-                    }
-                    .disabled(store.changingTopic)
-                }
-                Button("Rename Topic…") {
-                    DispatchQueue.main.async { rename(id, false) }
-                }
-                .disabled(store.changingTopic)
-                Button("Add a Project…") { store.presentAddProject(toTopic: id) }
-                    .disabled(store.changingTopic)
-                Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
-                    .disabled(store.changingTopic)
-            }
+            if let list { listActions(list) } else { groupActions }
         }
         .contextMenu {
-            Button("Go to Topic") { store.goToTopic(topic.id) }
-                .accessibilityIdentifier("go-to-topic")
-            if case .topic(let id) = topic.id {
-                Divider()
-                if topic.isDormant {
-                    Button("Reopen") { store.reopenTopic(id, .reopen) }
-                        .accessibilityIdentifier("reopen-topic-" + id)
-                        .disabled(store.changingTopic)
-                    Button("Start Fresh") { store.reopenTopic(id, .startFresh) }
-                        .accessibilityIdentifier("start-fresh-topic-" + id)
-                        .disabled(store.changingTopic)
-                }
-                Button("Snooze…") { store.presentSnooze([.topic(id)], from: .until) }
-                    .accessibilityIdentifier("snooze-topic").disabled(store.changingTopic)
-                Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
-                    .accessibilityIdentifier("zen-topic").disabled(store.changingTopic)
-                Button("Forget Topic…") { store.presentForgetTopic(id) }
-                    .accessibilityIdentifier("forget-topic").disabled(store.changingTopic)
-                Button("Settle Topic…") { store.presentSettleTopic(id) }
-                    .accessibilityIdentifier("settle-topic")
-                    .disabled(store.changingTopic)
-                Divider()
-                if !store.topicConfig.titleCommandFallbacks.isEmpty {
-                    Button("Suggest title from Agents") { rename(id, true) }
-                        .accessibilityIdentifier("suggest-topic-title")
-                        .disabled(store.changingTopic)
-                }
-                Button("Rename Topic…") { rename(id, false) }
-                    .accessibilityIdentifier("rename-topic")
-                    .disabled(store.changingTopic)
-                Button("Add a Project…") { store.presentAddProject(toTopic: id) }
-                    .accessibilityIdentifier("add-topic-project")
-                    .disabled(store.changingTopic)
-                Divider()
-                pinButton(id)
-                CardMoveButtons(store: store, id: .topic(id), neighbors: neighbors)
+            if let list { listMenu(list) } else { groupActions }
+        }
+        .cardTagsOverlay(tags, onPress: press)
+    }
+
+    /// A closed card in a group shows no Tags.
+    private var tags: CardTags? { list != nil || topic.isExpanded ? store.cardTags(topic) : nil }
+
+    /// The actions of a card in a group: those of the Snoozed or Settled Topic, and Pin.
+    @ViewBuilder
+    private var groupActions: some View {
+        if case .topic(let id) = topic.id {
+            Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
+            if case .snoozed = topic.kind {
+                Button("Settle…") { store.presentSettleTopic(id) }.disabled(store.changingTopic)
+                Button("Snooze again…") { store.presentSnooze(id) }.disabled(store.changingTopic)
             }
+            pinButton(id)
+        }
+    }
+
+    @ViewBuilder
+    private func listActions(_ list: TopicListPlace) -> some View {
+        Button("Go to Topic") { store.goToTopic(topic.id) }
+        if case .topic(let id) = topic.id {
+            Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
+            pinButton(id)
+            CardMoveButtons(store: store, id: .topic(id), neighbors: list.neighbors)
+            if !store.topicConfig.titleCommandFallbacks.isEmpty {
+                Button("Suggest title from Agents") {
+                    DispatchQueue.main.async { list.rename(id, true) }
+                }
+                .disabled(store.changingTopic)
+            }
+            Button("Rename Topic…") {
+                DispatchQueue.main.async { list.rename(id, false) }
+            }
+            .disabled(store.changingTopic)
+            Button("Add a Project…") { store.presentAddProject(toTopic: id) }
+                .disabled(store.changingTopic)
+            Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
+                .disabled(store.changingTopic)
+        }
+    }
+
+    @ViewBuilder
+    private func listMenu(_ list: TopicListPlace) -> some View {
+        Button("Go to Topic") { store.goToTopic(topic.id) }
+            .accessibilityIdentifier("go-to-topic")
+        if case .topic(let id) = topic.id {
+            Divider()
+            if topic.isDormant {
+                Button("Reopen") { store.reopenTopic(id, .reopen) }
+                    .accessibilityIdentifier("reopen-topic-" + id)
+                    .disabled(store.changingTopic)
+                Button("Start Fresh") { store.reopenTopic(id, .startFresh) }
+                    .accessibilityIdentifier("start-fresh-topic-" + id)
+                    .disabled(store.changingTopic)
+            }
+            Button("Snooze…") { store.presentSnooze(id) }
+                .accessibilityIdentifier("snooze-topic").disabled(store.changingTopic)
+            Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
+                .accessibilityIdentifier("zen-topic").disabled(store.changingTopic)
+            Button("Forget Topic…") { store.presentForgetTopic(id) }
+                .accessibilityIdentifier("forget-topic").disabled(store.changingTopic)
+            Button("Settle Topic…") { store.presentSettleTopic(id) }
+                .accessibilityIdentifier("settle-topic")
+                .disabled(store.changingTopic)
+            Divider()
+            if !store.topicConfig.titleCommandFallbacks.isEmpty {
+                Button("Suggest title from Agents") { list.rename(id, true) }
+                    .accessibilityIdentifier("suggest-topic-title")
+                    .disabled(store.changingTopic)
+            }
+            Button("Rename Topic…") { list.rename(id, false) }
+                .accessibilityIdentifier("rename-topic")
+                .disabled(store.changingTopic)
+            Button("Add a Project…") { store.presentAddProject(toTopic: id) }
+                .accessibilityIdentifier("add-topic-project")
+                .disabled(store.changingTopic)
+            Divider()
+            pinButton(id)
+            CardMoveButtons(store: store, id: .topic(id), neighbors: list.neighbors)
         }
     }
 
@@ -614,10 +628,10 @@ private struct TopicCard: View {
             .disabled(store.changingTopic)
     }
 
-    /// A press on the Active Topic's header opens or closes its card; on another Topic's header it goes to that
-    /// Topic, whose card then opens as the Active Topic's.
+    /// A press on the Active Topic's header, or on a card in a group, opens or closes the card; on another Topic's
+    /// header in the Topics list it goes to that Topic, whose card then opens as the Active Topic's.
     private func press() {
-        guard !holdsSelection else { return toggle() }
+        guard !holdsSelection, list != nil else { return toggle() }
         store.updateTopicSelection()
         withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(topic.id, open: true) }
         store.goToTopic(topic.id)
@@ -636,10 +650,35 @@ private struct TopicCard: View {
     private var listID: TopicListID? { topic.id.listID }
 }
 
-/// The Topic and Locked cards right above and below a card, among those with its pin.
-private struct CardNeighbors {
-    let above: TopicListID?
-    let below: TopicListID?
+/// The press on a Topic card's header: in the Topics list a click, or a long press that drags the card; in a group a click.
+private struct CardHandle: ViewModifier {
+    let list: TopicListPlace?
+    let listID: TopicListID?
+    let isEnabled: Bool
+    let onTap: () -> Void
+    let onDrop: (DropPlacement<TopicListID>) -> Void
+
+    func body(content: Content) -> some View {
+        if let list, let listID {
+            content.longPressDrag(listID, drag: list.drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop)
+        } else {
+            content.onTapGesture(perform: onTap).takesFirstClick()
+        }
+    }
+}
+
+/// A Topic card in the Topics list is an item of the list's drag; a card in a group does not move.
+private struct CardItem: ViewModifier {
+    let list: TopicListPlace?
+    let listID: TopicListID?
+
+    func body(content: Content) -> some View {
+        if let list, let listID {
+            content.longPressDragItem(listID, drag: list.drag, shown: list.order, cornerRadius: 9)
+        } else {
+            content
+        }
+    }
 }
 
 /// Move Up and Move Down of a Topic or Locked card: the Sidebar's own order change, which the palette does not show.
@@ -649,9 +688,9 @@ private struct CardMoveButtons: View {
     let neighbors: CardNeighbors
 
     var body: some View {
-        Button("Move Up") { if let above = neighbors.above { store.moveTopic(id, to: .before(above)) } }
+        Button("Move Up") { if let placement = neighbors.placement(.previous) { store.moveTopic(id, to: placement) } }
             .disabled(neighbors.above == nil || store.changingTopic)
-        Button("Move Down") { if let below = neighbors.below { store.moveTopic(id, to: .after(below)) } }
+        Button("Move Down") { if let placement = neighbors.placement(.next) { store.moveTopic(id, to: placement) } }
             .disabled(neighbors.below == nil || store.changingTopic)
     }
 }

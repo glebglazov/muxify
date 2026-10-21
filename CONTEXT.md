@@ -67,8 +67,12 @@ The Topic or Locked Session that Muxify opens after the user Snoozes or Settles 
 _Avoid_: following Topic, previous Topic, last Topic
 
 **Tag**:
-An optional short name on a Topic, written with `#`, such as `#backend`. A Topic can have several Tags. The Tags that Muxify suggests are the Tags on the Topic records that exist now.
+An optional short name on a Topic, written with `#`, such as `#backend`, that is one of the Tags the Config defines. A Topic can have several Tags. A Tag shows as its name everywhere, and it can have a colour.
 _Avoid_: label, category, folder, group
+
+**Tag Mark**:
+The small coloured square that shows one Tag of a Topic on its card, in the colour of that Tag.
+_Avoid_: dot, badge, chip (when you mean the mark on a card)
 
 **Settle**:
 To mark a Topic as done. It leaves the Sidebar, its Sessions are killed or leave the Topic, and its record stays so that it can be reopened.
@@ -95,7 +99,7 @@ An open Topic that has no live Session and remembers no Session: the user remove
 _Avoid_: Dormant (when it remembers no Session), blank, cleared
 
 **Snooze**:
-To hide one or more open Topics until a time, or until the user Unsnoozes them. Their Sessions and Agents keep running, but their Agents show no Notification until they come back. A Snooze on a Topic that is already Snoozed replaces its time. A Snoozed Topic loses its place in the Topics list, unless Zen Snoozed it: it comes back at the end that the Config gives to new Topics, among the Topics with its Pin, and the Topics that come back together keep their earlier order among themselves.
+To hide one or more open Topics until a time, or until the user Unsnoozes them. Their Sessions and Agents keep running, but their Agents show no Notification until they come back. A Snooze on a Topic that is already Snoozed replaces its time. The Snoozed Topics are listed by the time they wake, soonest first, and the Topics Snoozed until the user Unsnoozes them come last. A Snoozed Topic loses its place in the Topics list, unless Zen Snoozed it: it comes back at the end that the Config gives to new Topics, among the Topics with its Pin, and the Topics that come back together keep their earlier order among themselves.
 _Avoid_: hide, park, defer, archive, mass snooze
 
 **Unsnooze**:
@@ -107,7 +111,7 @@ A time when every open Topic except one is Snoozed, so the user can work on that
 _Avoid_: focus, focus mode, do not disturb, mass snooze
 
 **Pin**:
-To keep a Topic above every Topic that is not Pinned, in each list of Topics, until you unpin it. A Pinned Topic can be Snoozed as usual, and it is still Pinned when it comes back.
+To keep a Topic above every Topic that is not Pinned, in each list of Topics except the Snoozed Topics, until you unpin it. A Pinned Topic can be Snoozed as usual, and it is still Pinned when it comes back.
 _Avoid_: favorite, star, sticky, keep on top
 
 **Lock**:
@@ -137,7 +141,7 @@ Searching the text of the active Tab's page, its iframes included, from a find b
 _Avoid_: search (when you mean the page text), Find (alone)
 
 **Vim Keys**:
-The letter keys h, j, k, l, d, u, gg and G, which scroll the active Tab's page as the arrow keys, Page Down, Page Up, Home and End do, when the Browser has Focus and the page does not use the key itself. They are on by default and the Config can turn them off.
+The letter keys h, j, k, l, d, u, gg and G, which scroll the active Tab's page as the arrow keys, Page Down, Page Up, Home and End do, and H and L, which go back and forward as the Back and Forward buttons do, when the Browser has Focus and the page does not use the key itself. They are on by default and the Config can turn them off.
 _Avoid_: vim mode, keyboard navigation
 
 ### Simulator
@@ -253,9 +257,9 @@ _Avoid_: switcher, launcher, finder, sessionizer, Go to Topic
 One kind of thing a Command Palette searches: Topics, Sessions (a row for each Project with the Sessions in it, and a row for each Session outside every Project), Windows, Agents or Commands.
 _Avoid_: provider, category, section
 
-**Pick step**:
-A palette step that collects Topics and Tags as chips in the search field, one pick at a time, before an Action on all the Topics they name. A Tag chip names every Topic that has the Tag. Snooze Topics starts with it.
-_Avoid_: choose rows, mark, multi-select, selection
+**Check step**:
+A palette step that lists Topics with a box on each, and Tag rows that check or uncheck all their Topics in the list, before an Action on the checked Topics. A Tag row is not a member of the set. Snooze Topics and Unsnooze Topics start with it.
+_Avoid_: pick step, chips, mark, multi-select, selection
 
 ### Git
 

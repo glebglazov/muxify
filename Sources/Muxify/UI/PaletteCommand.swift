@@ -11,13 +11,19 @@ enum PaletteCommand: String, CaseIterable {
     case moveSession = "Move Session"
     case movePaneWithTab = "Move Pane with Active Tab"
     case addProject = "Add a Project"
-    case snoozeTopic = "Snooze Topic"
     case snoozeTopics = "Snooze Topics…"
+    case snoozeTopic = "Snooze Topic"
     case settleTopic = "Settle Topic"
     case removeSessionFromTopic = "Remove Session from Topic"
     case forgetTopic = "Forget Topic"
     case renameTopic = "Rename Topic"
     case editTags = "Edit Tags…"
+    case moveTopicUp = "Move Topic Up"
+    case moveTopicDown = "Move Topic Down"
+    case pinTopic = "Pin Topic"
+    case unpinTopic = "Unpin Topic"
+    case unsnoozeTopics = "Unsnooze Topics…"
+    case unsnoozeTopic = "Unsnooze Topic"
     case lockSession = "Lock Session"
     case unlockSession = "Unlock Session"
     case zen = "Zen"
@@ -75,6 +81,11 @@ enum PaletteCommand: String, CaseIterable {
         case .renameTopic: .renameTopic
         case .zen, .endZen: .toggleZen
         case .lockSession, .unlockSession: .toggleLock
+        case .moveTopicUp: .moveTopicUp
+        case .moveTopicDown: .moveTopicDown
+        case .pinTopic, .unpinTopic: .togglePinTopic
+        case .unsnoozeTopic: .unsnoozeTopic
+        case .unsnoozeTopics: .unsnoozeTopics
         case .newAppWindow: .newAppWindow
         case .maximize, .restore: .toggleMaximize
         case .maximizeTerminal: .toggleMaximizeTerminal
@@ -124,12 +135,19 @@ extension CommandPalette {
             case .newTopic: return !store.isRemote && !store.changingTopic
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
-            case .addProject, .snoozeTopic, .settleTopic, .editTags: return canChangeTopics && hasOpenTopic
+            case .addProject, .snoozeTopic, .settleTopic: return canChangeTopics && hasOpenTopic
+            case .editTags: return canChangeTopics && hasOpenTopic && store.topicConfig.tags != nil
             case .forgetTopic, .renameTopic: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
             case .removeSessionFromTopic:
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
                     && store.selectedWindow?.topicID == store.activeTopicID
             case .snoozeTopics: return canChangeTopics && store.topicWatcher.records.contains { $0.settledAt == nil }
+            case .moveTopicUp: return canChangeTopics && store.activeCardMove(.previous) != nil
+            case .moveTopicDown: return canChangeTopics && store.activeCardMove(.next) != nil
+            case .pinTopic, .unpinTopic:
+                guard canChangeTopics, let topic = store.pinnableActiveTopic else { return false }
+                return topic.isPinned == (command == .unpinTopic)
+            case .unsnoozeTopic, .unsnoozeTopics: return canChangeTopics && !store.topics.snoozedRows.isEmpty
             case .lockSession, .unlockSession:
                 guard canChangeTopics, let id = store.selectedWindow?.sessionID, let locked = store.lockState(ofSession: id) else { return false }
                 return locked == (command == .unlockSession)
@@ -187,7 +205,7 @@ extension CommandPalette {
         }
         switch command {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addProject, .snoozeTopic, .snoozeTopics, .settleTopic, .zen,
-             .forgetTopic, .renameTopic, .editTags: break
+             .forgetTopic, .renameTopic, .editTags, .unsnoozeTopic, .unsnoozeTopics: break
         default: close(restoringFocus: false)
         }
         switch command {
@@ -200,8 +218,9 @@ extension CommandPalette {
         case .moveWindow: store.presentMoveWindow(keepingHistory: true)
         case .moveSession: store.presentMoveSession(keepingHistory: true)
         case .addProject: store.presentAddProject(keepingHistory: true)
-        case .snoozeTopic: if let id = store.activeTopicID { store.presentSnooze([.topic(id)], from: .until, keepingHistory: true) }
-        case .snoozeTopics: store.presentSnooze([], from: .pick, keepingHistory: true)
+        case .snoozeTopic: if let id = store.activeTopicID { store.presentSnooze(id, keepingHistory: true) }
+        case .snoozeTopics: store.presentCheck(CheckDraft(action: .snooze), keepingHistory: true)
+        case .unsnoozeTopics: store.presentCheck(CheckDraft(action: .unsnooze), keepingHistory: true)
         case .settleTopic: store.presentSettleTopic(keepingHistory: true)
         case .removeSessionFromTopic: if let window = store.selectedWindow { store.removeFromTopic(window) }
         case .forgetTopic: if let id = store.activeTopicID { store.presentForgetTopic(id, keepingHistory: true) }
@@ -210,6 +229,10 @@ extension CommandPalette {
         case .zen: store.toggleZenOfActiveTopic(keepingHistory: true)
         case .endZen: store.endZen()
         case .lockSession, .unlockSession: store.toggleLockOfCurrentSession()
+        case .moveTopicUp: store.moveActiveCard(.previous)
+        case .moveTopicDown: store.moveActiveCard(.next)
+        case .pinTopic, .unpinTopic: store.togglePinOfActiveTopic()
+        case .unsnoozeTopic: store.presentUnsnoozeTopic(keepingHistory: true)
         case .nextSession, .previousSession, .nextTopic, .previousTopic:
             if let step = command.keybinding?.step { store.step(step.level, step.direction) }
         case .newAppWindow: store.onNewAppWindow?()

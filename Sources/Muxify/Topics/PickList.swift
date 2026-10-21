@@ -20,13 +20,20 @@ struct SearchField: Equatable {
 
     let text: String
     let place: Place
+    /// The colour of a `.tag` field's chip: its Tag's colour in the Config.
+    var color: MarkColor? = nil
 
     static func title(_ text: String) -> SearchField { SearchField(text: text, place: .title) }
     static func typeWord(_ text: String) -> SearchField { SearchField(text: text, place: .typeWord) }
     static func detail(_ text: String) -> SearchField { SearchField(text: text, place: .detail) }
     static func hidden(_ text: String) -> SearchField { SearchField(text: text, place: .hidden) }
     static func label(_ text: String) -> SearchField { SearchField(text: text, place: .label) }
-    static func tag(_ tag: Tag) -> SearchField { SearchField(text: tag.description, place: .tag) }
+    static func tag(_ definition: TagDefinition) -> SearchField {
+        SearchField(text: definition.tag.description, place: .tag, color: definition.color)
+    }
+
+    /// The chips of a Topic's Tags in the palette. A Tag the Config no longer defines is not listed (ADR 0034).
+    static func tags(_ shown: [ShownTag]) -> [SearchField] { shown.compactMap(\.definition).map(tag) }
 }
 
 /// The best field per word, summed over words. Nil when some word matches no field.
@@ -111,7 +118,7 @@ struct PickCandidate<Payload: Equatable> {
     /// The Session's last activity in tmux, which breaks a tie after the last visit.
     var activity = 0
     let pick: Pick<Payload>
-    /// What ⌃Y types at the prompt of the terminal behind the picker, as pop's Yank does.
+    /// The text ⌃Y types where the Focus was before the picker opened, as pop's Yank does. A terminal gets it as one shell word.
     var paste: String? = nil
     /// The id of the Topic that ⌃S Snoozes.
     var snooze: String? = nil
@@ -128,12 +135,18 @@ struct PickRow<Payload: Equatable>: Identifiable, Equatable {
     let title: Highlighted
     let detail: Highlighted
     /// The Tags of the row's Topic, each with the marks of the query.
-    var tags: [Highlighted] = []
+    var tags: [RowTag] = []
     let trailing: String
     let mark: RowMark?
     let pick: Pick<Payload>
     let paste: String?
     let snooze: String?
+}
+
+/// A Tag chip after a row's title.
+struct RowTag: Equatable {
+    let text: Highlighted
+    let color: MarkColor?
 }
 
 struct PickSection<Payload: Equatable>: Identifiable, Equatable {
@@ -216,9 +229,9 @@ enum FuzzyRanker {
     }
 
     /// The Tag fields after the title, and their marks.
-    static func tags(_ fields: [SearchField], match: FieldsMatch?) -> [Highlighted] {
+    static func tags(_ fields: [SearchField], match: FieldsMatch?) -> [RowTag] {
         fields.enumerated().dropFirst().filter { $0.element.place == .tag }.map { index, field in
-            Highlighted(text: field.text, marks: match?.positions[index] ?? [])
+            RowTag(text: Highlighted(text: field.text, marks: match?.positions[index] ?? []), color: field.color)
         }
     }
 

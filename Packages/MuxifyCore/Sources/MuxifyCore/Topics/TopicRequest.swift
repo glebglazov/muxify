@@ -353,6 +353,7 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let gitFailed = Kind(rawValue: "git_failed")
         public static let storeBusy = Kind(rawValue: "store_busy")
         public static let storeFailed = Kind(rawValue: "store_failed")
+        public static let tagUndefined = Kind(rawValue: "tag_undefined")
     }
 
     /// How far the request got before it failed.

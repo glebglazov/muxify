@@ -17,7 +17,9 @@ make verify SUITE=topics_cards_sidebar
 make verify SUITE="topics_cards_sidebar command_palette"
 ```
 
-`make verify` runs each suite in its own process, and all suites at the same time (`run.py`). It writes one line when a suite ends. The full output of a suite goes to `/tmp/muxify-verify/<suite>/last-run.log`. When a suite fails, `make verify` also writes that output.
+`make verify` runs each suite in its own process, and 10 suites at the same time (`run.py`). Set `MUXIFY_VERIFY_JOBS` to change the number. With all suites at the same time, the Mac starts processes so slowly that checks fail by chance. It writes one line when a suite ends. The full output of a suite goes to `/tmp/muxify-verify/<suite>/last-run.log`. When a suite fails, `make verify` also writes that output.
+
+A suite that fails runs again alone after the others. When it passes then, the last line names it as FLAKY, and its first output stays in `first-run.log`. `make verify` fails only when a suite fails again. A FLAKY suite has a check that depends on timing: find the cause, do not ignore it.
 
 Run one check. Build the app first, because this command does not build it:
 
@@ -66,7 +68,7 @@ Checks run while the user works. A check must not take the keyboard focus, the m
 - `hover` puts the pointer on an element for the app's hover tracking, without moving the real pointer: `sandbox.act('hover', '<identifier>')`. A later `hover` on another element moves it there.
 - `snapshot` draws the App Window into a PNG, without a screen capture, so it needs no screen recording permission: `sandbox.act('snapshot', '<identifier>', '<path>.png')` keeps only that element, and an empty identifier keeps the whole App Window. Use it for a picture of a visual change; a check asserts on the dump, not on pixels.
 - `responder` gives the class name of the first responder of each visible App Window, such as `TerminalSurfaceView` or `WKWebView`. Use it to find which view has Focus: `sandbox.driver('responder')['responders']`.
-- `click` sends a mouse down and a mouse up to the centre of an element, without the pointer: `sandbox.act('click', '<identifier>')`. Use it to test a gesture, because `press` performs the element's accessibility action and skips the gesture. The same first-click rule as for `drag` applies.
+- `click` sends a mouse down and a mouse up to the centre of an element, without the pointer: `sandbox.act('click', '<identifier>')`. Use it to test a gesture, because `press` performs the element's accessibility action and skips the gesture. `command_key=True` holds ⌘ through the click. The same first-click rule as for `drag` applies.
 - `drag` drags an element to another element without the pointer: `sandbox.act('drag', '<source>', '<destination>')` releases in the upper quarter of the destination, and `edge='bottom'` releases in its lower quarter. `hold=<seconds>` keeps the press still that long before it moves, as a long press does. The app stays in the background, so the source's gesture must take the first click (`takesFirstClick` in `UI/SidebarView.swift`). A system drag session follows the real pointer, so `drag` cannot drive it.
 - The Sidebar lists build only the rows they show, so a row far down is not in a dump. `sandbox.reveal('<identifier>')` scrolls the row to the top of its list, without the mouse or the keyboard, and returns the rows; every driver command takes the same `reveal=True` option.
 - The driver has no command that types keys or opens a context menu, because these take the keyboard and the mouse. Do not add one.
@@ -84,7 +86,7 @@ The terminal that runs the checks must have the Accessibility permission in Syst
 
 ## Sandbox guarantees
 
-A `Sandbox` gives each run its own root, tmux server, Config, state and app copy. `Sandbox.tmux` always names the sandbox socket with `-S`, so it cannot reach the default tmux server. The app copy has a bundle id for that run only. The Debug-only `TestDriver` (`Sources/Muxify/App/TestDriver.swift`) refuses to start if `TMUX` is set or if `TMUX_TMPDIR` is outside the sandbox. `teardown` stops only the processes that the sandbox started, by PID: the app, its tmux clients, the tmux server and each process whose command line or environment names the sandbox directory.
+A `Sandbox` gives each run its own root, tmux server, Config, state and app copy. `Sandbox.tmux` always names the sandbox socket with `-S`, so it cannot reach the default tmux server. The app copy has a bundle id for that run only. The Debug-only `TestDriver` (`Sources/Muxify/App/TestDriver.swift`) refuses to start if `TMUX` is set or if `TMUX_TMPDIR` is outside the sandbox. Under the `TestDriver` the app starts its tmux server with `-f /dev/null`, so the user's tmux config and its hooks do not act on the sandbox server. `teardown` stops only the processes that the sandbox started, by PID: the app, its tmux clients, the tmux server and each process whose command line or environment names the sandbox directory.
 
 ## Clean-up of dead runs
 

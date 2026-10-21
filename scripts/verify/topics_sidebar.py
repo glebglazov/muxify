@@ -281,3 +281,46 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
 
     def wait_session(self, name):
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=' + name).returncode == 0, 'no Session ' + name, seconds=10)
+
+    def open_card(self, key):
+        """Opens a card, a group or a grouped Topic row, each of which opens on a press.
+        Muxify closes opened Topics when the selected Window moves to another Topic.
+        A selection that arrives just before the press can open the card first, and the press then closes it,
+        so the press repeats until the card stays open."""
+        def opened():
+            rs = self.find(key)
+            if self.expanded(key, rs):
+                return rs
+            self.s.act('press', key)
+            latency, rs = self.rows_until(lambda rs: self.expanded(key, rs), seconds=REFRESH_LIMIT)
+            return rs if latency is not None else None
+        return wait(opened, key + ' did not expand')
+
+    def expand(self, key):
+        """Opens a card, or a group row, and lists all its rows."""
+        if self.s.has(key + '-more', self.open_card(key)):
+            self.s.act('press', key + '-more')
+            self.s.wait_rows(lambda rs: not self.s.has(key + '-more', rs), key + ' did not list all its rows')
+
+    def grouped(self, key, group, rs):
+        """Whether the Topic row sits in the group: the groups end the list, so the row follows the group row."""
+        ids = self.s.ids(rs)
+        return group in ids and key in ids and ids.index(key) > ids.index(group)
+
+    def settled_rows(self, rs):
+        return [key for key in self.topic_rows(rs) if self.grouped(key, 'settled-topics', rs)]
+
+    def collapse(self, key):
+        """Closes a group row. Waits for the row first: a group whose Topics are still loading has no row yet,
+        and it would then appear in its remembered open state after the check decided not to press."""
+        rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'no row ' + key)
+        if self.expanded(key, rs):
+            self.s.act('press', key)
+        self.s.wait_rows(lambda rs: not self.expanded(key, rs), key + ' did not collapse')
+
+    def remove_topics(self, prefix):
+        """Deletes the Topic files with the prefix and waits until their rows are gone, so later checks find their rows in view."""
+        for path in self.topics_dir.glob(prefix + '*.json'):
+            remove_topic(path)
+        self.s.wait_rows(lambda rs: not any(key.startswith('topic-' + prefix) for key in self.s.ids(rs)),
+                         'rows of the removed %s* Topics are still shown' % prefix)

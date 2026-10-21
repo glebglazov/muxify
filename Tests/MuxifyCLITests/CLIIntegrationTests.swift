@@ -401,6 +401,12 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(add.status, 0, add.output)
         XCTAssertEqual(add.stdout, id + "\n", "a write prints the id of the Topic it changed")
         XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["backend", "release"])
+        let undefined = try await run(cli, arguments: ["topic", "tag", "set", "backend", "bazel", "--topic", "Ship"],
+                                      environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertNotEqual(undefined.status, 0, undefined.output)
+        XCTAssertTrue(undefined.stderr.contains("#bazel") && undefined.stderr.contains("topics.tags"), undefined.stderr)
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["backend", "release"],
+                       "a Tag that the Config does not define writes nothing")
         let remove = try await run(cli, arguments: ["topic", "tag", "remove", "release", "--topic", "Ship"], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(remove.status, 0, remove.output)
         XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["backend"])
@@ -1262,7 +1268,7 @@ private final class TopicSandbox {
         tools = root.appendingPathComponent("work/tools", isDirectory: true)
         config = root.appendingPathComponent("config.yaml")
         for folder in [game, tools] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        try Data("sessions:\n  paths:\n    - path: \(root.path)/work/*\n".utf8).write(to: config)
+        try Data("sessions:\n  paths:\n    - path: \(root.path)/work/*\ntopics:\n  tags:\n    backend: {}\n    release: {}\n".utf8).write(to: config)
         let socketFolder = root.appendingPathComponent("tmux-\(getuid())", isDirectory: true)
         try FileManager.default.createDirectory(at: socketFolder, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])

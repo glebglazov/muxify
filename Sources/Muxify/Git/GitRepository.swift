@@ -762,7 +762,7 @@ enum GitRepository {
         guard !commonDirectory.isEmpty, (commonDirectory as NSString).lastPathComponent == ".git" else { return nil }
         let main = (commonDirectory as NSString).deletingLastPathComponent
         let name = (root as NSString).lastPathComponent
-        return (root as NSString).standardizingPath == (main as NSString).standardizingPath ? nil : name
+        return Folder(path: root, real: root) == Folder(path: main, real: main) ? nil : name
     }
 }
 

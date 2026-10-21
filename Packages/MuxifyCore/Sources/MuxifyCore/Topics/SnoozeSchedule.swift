@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SnoozeSchedule: Equatable {
+public enum SnoozeSchedule: Equatable, Sendable {
     case relative(Int, Calendar.Component)
     case day(Int, hour: Int, minute: Int)
     case weekday(Int, hour: Int, minute: Int)
@@ -128,7 +128,7 @@ public enum SnoozeDeadline: Codable, Hashable, Sendable {
     }
 }
 
-public struct SnoozePreset: Equatable {
+public struct SnoozePreset: Equatable, Sendable {
     public let label: String
     public let schedule: SnoozeSchedule
 

@@ -195,8 +195,9 @@ class Sandbox:
         """`env` adds to the sandbox environment, for a command whose client environment matters."""
         return subprocess.check_output(self._tmux_command(args), env=dict(self.env, **(env or {})), text=True).strip()
 
-    def tmux_ok(self, *args):
-        return subprocess.run(self._tmux_command(args), env=self.env, capture_output=True, text=True)
+    def tmux_ok(self, *args, timeout=None):
+        """The finished tmux command, whatever its status. Past `timeout` seconds it raises TimeoutExpired."""
+        return subprocess.run(self._tmux_command(args), env=self.env, capture_output=True, text=True, timeout=timeout)
 
     def tmux_client(self, session, terminal):
         """Starts a plain Client on a PTY owned by the check."""
@@ -324,12 +325,18 @@ class Sandbox:
         next read of tmux."""
         window, session = self.tmux('display-message', '-p', '-t', target, '#{window_id}|#{session_name}').split('|', 1)
         keys = ('topic-window-' + window, 'session-window-' + window)
+        last = {}
         def shown():
             rs = self.rows()
             title = next((r.get('accessibilityTitle') for r in rs if r.get('accessibilityRole') == 'AXWindow'), None)
-            return title == session and all(r.get('accessibilityValue') == 'selected'
-                                            for r in rs if r.get('accessibilityIdentifier') in keys)
-        wait(shown, 'the app does not show %s of %s' % (window, session), seconds)
+            last.update(title=title, rows={r['accessibilityIdentifier']: r.get('accessibilityValue')
+                                           for r in rs if r.get('accessibilityIdentifier') in keys})
+            return title == session and all(value == 'selected' for value in last['rows'].values())
+        try:
+            wait(shown, 'the app does not show %s of %s' % (window, session), seconds)
+        except AssertionError as error:
+            clients = self.tmux_ok('list-clients', '-F', '#{client_control_mode} #{session_name} #{window_id}').stdout
+            raise AssertionError('%s: it shows %s; tmux clients: %s' % (error, last, clients.split('\n'))) from None
 
     def wait_rows(self, predicate, message, seconds=20):
         """The first UI dump for which predicate(rows) holds."""

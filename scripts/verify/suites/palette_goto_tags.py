@@ -17,6 +17,8 @@ LATER = '2099-01-01T00:00:00Z'
 
 
 class PaletteGoToTags(PaletteFixture):
+    TAGS = {'gssect': '{}', 'gfilter': '{}', 'gzsnooze': '{}', 'gplain': '{color: green}', 'gempty': '{}'}
+
     def go_to(self, query):
         def opened():
             if not self.s.has('palette-search'):
@@ -50,6 +52,22 @@ class PaletteGoToTags(PaletteFixture):
         self.assertLess(ids.index('palette-section-topics'), ids.index('palette-section-tags'), 'the Tags section is not after Topics')
         self.assertIn('1 Topic', s.row('palette-row-tag-gssect', rs).get('accessibilityLabel', ''))
 
+    def test_tags_show_their_name_and_a_tag_with_no_topic_or_no_definition_is_not_listed(self):
+        s = self.s
+        self.topic('gd-one', 31, tags=['gplain', 'gorphan'])
+        rs = self.go_to('#')
+        rs = s.wait_rows(lambda rs: s.has('palette-row-tag-gplain', rs), 'the Tag is not listed')
+        self.assertIn('#gplain', self.text('palette-row-tag-gplain', rs), 'the Tag row does not show the Tag name')
+        self.assertFalse(s.has('palette-row-tag-gorphan', rs), 'a Tag the Config does not define is listed')
+        self.assertFalse(s.has('palette-row-tag-gempty', rs), 'a Tag that no Topic has is listed as a filter')
+        self.go_to('#gpla')
+        rs = s.wait_rows(lambda rs: s.has('palette-row-tag-gplain', rs), 'the name of a Tag does not find it')
+        self.assertIn('#gplain', s.row('palette-row-topic-gd-one', rs).get('accessibilityLabel', ''),
+                      'the Topic row does not show the name of its Tag')
+        self.assertNotIn('#gorphan', s.row('palette-row-topic-gd-one', rs).get('accessibilityLabel', ''),
+                         'the Topic row shows a Tag the Config does not define')
+        s.act('action', 'palette-search', 'Close')
+
     def test_return_on_a_tag_row_filters_by_the_tag_and_back_removes_the_filter(self):
         s = self.s
         self.topic('gf-open', 11, tags=['gfilter'])
@@ -70,18 +88,21 @@ class PaletteGoToTags(PaletteFixture):
         rs = s.wait_rows(lambda rs: not self.chips(rs) and s.has('palette-search', rs), 'Back did not remove the filter chip')
         self.assertFalse(s.has('palette-breadcrumb', rs), 'the breadcrumb stayed after the filter went')
 
-    def test_snooze_its_topics_on_a_tag_row_opens_pick_with_the_tag_as_a_chip(self):
+    def test_snooze_its_topics_on_a_tag_row_opens_check_with_the_topics_of_the_tag_checked(self):
         s = self.s
         self.topic('gz-one', 21, tags=['gzsnooze'])
         self.topic('gz-two', 22, tags=['gzsnooze'])
+        self.topic('gz-none', 23)
         self.go_to('#gzsnooze')
         s.wait_rows(lambda rs: s.has('palette-row-tag-gzsnooze', rs), 'the Tag row did not show')
         s.act('action', 'palette-row-tag-gzsnooze', 'Snooze its Topics…')
-        rs = s.wait_rows(lambda rs: 'Snooze Topics › pick' in self.text('palette-breadcrumb', rs) and self.chips(rs) == ['gzsnooze'],
-                         'Snooze its Topics… did not open the pick step with the Tag as a chip')
-        self.assertIn('→ Snooze 2 Topics…', self.text('palette-row-snooze-picked', rs))
+        checked = lambda rs, name: 'checked' in s.row('palette-row-topic-' + name, rs).get('accessibilityValue', '')
+        rs = s.wait_rows(lambda rs: 'Snooze Topics › check' in self.text('palette-breadcrumb', rs) and checked(rs, 'gz-one') and checked(rs, 'gz-two'),
+                         'Snooze its Topics… did not open the check step with the Topics of the Tag checked')
+        self.assertFalse(checked(rs, 'gz-none'), 'a Topic without the Tag is checked')
+        self.assertEqual(self.chips(rs), [], 'the check step shows a chip')
+        self.assertIn('↩ Snoozes 2 Topics…', self.text('palette-note', rs))
         s.act('action', 'palette-search', 'Close')
-
 
 if __name__ == '__main__':
     unittest.main()

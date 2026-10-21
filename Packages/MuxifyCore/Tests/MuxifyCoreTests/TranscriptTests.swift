@@ -119,6 +119,8 @@ final class TranscriptTests: XCTestCase {
         for (conversation, file) in files {
             XCTAssertEqual(roots.transcript(of: conversation)?.resolvingSymlinksInPath(), file.resolvingSymlinksInPath(), "\(conversation)")
             XCTAssertEqual(roots.kind(ofTranscriptAt: file), conversation.kind)
+            XCTAssertEqual(roots.kind(ofTranscriptAt: URL(fileURLWithPath: Folder.local(file.path).real)), conversation.kind,
+                           "through the temporary folder's /private symlink")
         }
         XCTAssertNil(roots.transcript(of: AgentConversation(kind: .claude, id: "other")))
         XCTAssertNil(roots.transcript(of: AgentConversation(kind: .claude, id: "../c-1")), "an unsafe id reads nothing")

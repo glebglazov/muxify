@@ -108,7 +108,7 @@ final class ProjectAliasTests: XCTestCase {
         var settled = record
         settled.settledAt = "2026-01-01T00:00:00Z"
         settled.sessions.append(.object(["project_path": .string("/work/vault")]))
-        XCTAssertEqual(TopicsModel.settledRow(settled, projects: [vault, game], expanded: []).sessions.map(\.projectName),
+        XCTAssertEqual(TopicsModel.settledRow(settled, projects: [vault, game], tags: nil, expanded: []).sessions.map(\.projectName),
                        ["Game Server/main", "My Obsidian"])
         let plan = TopicPlan(title: "Write notes", project: vault, records: [], sessionNames: [], id: "n")
         XCTAssertEqual(plan.sessionName, "vault/write-notes")

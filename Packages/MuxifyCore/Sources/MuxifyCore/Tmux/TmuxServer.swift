@@ -16,17 +16,27 @@ public struct TmuxServer: Sendable {
         self.init(options: ["-S", socketPath] + (configPath.map { ["-f", $0] } ?? []))
     }
 
+    /// The default socket's server, with `configPath` in place of the user's tmux config when this call starts
+    /// the server.
+    public init(configPath: String) {
+        self.init(options: ["-f", configPath])
+    }
+
+    /// The tmux command line for `arguments` on this server.
+    public func invocation(_ arguments: [String]) throws -> CommandInvocation {
+        guard let binary = Tmux.binary else { throw TmuxError.notInstalled }
+        return CommandInvocation(executable: binary, arguments: options + arguments)
+    }
+
     /// Runs one tmux command, or several joined by `;`, and returns its output.
     @discardableResult
     public func run(_ arguments: [String]) throws -> String {
-        guard let binary = Tmux.binary else { throw TmuxError.notInstalled }
         var environment = ProcessInfo.processInfo.environment
         // tmux uses the socket in $TMUX before the one in $TMUX_TMPDIR.
         environment["TMUX"] = nil
         environment["TMUX_PANE"] = nil
         // The long deadline is Shell's: the same commands ran through it before.
-        return try CommandRunner().run(CommandInvocation(executable: binary, arguments: options + arguments),
-                                       timeout: 120, environment: environment)
+        return try CommandRunner().run(invocation(arguments), timeout: 120, environment: environment)
     }
 
     /// The server's Windows, clients and Panes; an empty snapshot when the server does not run.

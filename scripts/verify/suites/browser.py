@@ -1,9 +1,9 @@
-"""Find in Page and Vim Keys in the Browser.
+"""Find in Page, Vim Keys and Paste Path in the Browser.
 
 The checks dispatch keys inside the page, because the driver must not type keys (README: "Do not take focus").
 A Vim Key dispatched there still reaches WebKit as the key it stands for, so the page scrolls for real.
 The fixture page reports its scroll positions, the Find in Page highlight and its key results in its title,
-which the Tab strip shows.
+which the Tab strip shows. The Paste Path check opens the palette from its View menu item.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.browser
@@ -12,6 +12,7 @@ Run from the repo root after `make build`:
 import re
 import time
 import unittest
+from urllib.parse import unquote
 
 from scripts.verify.sandbox import Sandbox, wait
 
@@ -77,6 +78,12 @@ PAGE = '''<!doctype html>
     sheet.innerHTML = '<div style="height: 100%; overflow: auto">needle in a closed sheet</div>';
     document.body.append(sheet);
   }
+  // A link over the whole page, so a click at the centre of the Browser lands on it.
+  if (params.has('link')) {
+    const link = Object.assign(document.createElement('a'), { href: location.pathname + '?' + params.get('link') });
+    link.style.cssText = 'position: fixed; inset: 0';
+    document.body.append(link);
+  }
   if (params.has('invisible')) document.body.insertAdjacentHTML('beforeend', '<p style="visibility: hidden">needle unseen</p>');
   if (params.has('fill')) {
     document.body.style.cssText = 'height: 100vh; overflow: hidden';
@@ -85,17 +92,18 @@ PAGE = '''<!doctype html>
   setInterval(() => {
     const found = CSS.highlights.get('muxify-find');
     document.title = `mx q=${location.search.slice(1)} y=${Math.round(scrollY)} inner=${Math.round(inner.scrollTop)} hl=${found ? found.size : 0} passed=${passed} native=${native} active=${document.activeElement ? document.activeElement.tagName : 'none'}`
-      + ` sent=${sent} steps=${steps.join('/')}`;
+      + ` sent=${sent} steps=${steps.join('/')} value=${encodeURIComponent(field.value)}`;
   }, 100);
   addEventListener('load', () => setTimeout(async () => {
     if (params.has('focus')) field.focus();
     if (params.has('pagekeys')) document.addEventListener('keydown', (event) => event.preventDefault());
     if (params.has('escape')) field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    if (params.has('history')) { location.hash = 'second'; await new Promise((done) => setTimeout(done, 300)); }
     if (params.has('every')) setInterval(() => send(params.get('every')), 200);
     for (const group of (params.get('keys') || '').split(',').filter(Boolean)) {
       if (params.has('held')) await hold(group); else send(group);
       await new Promise((done) => setTimeout(done, 1500));
-      steps.push(position());
+      steps.push(params.has('history') ? location.hash.slice(1) || 'start' : position());
     }
     sent = 'yes';
   }, 300));
@@ -267,6 +275,19 @@ class Browser(unittest.TestCase):
         page = self.wait_sent()
         self.assertGreater(int(page['y']), 200, 'd did not scroll the page by most of a screen')
 
+    def test_shift_h_goes_back_and_shift_l_goes_forward(self):
+        self.open_page('history&keys=H,L')
+        page = self.wait_sent()
+        self.assertEqual(page['steps'], 'start/second', 'H did not go back, or L did not go forward')
+
+    def test_command_click_opens_the_link_in_a_new_tab(self):
+        self.open_page('link=case=opened')
+        self.s.act('click', 'browser-panel', command_key=True)
+        self.query = 'case=opened'
+        self.wait_page(lambda page: True, 'a ⌘-click on a link did not open the link in a new Tab')
+        self.query = 'link=case=opened'
+        self.assertIsNotNone(self.page_state(), 'a ⌘-click on a link left its own Tab')
+
     def test_j_in_a_text_field_types_and_does_not_scroll(self):
         self.open_page('focus&keys=jjj')
         self.wait_sent()
@@ -307,6 +328,40 @@ class Browser(unittest.TestCase):
         self.wait_sent()
         time.sleep(1)
         self.assertEqual(self.page_state()['y'], '0', 'j scrolled with browser.vim_keys off')
+
+    # Paste Path
+
+    def test_paste_path_types_the_raw_path_into_the_text_field_that_has_focus(self):
+        folder = self.s.root/'pasted folder'
+        folder.mkdir(exist_ok=True)
+        sid = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'paste-into-page', '-c', str(folder), SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
+        self.open_page('focus&case=paste')
+        self.s.driver('press', 'Focus Browser')
+        wait(lambda: 'WKWebView' in self.s.driver('responder')['responders'], 'Focus Browser did not give the page Focus')
+        self.wait_page(lambda page: page['active'] == 'INPUT', 'the text field did not take focus')
+        key = 'palette-row-session:' + sid
+        def opened():
+            self.s.driver('press', 'Go to…')
+            try:
+                self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'not yet', seconds=3)
+                return True
+            except AssertionError:
+                return False
+        # SwiftUI rebuilds the View menu a moment after the state it reads changes, and a press in that moment can miss.
+        wait(opened, 'the palette did not open', seconds=20)
+        def searched():
+            self.s.act('focus', 'palette-search')
+            self.s.act('set', 'palette-search', 'paste-into-page')
+            return self.s.has(key)
+        wait(searched, 'no palette row for the Session paste-into-page', seconds=20)
+        self.s.act('action', key, 'Paste Path')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after Paste Path')
+        page = self.wait_page(lambda page: page['value'] != '', 'Paste Path typed nothing into the text field')
+        self.assertEqual(unquote(page['value']), str(folder), 'the text field did not get the path as it is, without shell quotes')
+        self.assertEqual(page['active'], 'INPUT', 'Paste Path took focus from the text field')
+        pane = self.s.tmux('display-message', '-p', '-t', 'browser:' + self.id().rsplit('.', 1)[-1][5:], '#{pane_id}')
+        self.assertNotIn('pasted folder', self.s.tmux('capture-pane', '-p', '-t', pane), 'Paste Path also typed the path at the prompt')
 
     def test_vim_keys_off_in_the_config_stop_an_open_page(self):
         self.addCleanup(self.reload_config, '')

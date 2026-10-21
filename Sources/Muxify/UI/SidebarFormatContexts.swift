@@ -15,6 +15,7 @@ struct SidebarFormatContexts {
         let panesByWindow = Dictionary(grouping: panes, by: \.windowID)
         let agentsByPane = Dictionary(agents.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
         let recordsByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func topicTags(_ shown: [ShownTag]) -> String { shown.map(\.tag.description).joined(separator: " ") }
         func counts(_ agents: [Agent]) -> [Variable: String] {
             [.agent_count: String(agents.count), .agents_working: String(agents.filter { $0.status == .working }.count),
              .agents_unread: String(agents.filter(\.unread).count)]
@@ -33,6 +34,7 @@ struct SidebarFormatContexts {
                 .project: topicSession?.projectName ?? location?.project.name ?? remoteProjectName(first.sessionPath),
                 .branch: first.isRemote ? "" : branches[.local(first.sessionPath)] ?? "",
                 .topic_title: first.isRemote ? "" : first.topicID.flatMap { model.titles[$0] } ?? "",
+                .topic_tags: topicTags(record.map { model.tags?.shown($0.tags) ?? [] } ?? []),
                 .window_count: String(members.count),
                 .pane_count: String(members.reduce(0) { $0 + $1.paneCount }),
             ])
@@ -70,7 +72,7 @@ struct SidebarFormatContexts {
             }
             sessions[sessionID] = Context(values: sessionValues, loops: [.windows: windowContexts, .panes: paneContexts])
         }
-        for topic in model.rows {
+        for topic in model.rows + model.snoozedRows + model.groups.filter({ $0.kind == .settled }).flatMap(\.topics) {
             // A Locked card shows its Session's Formats.
             guard case .topic = topic.id else { continue }
             let children = topic.sessions.compactMap { sessions[$0.id.session] }
@@ -82,8 +84,10 @@ struct SidebarFormatContexts {
                 .topic_title: topic.title, .topic_pinned_flag: topic.isPinned ? "1" : "0",
                 .topic_dormant_flag: topic.isDormant ? "1" : "0", .session_count: String(children.count),
                 .window_count: String(allWindows.count), .pane_count: String(allPanes.count),
+                .topic_tags: topicTags(topic.tags), .tag_count: String(topic.tags.count),
             ])
-            topics[topic.id] = Context(values: values, loops: [.sessions: children, .windows: allWindows, .panes: allPanes])
+            let tags = topic.tags.map { Context(values: merged(values, [.tag: $0.tag.name])) }
+            topics[topic.id] = Context(values: values, loops: [.sessions: children, .windows: allWindows, .panes: allPanes, .tags: tags])
         }
     }
 }

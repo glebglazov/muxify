@@ -14,7 +14,7 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `move_session` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
 | `add_project_to_topic` | ⌘⇧A | Open Add a Project for the Active Topic in the palette |
 | `snooze_topic` | ⌥⌘S | Snooze the Active Topic, then open the Next Topic |
-| `snooze_topics` | Unbound | Open Snooze Topics, with no Topic picked |
+| `snooze_topics` | Unbound | Open Snooze Topics, with no Topic checked |
 | `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic or a Locked Session, or in Sessions mode, it only ends Zen |
 | `settle_topic` | Unbound | Settle the Active Topic, then open the Next Topic |
 | `remove_session_from_topic` | Unbound | Remove the current Session from the Active Topic. The Session stays live, and the Topic forgets it |
@@ -24,6 +24,11 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `mark_unread` | ⌘⇧U | Mark the Active Topic Unread, or eligible Agents in the current Session when there is no Active Topic |
 | `mark_all_read` | Unbound | Clear Unread in the Active Environment |
 | `toggle_lock` | Unbound | Lock the current Session, which must be in No Topic, or Unlock it while it is Locked |
+| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Locked Session, one card up among the cards with its Pin. It does nothing at the top, for No Topic, for a Snoozed or Settled Topic, and in Sessions mode |
+| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Locked Session, one card down among the cards with its Pin. It does nothing at the bottom, for No Topic, for a Snoozed or Settled Topic, and in Sessions mode |
+| `toggle_pin_topic` | Unbound | Pin the Active Topic, or Unpin it while it is Pinned. It does nothing for a Settled Topic |
+| `unsnooze_topic` | Unbound | Unsnooze the Active Topic while it is Snoozed. Else, while a Snoozed Topic exists, choose one Snoozed Topic to Unsnooze |
+| `unsnooze_topics` | Unbound | Open Unsnooze Topics, with no Topic checked |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser. It does nothing while the Browser is the only side shown |
@@ -69,23 +74,46 @@ or End Zen. These use the
 current item and appear when that item is available. Back returns from an input
 step to the Commands search.
 
-Commands also lists Snooze Topics…, which Snoozes several Topics until one time.
-Its first step is the pick step. The rows are suggestions: the Tags of the
-Topics under Tags, A→Z, the Topics in the Topics list under Topics, and the
-Snoozed Topics under Already Snoozed. No Topic starts picked, also not the Active
-Topic. ↩ on a row picks it: the Topic or Tag becomes a chip in the field, the row
-leaves the list, and the query clears. A Tag chip picks every Topic that has the
-Tag, and these Topics stay in the list, dim, with "in #tag". A Snooze by Tag is a
-usual Snooze of those Topics: a Topic that gets the Tag later is not Snoozed.
-With a query, the last row, "＋ All N matches for “query”", picks every Topic that
-the query matches. With an empty query and one or more chips, the first row is
-"→ Snooze N Topics…": ↩ on it opens the time step. In the pick step, ↩ only
-picks. The time that you choose replaces the time of each Topic of the set, also
-a later time, and the step note names each Snooze that becomes shorter. ⌫ in the
-empty time field goes back to the pick step with the chips kept. Snooze Topic
-is the same flow with its Topic as the only chip, and it starts at the time step.
+Commands also lists Move Topic Up and Move Topic Down, Pin Topic or Unpin Topic,
+and Unsnooze Topic. They run at once on the Active Topic, as their keybindings
+do. Move Topic Up and Move Topic Down also move the card of the current Locked
+Session, and appear only when the card can move that way among the cards with
+its Pin. Unsnooze Topic appears while a Snoozed Topic exists. While the Active
+Topic is Snoozed, it Unsnoozes it at once. Else it lists the Snoozed Topics, and
+↩ Unsnoozes the highlighted one.
 
-In a field with chips (the pick step, New Topic and Edit Tags), ← at the start
+Commands also lists Snooze Topics…, which Snoozes several Topics until one time.
+Its first step is the check step. The rows are the Tags of the Topics under
+Tags, in Config order, the Topics in the Topics list under Topics, and the
+Snoozed Topics under Already Snoozed. Each row has a box. No Topic starts
+checked, also not the Active Topic. The search field holds only the query.
+
+- Space or ⇥ checks or unchecks the highlighted row, also with a query. So the
+  query of this step cannot hold a space. A click on a row does the same.
+- ⌘A checks every Topic row that the filter shows, or unchecks them when all of
+  them are already checked.
+- A Tag row checks or unchecks the Topics that have the Tag in this list: with
+  none or some checked, Space checks all of them, and with all checked, Space
+  unchecks all of them. Its box shows none, some or all, in the colour of the
+  Tag, and the row shows "2/3" while some are checked. Only Topics are in the
+  set: a Topic that gets the Tag later is not Snoozed.
+- With one or more Topics checked, ↩ on any row opens the time step with the
+  checked Topics. With none checked, ↩ on a Topic row opens it with that Topic,
+  and ↩ on a Tag row checks its Topics and stays in the check step.
+- The note under the list names the checked Topics, counts the checked Topics
+  that the filter hides, and says what ↩ does now.
+
+The time that you choose replaces the time of each Topic of the set, also a
+later time, and the step note names each Snooze that becomes shorter. ⌫ in the
+empty time field goes back to the check step with the checks kept. Snooze Topic
+is the same flow with its Topic checked, and it starts at the time step.
+
+Commands also lists Unsnooze Topics… while a Snoozed Topic exists. It opens the
+same check step with only the Snoozed Topics, and each row shows its wake time.
+A Tag row counts only the Snoozed Topics. ↩ works as in Snooze Topics…, but it
+Unsnoozes the Topics at once, with no time step.
+
+In a field with chips (New Topic and Edit Tags), ← at the start
 of the text selects the last chip, and ← and → move the selection. → after the
 last chip puts the caret back in the text. ⌫ removes the selected chip and
 selects the chip to its left, and ⌦ removes it and selects the chip to its
@@ -99,13 +127,16 @@ query, Go to… also lists the Tags after the Topics. ↩ on
 a Tag row makes it a filter chip, "Go to… › #backend", and the list then shows
 only the Topics with the Tag: open, Snoozed and Settled. ⌫ in the empty field
 removes the chip. ⌘K on a Tag row offers Snooze its Topics…, which opens the
-pick step with the Tag as a chip.
+check step with the Topics of the Tag checked.
 
-In New Topic, a word that starts with `#` is a Tag, not a part of the title.
-While you type it, the rows show the Tags of the Topic records that match it,
-A→Z, and New Tag when no record has it. ⇥ or ↩ on a row makes the Tag a chip.
-A space after a complete Tag also makes it a chip, so you can type `#backend `
-and go on. ⌫ in an empty field removes the last chip. Commands also lists Edit Tags…
+Only the Tags that the Config lists in `topics.tags` exist (see
+[Tags](configuration.md#tags)). In New Topic, a word that starts with `#` is a
+Tag, not a part of the title. While you type it, the rows show the Tags of the
+Config that match it by name or display name, in Config order. When none
+matches, a row says so, the word cannot become a chip, and ↩ does nothing
+while it is in the field. ⇥ or ↩ on a row makes the Tag a chip. A space after
+a complete Tag also makes it a chip, so you can type `#backend ` and go on.
+Without `topics.tags`, `#` is plain title text and Edit Tags… is not offered. ⌫ in an empty field removes the last chip. Commands also lists Edit Tags…
 for the Active Topic, and the actions menu of a Topic row has it too. Its field
 holds the Topic's Tags as chips. Type a Tag, with or without `#`, to add it.
 ↩ writes the Tags, and an empty field removes all of them.
@@ -170,6 +201,11 @@ keybindings:
   forget_topic: []
   rename_topic: []
   toggle_lock: []
+  move_topic_up: alt+cmd+up
+  move_topic_down: alt+cmd+down
+  toggle_pin_topic: []
+  unsnooze_topic: []
+  unsnooze_topics: []
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
   toggle_terminal: cmd+j
   toggle_browser: cmd+b
@@ -296,7 +332,7 @@ conflict with the actions above:
 | `show_actions` | ⌘K | Show or hide the actions menu |
 | `copy_folder` | ⌘C | Copy the result's folder |
 | `copy_tmux_target` | ⌘⇧C | Copy the result's tmux target or Pane ID |
-| `paste_folder` | ⌃Y | Type the result's folder, as one shell word, at the prompt of the current Pane |
+| `paste_folder` | ⌃Y | Type the result's folder where the Focus was: into the text field or web page that had it, or as one shell word at the prompt of the current Pane |
 | `snooze_topic` | ⌃S | Open Snooze for the highlighted open, Dormant or Snoozed Topic |
 | `move` | Unbound | Open Move for the highlighted result |
 | `add_project_to_topic` | Unbound | Add a Project to the highlighted Topic |
@@ -398,6 +434,7 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | Shortcut | Action |
 | --- | --- |
 | ⌘T | Open a new Browser Tab |
+| ⌘-click (link) | Open the link in a new Browser Tab |
 | ⌘L | Move Focus to the address bar, opening the Browser if hidden |
 | ⌘W | Close the active Browser Tab |
 | ⌘⇧] or ⌃Tab | Select the next Browser Tab |
@@ -428,7 +465,7 @@ typed in. Before that, it starts in the frame that shows the most of the page. I
 
 ### Vim Keys
 
-When the Browser has Focus, these keys scroll the page:
+When the Browser has Focus, these keys scroll the page or go through its history:
 
 | Key | Acts as | Scroll |
 | --- | --- | --- |
@@ -437,10 +474,12 @@ When the Browser has Focus, these keys scroll the page:
 | d / u | Page Down / Page Up | Down / up almost one screen |
 | gg | Home | To the top |
 | G | End | To the bottom |
+| H / L | Back / Forward | Previous / next page in the Tab's history |
 
 A Vim Key presses the key in the "Acts as" column. The page scrolls the same
 part, by the same step and with the same animation as for that key. Hold j to
-scroll until you release it.
+scroll until you release it. H and L go one page for each press, also when you
+hold them.
 
 - The page wins. If the page uses the key itself, Vim Keys do nothing.
 - Text fields type. In a text field or other editable text, the key types its
