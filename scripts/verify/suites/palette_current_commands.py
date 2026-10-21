@@ -58,6 +58,17 @@ class PaletteCurrentCommands(PaletteFixture):
             self.assertEqual(after.get(key), original.get(key), key + ' changed on Cancel')
         self.assertFalse((self.s.root/'state/muxify/zen.json').exists())
 
+    def test_the_topics_commands_come_before_the_topic_commands(self):
+        self.current_topic('snooze-order')
+        self.topic('snooze-order-snoozed', snoozed_until='never')
+        for verb in ['Snooze', 'Unsnooze']:
+            self.search(verb.lower() + ' topic')
+            many, one = 'palette-row-command-%s Topics…' % verb, 'palette-row-command-%s Topic' % verb
+            rs = self.s.wait_rows(lambda rs: self.s.has(many, rs) and self.s.has(one, rs), 'both %s Commands did not show' % verb)
+            ids = self.s.ids(rs)
+            self.assertLess(ids.index(many), ids.index(one), '%s Topic came before %s Topics…' % (verb, verb))
+            self.s.act('action', 'palette-search', 'Close')
+
     def remembered(self, path):
         """Waits until the app records the Topic's live Session, so that a removal has something to forget."""
         wait(lambda: json.loads(path.read_text()).get('sessions'), 'the Topic did not remember its Session')
