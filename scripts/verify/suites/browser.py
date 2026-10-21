@@ -78,6 +78,12 @@ PAGE = '''<!doctype html>
     sheet.innerHTML = '<div style="height: 100%; overflow: auto">needle in a closed sheet</div>';
     document.body.append(sheet);
   }
+  // A link over the whole page, so a click at the centre of the Browser lands on it.
+  if (params.has('link')) {
+    const link = Object.assign(document.createElement('a'), { href: location.pathname + '?' + params.get('link') });
+    link.style.cssText = 'position: fixed; inset: 0';
+    document.body.append(link);
+  }
   if (params.has('invisible')) document.body.insertAdjacentHTML('beforeend', '<p style="visibility: hidden">needle unseen</p>');
   if (params.has('fill')) {
     document.body.style.cssText = 'height: 100vh; overflow: hidden';
@@ -92,11 +98,12 @@ PAGE = '''<!doctype html>
     if (params.has('focus')) field.focus();
     if (params.has('pagekeys')) document.addEventListener('keydown', (event) => event.preventDefault());
     if (params.has('escape')) field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    if (params.has('history')) { location.hash = 'second'; await new Promise((done) => setTimeout(done, 300)); }
     if (params.has('every')) setInterval(() => send(params.get('every')), 200);
     for (const group of (params.get('keys') || '').split(',').filter(Boolean)) {
       if (params.has('held')) await hold(group); else send(group);
       await new Promise((done) => setTimeout(done, 1500));
-      steps.push(position());
+      steps.push(params.has('history') ? location.hash.slice(1) || 'start' : position());
     }
     sent = 'yes';
   }, 300));
@@ -267,6 +274,19 @@ class Browser(unittest.TestCase):
         self.open_page('keys=d')
         page = self.wait_sent()
         self.assertGreater(int(page['y']), 200, 'd did not scroll the page by most of a screen')
+
+    def test_shift_h_goes_back_and_shift_l_goes_forward(self):
+        self.open_page('history&keys=H,L')
+        page = self.wait_sent()
+        self.assertEqual(page['steps'], 'start/second', 'H did not go back, or L did not go forward')
+
+    def test_command_click_opens_the_link_in_a_new_tab(self):
+        self.open_page('link=case=opened')
+        self.s.act('click', 'browser-panel', command_key=True)
+        self.query = 'case=opened'
+        self.wait_page(lambda page: True, 'a ⌘-click on a link did not open the link in a new Tab')
+        self.query = 'link=case=opened'
+        self.assertIsNotNone(self.page_state(), 'a ⌘-click on a link left its own Tab')
 
     def test_j_in_a_text_field_types_and_does_not_scroll(self):
         self.open_page('focus&keys=jjj')

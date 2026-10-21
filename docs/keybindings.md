@@ -434,6 +434,7 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | Shortcut | Action |
 | --- | --- |
 | ⌘T | Open a new Browser Tab |
+| ⌘-click (link) | Open the link in a new Browser Tab |
 | ⌘L | Move Focus to the address bar, opening the Browser if hidden |
 | ⌘W | Close the active Browser Tab |
 | ⌘⇧] or ⌃Tab | Select the next Browser Tab |
@@ -464,7 +465,7 @@ typed in. Before that, it starts in the frame that shows the most of the page. I
 
 ### Vim Keys
 
-When the Browser has Focus, these keys scroll the page:
+When the Browser has Focus, these keys scroll the page or go through its history:
 
 | Key | Acts as | Scroll |
 | --- | --- | --- |
@@ -473,10 +474,12 @@ When the Browser has Focus, these keys scroll the page:
 | d / u | Page Down / Page Up | Down / up almost one screen |
 | gg | Home | To the top |
 | G | End | To the bottom |
+| H / L | Back / Forward | Previous / next page in the Tab's history |
 
 A Vim Key presses the key in the "Acts as" column. The page scrolls the same
 part, by the same step and with the same animation as for that key. Hold j to
-scroll until you release it.
+scroll until you release it. H and L go one page for each press, also when you
+hold them.
 
 - The page wins. If the page uses the key itself, Vim Keys do nothing.
 - Text fields type. In a text field or other editable text, the key types its

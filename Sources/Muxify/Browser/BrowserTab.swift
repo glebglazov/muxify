@@ -41,7 +41,7 @@ final class BrowserTab: NSObject, Identifiable {
         return urlString.isEmpty ? "New Tab" : urlString
     }
 
-    /// target=_blank links and window.open ask for a new Tab.
+    /// target=_blank links, window.open and ⌘-clicked links ask for a new Tab.
     @ObservationIgnored var onOpenInNewTab: ((URL) -> Void)?
     /// The Tab's URL changed (for persisting the Browser).
     @ObservationIgnored var onURLChange: (() -> Void)?
@@ -299,6 +299,12 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
         // Hand mailto:, zoommtg:, etc. to the system.
         if !["http", "https", "file", "about", "data", "blob", "javascript"].contains(scheme) {
             NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+        // ⌘-click opens the link in a new Tab, as in Safari.
+        if navigationAction.navigationType == .linkActivated, navigationAction.modifierFlags.contains(.command) {
+            onOpenInNewTab?(url)
             decisionHandler(.cancel)
             return
         }

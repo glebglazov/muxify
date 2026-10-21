@@ -526,7 +526,7 @@ reveal its Browser. The [Simulator](simulator.md) runs in a browser, not a nativ
 panel.
 
 [Vim Keys](keybindings.md#vim-keys) scroll a Browser page with h, j, k, l, d,
-u, gg and G. They are on by default. To turn them off:
+u, gg and G, and go back and forward with H and L. They are on by default. To turn them off:
 
 ```yaml
 browser:

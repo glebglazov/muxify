@@ -125,6 +125,7 @@ enum TestDriver {
     private static var pending: Steps?
 
     /// `click` presses the target at its centre and lets go there, without moving: a plain click of the mouse.
+    /// The option `command_key` holds ⌘ through the click, as a ⌘-click does.
     /// `drag` presses the target, moves to the element named by `text` and lets go there: in its upper quarter,
     /// or its lower quarter with the option `edge: "bottom"`. The option `hold` keeps the press still for that many
     /// seconds before it moves, as a long press does. Each tick hands one mouse event to the window, never through
@@ -137,11 +138,13 @@ enum TestDriver {
         private var moves: [(type: NSEvent.EventType, point: NSPoint)] = []
         private var holdUntil: Date?
         private let hold: TimeInterval
+        private let modifierFlags: NSEvent.ModifierFlags
         private var pressed = false
 
         init(nonce: String, command: [String: Any]) {
             self.nonce = nonce
             hold = command["hold"] as? Double ?? 0
+            modifierFlags = command["command_key"] as? Bool == true ? .command : []
             let elements = TestDriver.dump()
             func frame(_ identifier: String?) -> NSRect? {
                 guard let identifier else { return nil }
@@ -174,7 +177,7 @@ enum TestDriver {
             let (type, point) = moves.removeFirst()
             if type == .leftMouseDown, hold > 0 { holdUntil = Date().addingTimeInterval(hold) }
             // Each event takes the time it is sent, so a gesture that measures how long the press lasted sees the hold.
-            NSEvent.mouseEvent(with: type, location: window.convertPoint(fromScreen: point), modifierFlags: [],
+            NSEvent.mouseEvent(with: type, location: window.convertPoint(fromScreen: point), modifierFlags: modifierFlags,
                                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
                                eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)
                 .map(window.sendEvent)

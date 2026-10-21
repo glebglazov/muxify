@@ -141,7 +141,7 @@ Searching the text of the active Tab's page, its iframes included, from a find b
 _Avoid_: search (when you mean the page text), Find (alone)
 
 **Vim Keys**:
-The letter keys h, j, k, l, d, u, gg and G, which scroll the active Tab's page as the arrow keys, Page Down, Page Up, Home and End do, when the Browser has Focus and the page does not use the key itself. They are on by default and the Config can turn them off.
+The letter keys h, j, k, l, d, u, gg and G, which scroll the active Tab's page as the arrow keys, Page Down, Page Up, Home and End do, and H and L, which go back and forward as the Back and Forward buttons do, when the Browser has Focus and the page does not use the key itself. They are on by default and the Config can turn them off.
 _Avoid_: vim mode, keyboard navigation
 
 ### Simulator
