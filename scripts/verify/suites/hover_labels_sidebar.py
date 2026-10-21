@@ -14,6 +14,9 @@ from scripts.verify.sandbox import Sandbox, wait
 
 SHELL = '/bin/zsh -f'
 LONG = 'a-window-name-far-too-long-for-any-sidebar-row-to-show-whole'
+# HoverLabel.delay in Sources/Muxify/UI/HoverLabel.swift.
+DELAY = 0.4
+TRIES = 5
 
 
 class HoverLabelsSidebar(unittest.TestCase):
@@ -34,9 +37,29 @@ class HoverLabelsSidebar(unittest.TestCase):
                     'the Window rows do not show')
 
     def setUp(self):
-        # The Agents header has no label; resting there past the cool-down makes the next label wait its delay.
+        self.rest_off_rows()
+
+    def rest_off_rows(self):
+        # The Agents header has no label; resting there past the cool-down makes the next label wait its delay. The
+        # cool-down starts when the open label closes, which can come after the hover command, so the rest starts at
+        # a dump without the label.
         self.s.act('hover', 'agents-header')
+        self.s.wait_rows(lambda rs: self.label(rs) is None, 'the label stays open off the rows', seconds=5)
         time.sleep(0.5)
+
+    def rows_within_delay(self, key, predicate):
+        """Hovers `key` and polls dumps until one holds `predicate`, for as long as the rest delay cannot have ended:
+        the rows, or None. A dump that comes back later cannot tell a label that opened at once from one that waited,
+        and under load one driver round trip can outlast the delay, so each try that ends without a match tries again.
+        """
+        start = time.monotonic()
+        self.s.act('hover', key)
+        while True:
+            rs = self.s.rows()
+            if time.monotonic() - start >= DELAY:
+                return None
+            if predicate(rs):
+                return rs
 
     def label(self, rs):
         """The texts of the open hover label, nil when none is open."""
@@ -54,9 +77,14 @@ class HoverLabelsSidebar(unittest.TestCase):
         return texts
 
     def test_a_cut_off_title_opens_whole_with_the_windows_place_after_a_rest(self):
-        self.s.act('hover', 'topic-window-' + self.long)
-        time.sleep(0.2)
-        self.assertIsNone(self.label(self.s.rows()), 'the label opened before the pointer rested')
+        for attempt in range(1, TRIES + 1):
+            early = self.rows_within_delay('topic-window-' + self.long, lambda rs: True)
+            if early is not None:
+                break
+            self.rest_off_rows()
+        else:
+            self.fail('no dump came back within the %.1f s rest delay in %d tries' % (DELAY, TRIES))
+        self.assertIsNone(self.label(early), 'the label opened before the pointer rested, in try %d' % attempt)
         rs = self.s.wait_rows(lambda rs: self.label(rs), 'no hover label', seconds=5)
         texts = self.label(rs)
         self.assertEqual(texts[0], LONG, 'the label does not show the full title: %s' % texts)
@@ -69,13 +97,14 @@ class HoverLabelsSidebar(unittest.TestCase):
         self.assertTrue(texts[0].startswith(self.places[self.short] + ' — '), texts)
 
     def test_the_next_row_opens_its_label_at_once(self):
-        self.s.act('hover', 'topic-window-' + self.long)
-        self.s.wait_rows(lambda rs: self.label(rs), 'no hover label', seconds=5)
-        start = time.monotonic()
-        self.s.act('hover', 'topic-window-' + self.short)
-        rs = self.s.wait_rows(lambda rs: (self.label(rs) or [''])[0].startswith(self.places[self.short]),
-                              'the label did not move to the next row', seconds=5)
-        self.assertLess(time.monotonic() - start, 0.35, 'the next row waited for its label: %s' % self.label(rs))
+        moved = lambda rs: (self.label(rs) or [''])[0].startswith(self.places[self.short])
+        for _ in range(TRIES):
+            self.s.act('hover', 'topic-window-' + self.long)
+            self.s.wait_rows(lambda rs: self.label(rs), 'no hover label', seconds=5)
+            if self.rows_within_delay('topic-window-' + self.short, moved) is not None:
+                return
+            self.s.wait_rows(moved, 'the label did not move to the next row', seconds=5)
+        self.fail('the next row waited its rest delay for its label in %d tries' % TRIES)
 
 
 if __name__ == '__main__':
