@@ -195,8 +195,9 @@ class Sandbox:
         """`env` adds to the sandbox environment, for a command whose client environment matters."""
         return subprocess.check_output(self._tmux_command(args), env=dict(self.env, **(env or {})), text=True).strip()
 
-    def tmux_ok(self, *args):
-        return subprocess.run(self._tmux_command(args), env=self.env, capture_output=True, text=True)
+    def tmux_ok(self, *args, timeout=None):
+        """The finished tmux command, whatever its status. Past `timeout` seconds it raises TimeoutExpired."""
+        return subprocess.run(self._tmux_command(args), env=self.env, capture_output=True, text=True, timeout=timeout)
 
     def tmux_client(self, session, terminal):
         """Starts a plain Client on a PTY owned by the check."""

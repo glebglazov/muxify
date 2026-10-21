@@ -423,7 +423,7 @@ final class WorkspaceStore {
         let projects = projects
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result {
-                try TopicTitleSuggester(commands: commands).suggest(for: .topic(topic, TmuxServer.local.snapshot(), projects))
+                try TopicTitleSuggester(commands: commands).suggest(for: .topic(topic, TmuxServer.app.snapshot(), projects))
             }
             RunLoop.main.perform(inModes: [.default, .modalPanel]) {
                 MainActor.assumeIsolated {
@@ -442,7 +442,7 @@ final class WorkspaceStore {
         let windowID = selectedWindowID
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { () -> String in
-                let snapshot = TmuxServer.local.snapshot()
+                let snapshot = TmuxServer.app.snapshot()
                 let window = windowID.flatMap { id in snapshot.windows.first { $0.id == id } }
                 let pane = window.flatMap { window in snapshot.panes.first { $0.id == window.activePaneID } }
                 return try TopicTitleSuggester(commands: commands).suggest(for: .newTopic(pane, nil))
@@ -489,7 +489,7 @@ final class WorkspaceStore {
             let environment = generation
             let tty = clientTTY ?? surface?.ttyName
             Task {
-                let snapshot = await Task.detached { TmuxServer.local.snapshot() }.value
+                let snapshot = await Task.detached { TmuxServer.app.snapshot() }.value
                 guard generation == environment, palette.invocation == token,
                       case .move(let draft) = palette.flow else { return }
                 let windowID = snapshot.clients.first { $0.tty == tty }?.windowID ?? window.id
@@ -744,7 +744,7 @@ final class WorkspaceStore {
         let invocation = palette.invocation
         Task { [weak self] in
             let response = await Task.detached(priority: .userInitiated) {
-                for arguments in browserCommands { _ = try? TmuxServer.local.run(arguments) }
+                for arguments in browserCommands { _ = try? TmuxServer.app.run(arguments) }
                 return service.handle(request, client: client)
             }.value
             guard let self else { return }
@@ -760,7 +760,7 @@ final class WorkspaceStore {
 
     /// The service on the Local server, with the Projects as git reported them last.
     func topicService() -> TopicService {
-        TopicService(paths: topicWatcher.store.paths, server: .local, projects: projects, topics: topicConfig)
+        TopicService(paths: topicWatcher.store.paths, server: .app, projects: projects, topics: topicConfig)
     }
 
     private func present(_ response: TopicResponse, as presentation: TopicPresentation, invocation: UUID) {
@@ -809,7 +809,7 @@ final class WorkspaceStore {
                     moveFocusIntoWindow()
                     if surface == nil || surface?.processExited == true,
                        let window = windows.first(where: { $0.id == id.rawValue })
-                        ?? TmuxServer.local.snapshot().windows.first(where: { $0.id == id.rawValue }) {
+                        ?? TmuxServer.app.snapshot().windows.first(where: { $0.id == id.rawValue }) {
                         attach(to: Target(window))
                     }
                 case nil:

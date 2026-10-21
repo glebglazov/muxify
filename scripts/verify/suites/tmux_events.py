@@ -6,6 +6,7 @@ Run from the repo root after `make build`:
 
 import os
 import signal
+import subprocess
 import threading
 import time
 import unittest
@@ -26,6 +27,11 @@ class TmuxEvents(unittest.TestCase):
         # No tmux server at launch: the app starts one with its own Session.
         s.launch()
 
+    def setUp(self):
+        # A check that kills the app leaves the next one without it.
+        if not alive(self.s.pid):
+            self.s.launch()
+
     def control_clients(self):
         listing = self.s.tmux_ok('list-clients', '-F', '#{client_pid} #{client_control_mode}').stdout.split('\n')
         return [int(line.split()[0]) for line in listing if line.endswith(' 1')]
@@ -35,6 +41,23 @@ class TmuxEvents(unittest.TestCase):
         while not stop.is_set():
             n += 1
             self.s.tmux_ok('rename-window', '-t', 'main', 'w%d' % n)
+
+    def test_send_keys_from_outside_tmux_works_while_the_control_client_is_newest(self):
+        # tmux gives a command from outside tmux the client with the newest activity. A control client that starts
+        # again after the app's own client is that client.
+        old = wait(lambda: (self.control_clients() or [None])[0], 'app did not start a tmux control client')
+        os.kill(old, signal.SIGTERM)
+        wait(lambda: [pid for pid in self.control_clients() if pid != old], 'app did not start its control client again')
+        target = self.s.tmux('display-message', '-p', '#{client_control_mode}')
+        self.assertEqual(target, '1', 'tmux does not give outside commands the control client, so this checks nothing')
+        try:
+            sent = self.s.tmux_ok('send-keys', '-t', 'main', '-l', 'echo from-outside', timeout=10)
+            failure = sent.stderr.strip() if sent.returncode else None
+        except subprocess.TimeoutExpired:
+            failure = 'no answer in 10 s'
+        mode = self.s.tmux_ok('display-message', '-p', '-t', 'main', '#{pane_mode}', timeout=5).stdout.strip()
+        shown = self.s.tmux_ok('capture-pane', '-p', '-M', '-t', 'main', timeout=5).stdout.strip()[-500:]
+        self.assertIsNone(failure, 'send-keys from outside tmux failed: %s; pane mode %r shows %r' % (failure, mode, shown))
 
     def test_control_client_exits_when_app_is_killed(self):
         client = wait(lambda: (self.control_clients() or [None])[0], 'app did not start a tmux control client')

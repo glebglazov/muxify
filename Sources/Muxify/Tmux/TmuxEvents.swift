@@ -3,8 +3,11 @@ import Darwin
 
 /// Hears about tmux changes as they happen through a control-mode client
 /// (`tmux -C`), so the sidebar doesn't wait for the next poll when a Window is
-/// switched, added, closed or renamed. The client only listens: it is
-/// read-only, gets no pane output and doesn't count towards window sizes.
+/// switched, added, closed or renamed. The client only listens: it gets no
+/// pane output and doesn't count towards window sizes. It is not read-only:
+/// tmux gives a command from outside tmux the client with the newest
+/// activity, which is often this one, and a read-only client refuses commands
+/// such as `send-keys` for everybody.
 final class TmuxEvents {
     enum Event {
         /// A Session's current Window changed (select-window, prefix+n, …).
@@ -28,7 +31,7 @@ final class TmuxEvents {
     /// one doesn't matter. Call on the main thread.
     func start(sessionID: String, connection: TmuxConnection) {
         guard !isRunning, Date() >= nextStart,
-              let invocation = try? connection.invocation(["-C", "attach-session", "-f", "read-only,no-output,ignore-size", "-t", sessionID])
+              let invocation = try? connection.invocation(["-C", "attach-session", "-f", "no-output,ignore-size", "-t", sessionID])
         else { return }
         stop()
         let token = UUID()

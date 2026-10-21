@@ -14,7 +14,7 @@ enum DevServerScanner {
     }
 
     private static func listeningPorts(windowID: String) -> [Int] {
-        guard let paneOutput = try? TmuxServer.local.run(["list-panes", "-t", windowID, "-F", "#{pane_pid}"]) else { return [] }
+        guard let paneOutput = try? TmuxServer.app.run(["list-panes", "-t", windowID, "-F", "#{pane_pid}"]) else { return [] }
         let roots = paneOutput.split(separator: "\n").compactMap { Int32($0) }
         guard !roots.isEmpty else { return [] }
 
