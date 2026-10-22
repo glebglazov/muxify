@@ -261,7 +261,7 @@ final class WorkspaceStore {
             if let last = members.first(where: { $0.id == topicSelection.lastWindowByGroup[.noTopic] }) { return last }
             return EntryWindow.ofSession(members)
         }
-        guard let row = topics.rows.first(where: { $0.id == id }) else { return nil }
+        guard let row = (topics.rows + topics.snoozedRows).first(where: { $0.id == id }) else { return nil }
         return EntryWindow.of(row, lastWindowByGroup: topicSelection.lastWindowByGroup, visits: visits)
     }
 

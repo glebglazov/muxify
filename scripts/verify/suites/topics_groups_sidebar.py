@@ -97,19 +97,23 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.assertIsNotNone(latency, 'the Snoozed group does not list the three Topics; Topic rows %s' % self.topic_rows(rs))
         self.assertEqual(mine(rs), expected, 'the Snoozed group is not in wake time order, with the Pin ignored')
 
-    def test_a_closed_snoozed_card_shows_no_windows_and_a_press_opens_it_in_place_with_pin(self):
+    def test_a_press_on_a_closed_snoozed_card_goes_to_the_topic_and_keeps_it_snoozed_with_pin(self):
         s = self.s
         self.write_topic('card-snoozed', 'Card snoozed', self.beta, snoozed_until='never')
         sid = self.new_session('card-snoozed', self.beta, topic='card-snoozed')
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
-        clients = s.tmux('list-clients', '-F', '#{window_id}')
         self.expand('snoozed-topics')
-        rs = s.wait_rows(lambda rs: self.grouped('topic-card-snoozed', 'snoozed-topics', rs), 'the Topic is not in the Snoozed group')
+        rs = s.wait_rows(lambda rs: self.grouped('topic-card-snoozed', 'snoozed-topics', rs)
+                         and 'Empty' not in s.row('topic-card-snoozed', rs).get('accessibilityValue', ''),
+                         'the Topic is not in the Snoozed group with its live Session')
         self.assertFalse(self.expanded('topic-card-snoozed', rs), 'a Snoozed card starts open')
         self.assertFalse(s.has('topic-window-' + window, rs), 'a closed Snoozed card lists its Windows')
         s.act('press', 'topic-card-snoozed')
-        rs = s.wait_rows(lambda rs: s.has('topic-window-' + window, rs), 'a press did not open the Snoozed card to its Windows')
-        self.assertEqual(s.tmux('list-clients', '-F', '#{window_id}'), clients, 'a press on a Snoozed card went to the Topic')
+        s.wait_shown(window)
+        rs = s.wait_rows(lambda rs: self.expanded('topic-card-snoozed', rs) and s.has('topic-window-' + window, rs),
+                         'going to the Snoozed Topic did not open its card to its Windows')
+        self.assertTrue(self.grouped('topic-card-snoozed', 'snoozed-topics', rs), 'a press on a Snoozed card Unsnoozed it')
+        self.assertEqual(self.records()['card-snoozed'].get('snoozed_until'), 'never', 'a press on a Snoozed card changed its Snooze')
         s.act('action', 'topic-card-snoozed', 'Pin Topic')
         wait(lambda: self.records()['card-snoozed'].get('pinned') is True, 'Pin on a Snoozed card did not Pin the Topic')
 
@@ -165,6 +169,20 @@ class TopicsGroupsSidebar(TopicsSidebar):
                                       and not self.grouped('topic-group-settled', 'settled-topics', rs))
         self.assertIsNotNone(latency, 'Reopen did not return the Topic to the Topics list; Topic rows %s' % self.topic_rows(rs))
         self.assertIsNone(self.records()['group-settled'].get('settled_at'), 'Reopen kept the settle date in the record')
+
+    def test_a_click_on_a_closed_settled_card_shows_its_reopen_choice_and_reopens_nothing(self):
+        self.write_topic('click-settled', 'Click settled', self.alpha, settled_at='2031-01-02T10:00:00Z',
+                         sessions=[dict(project_path=str(self.alpha), windows=[dict(directory=str(self.alpha), name='shell')])])
+        self.expand('settled-topics')
+        rs = self.s.wait_rows(lambda rs: self.grouped('topic-click-settled', 'settled-topics', rs), 'the Topic is not in the Settled group')
+        self.assertFalse(self.expanded('topic-click-settled', rs), 'a Settled card starts open')
+        self.s.act('click', 'topic-click-settled')
+        rs = self.s.wait_rows(lambda rs: self.s.has('reopen-choice-reopen', rs) and self.expanded('topic-click-settled', rs),
+                              'a click on a Settled card did not show its Reopen choice with the card open')
+        self.assertTrue(self.grouped('topic-click-settled', 'settled-topics', rs), 'a click on a Settled card took it out of the group')
+        self.assertIsNotNone(self.records()['click-settled'].get('settled_at'), 'a click on a Settled card changed the record')
+        self.assertNotEqual(self.s.tmux_ok('has-session', '-t', '=alpha/click-settled').returncode, 0,
+                            'a click on a Settled card Reopened it without the Reopen choice')
 
     def test_settled_group_below_twenty_five_open_topics_shows_fifteen_newest_then_fifteen_more_and_collapsing_resets(self):
         # The Sidebar builds only the rows it shows. The open Topics push the Settled group and its pages below the
