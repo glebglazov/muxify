@@ -386,8 +386,7 @@ private struct GroupHeader: View {
 }
 
 /// Where a Topic card sits. In the Topics list the card has a Hint, moves by a drag and by Move Up and Move Down, and
-/// offers Settle. In the Snoozed or Settled group it has none of these: closed it shows only its title and wake time,
-/// and a press opens or closes it without going to the Topic.
+/// offers Settle. In the Snoozed or Settled group it has none of these, and closed it shows only its title and wake time.
 private enum TopicCardPlace {
     case list(TopicListPlace)
     case group
@@ -628,10 +627,10 @@ private struct TopicCard: View {
             .disabled(store.changingTopic)
     }
 
-    /// A press on the Active Topic's header, or on a card in a group, opens or closes the card; on another Topic's
-    /// header in the Topics list it goes to that Topic, whose card then opens as the Active Topic's.
+    /// A press on the Active Topic's header opens or closes the card; on another Topic's header it goes to that Topic,
+    /// whose card then opens as the Active Topic's. A Snoozed Topic stays Snoozed, and a Settled one shows its Reopen choice.
     private func press() {
-        guard !holdsSelection, list != nil else { return toggle() }
+        guard !holdsSelection else { return toggle() }
         store.updateTopicSelection()
         withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(topic.id, open: true) }
         store.goToTopic(topic.id)
