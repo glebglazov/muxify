@@ -1,5 +1,6 @@
 """Hover labels on the Sidebar's Window rows: after the pointer rests on a row, a label opens over it with the full
-title, when the row cuts it off, and the Window's place under it. The next row's label opens at once.
+title, when the row cuts it off, and the Window's place under it. The next row's label opens at once. The full title is
+the text the row draws, so a title that only its Format makes too long also opens whole.
 
 The driver's `hover` gives the app's hover tracking a pointer position without moving the real pointer.
 
@@ -14,6 +15,9 @@ from scripts.verify.sandbox import Sandbox, wait
 
 SHELL = '/bin/zsh -f'
 LONG = 'a-window-name-far-too-long-for-any-sidebar-row-to-show-whole'
+# A name that fits, under a Window title Format that adds this text only to it.
+STRETCHED = 'stretched'
+SUFFIX = 'and a Format suffix far too long for any sidebar row to show whole'
 # HoverLabel.delay in Sources/Muxify/UI/HoverLabel.swift.
 DELAY = 0.4
 TRIES = 5
@@ -26,12 +30,16 @@ class HoverLabelsSidebar(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         project = s.root/'projects/alpha'
         project.mkdir(parents=True)
-        (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(project) + '\n')
+        (s.root/'config/muxify/config.yaml').write_text(
+            'sessions:\n  paths:\n    - path: ' + str(project) + '\n'
+            'sidebar:\n  formats:\n    window:\n'
+            "      title: '#{window_title}#{?#{==:#{window_name}," + STRETCHED + "}, " + SUFFIX + ",}'\n")
         s.tmux('new-session', '-d', '-s', 'base', '-n', LONG, '-c', str(project), SHELL)
         s.tmux('new-window', '-d', '-t', 'base:', '-n', 'short', '-c', str(project), SHELL)
-        cls.long, cls.short = s.tmux('list-windows', '-t', 'base:', '-F', '#{window_id}').split()
+        s.tmux('new-window', '-d', '-t', 'base:', '-n', STRETCHED, '-c', str(project), SHELL)
+        cls.long, cls.short, cls.stretched = s.tmux('list-windows', '-t', 'base:', '-F', '#{window_id}').split()
         cls.places = {window: s.tmux('display-message', '-p', '-t', window, '#{session_name}:#{window_index}')
-                      for window in (cls.long, cls.short)}
+                      for window in (cls.long, cls.short, cls.stretched)}
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-agentsVisible', 'YES', '-sidebarWorkView', 'Topics'])
         s.wait_rows(lambda rs: s.has('topic-window-' + cls.long, rs) and s.has('topic-window-' + cls.short, rs),
                     'the Window rows do not show')
@@ -89,6 +97,12 @@ class HoverLabelsSidebar(unittest.TestCase):
         texts = self.label(rs)
         self.assertEqual(texts[0], LONG, 'the label does not show the full title: %s' % texts)
         self.assertTrue(texts[1].startswith(self.places[self.long] + ' — '), 'the label does not show the place: %s' % texts)
+
+    def test_a_title_its_format_cuts_off_opens_whole(self):
+        self.s.act('hover', 'topic-window-' + self.stretched)
+        texts = self.label(self.s.wait_rows(lambda rs: self.label(rs), 'no hover label', seconds=5))
+        self.assertEqual(texts[0], STRETCHED + ' ' + SUFFIX, 'the label does not show the formatted title: %s' % texts)
+        self.assertTrue(texts[1].startswith(self.places[self.stretched] + ' — '), 'the label does not show the place: %s' % texts)
 
     def test_a_title_that_fits_shows_only_the_windows_place(self):
         self.s.act('hover', 'topic-window-' + self.short)
