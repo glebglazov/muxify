@@ -28,12 +28,12 @@ final class HoverLabels {
     private var pending: DispatchWorkItem?
     private var closedAt = Date.distantPast
 
-    func enter(_ anchor: HoverAnchor, title: String, titleFont: NSFont, detail: String, onlyWhenCutOff: Bool) {
+    func enter(_ anchor: HoverAnchor, detail: String, onlyWhenCutOff: Bool) {
         owner = anchor
         pending?.cancel()
         let show = { [weak self, weak anchor] in
             guard let self, let anchor, self.owner === anchor else { return }
-            self.show(anchor, title: title, titleFont: titleFont, detail: detail, onlyWhenCutOff: onlyWhenCutOff)
+            self.show(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff)
         }
         if panel.isVisible || Date().timeIntervalSince(closedAt) < Self.coolDown {
             show()
@@ -54,13 +54,12 @@ final class HoverLabels {
         panel.orderOut(nil)
     }
 
-    private func show(_ anchor: HoverAnchor, title: String, titleFont: NSFont, detail: String, onlyWhenCutOff: Bool) {
+    private func show(_ anchor: HoverAnchor, detail: String, onlyWhenCutOff: Bool) {
         guard let view = anchor.view, let window = view.window else { return }
         let titleFrame = window.convertToScreen(view.convert(view.bounds, to: nil))
-        let width = (title as NSString).size(withAttributes: [.font: titleFont]).width
-        let cutOff = width > titleFrame.width + 0.5
+        let cutOff = anchor.title != nil && anchor.fullWidth > titleFrame.width + 0.5
         guard cutOff || (!onlyWhenCutOff && !detail.isEmpty) else { return }
-        let content = NSHostingView(rootView: HoverLabelView(title: cutOff ? title : nil, titleFont: titleFont, detail: detail))
+        let content = NSHostingView(rootView: HoverLabelView(title: cutOff ? anchor.title : nil, detail: detail))
         let size = content.fittingSize
         panel.contentView = content
         // The label's title sits on the row's title, so the row seems to open up in place.
@@ -88,13 +87,12 @@ final class HoverLabels {
 private struct HoverLabelView: View {
     static let padding = EdgeInsets(top: 4, leading: 7, bottom: 5, trailing: 8)
 
-    let title: String?
-    let titleFont: NSFont
+    let title: Text?
     let detail: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if let title { Text(title).font(Font(titleFont)) }
+            if let title { title.lineLimit(1) }
             if !detail.isEmpty { Text(detail).font(.system(size: 10.5)).foregroundStyle(.secondary) }
         }
         .fixedSize()
@@ -104,22 +102,29 @@ private struct HoverLabelView: View {
     }
 }
 
-/// Where a row's title is on screen, for its hover label.
+/// A row's title as its hover label needs it: where the row draws it, the text it draws, and how wide that text is
+/// whole, so the label shows the title only when the row cuts it off.
 @MainActor
 final class HoverAnchor {
     fileprivate weak var view: NSView?
+    fileprivate var title: Text?
+    fileprivate var fullWidth: CGFloat = 0
 }
 
 private struct HoverAnchorView: NSViewRepresentable {
     let anchor: HoverAnchor
+    let title: Text
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        anchor.view = view
+        updateNSView(view, context: context)
         return view
     }
 
-    func updateNSView(_ view: NSView, context: Context) { anchor.view = view }
+    func updateNSView(_ view: NSView, context: Context) {
+        anchor.view = view
+        anchor.title = title
+    }
 }
 
 private struct HoverAnchorKey: EnvironmentKey {
@@ -134,8 +139,6 @@ extension EnvironmentValues {
 }
 
 private struct HoverLabelModifier: ViewModifier {
-    let title: String
-    let titleFont: NSFont
     let detail: String
     let onlyWhenCutOff: Bool
 
@@ -145,29 +148,40 @@ private struct HoverLabelModifier: ViewModifier {
         content
             .environment(\.hoverAnchor, anchor)
             .onHover { inside in
-                if inside { HoverLabels.shared.enter(anchor, title: title, titleFont: titleFont, detail: detail, onlyWhenCutOff: onlyWhenCutOff) }
+                if inside { HoverLabels.shared.enter(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff) }
                 else { HoverLabels.shared.leave(anchor) }
             }
             .onDisappear { HoverLabels.shared.leave(anchor) }
     }
 }
 
-private struct HoverTitleModifier: ViewModifier {
+/// The title on one line, cut with "…". A hidden copy at its full width, laid out behind it, tells the anchor how wide
+/// the whole text is; the label compares that with the width the row gives the title.
+private struct HoverTitle: View {
+    let text: Text
     @Environment(\.hoverAnchor) private var anchor
 
-    func body(content: Content) -> some View {
-        content.background { if let anchor { HoverAnchorView(anchor: anchor).accessibilityHidden(true) } }
+    var body: some View {
+        text.lineLimit(1).truncationMode(.tail)
+            .background(alignment: .leading) {
+                text.lineLimit(1).fixedSize().hidden().allowsHitTesting(false).accessibilityHidden(true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { anchor?.fullWidth = $0 }
+            }
+            .background { if let anchor { HoverAnchorView(anchor: anchor, title: text).accessibilityHidden(true) } }
     }
 }
 
 extension View {
-    /// Gives the row a hover label with its full `title`, drawn in `titleFont`, and `detail` under it. With
-    /// `onlyWhenCutOff`, for a row that already shows its detail, the label opens only when the title is cut off.
-    /// Mark the row's title view with `hoverLabelTitle()`.
-    func hoverLabel(title: String, titleFont: NSFont, detail: String, onlyWhenCutOff: Bool = false) -> some View {
-        modifier(HoverLabelModifier(title: title, titleFont: titleFont, detail: detail, onlyWhenCutOff: onlyWhenCutOff))
+    /// Gives the row a hover label with `detail`, and with the row's full title over it when the row cuts the title
+    /// off. With `onlyWhenCutOff`, for a row that already shows its detail, the label opens only when the title is cut
+    /// off. Draw the row's title with `hoverLabelTitle()`.
+    func hoverLabel(detail: String, onlyWhenCutOff: Bool = false) -> some View {
+        modifier(HoverLabelModifier(detail: detail, onlyWhenCutOff: onlyWhenCutOff))
     }
+}
 
-    /// The title of a row with a `hoverLabel`: the label aligns with it, and shows the full title when it is cut off.
-    func hoverLabelTitle() -> some View { modifier(HoverTitleModifier()) }
+extension Text {
+    /// The title of a row with a `hoverLabel`, on one line and cut with "…". The label aligns with it, and shows this
+    /// same text, in its font, when the row cuts it off.
+    func hoverLabelTitle() -> some View { HoverTitle(text: self) }
 }

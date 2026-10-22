@@ -88,8 +88,7 @@ struct SearchableSelect<Payload: Equatable>: View {
     private func rowLabel(_ row: PickRow<Payload>) -> some View {
         rowContent(row)
         .contentShape(Rectangle())
-        .hoverLabel(title: row.title.text, titleFont: .systemFont(ofSize: NSFont.systemFontSize, weight: .medium),
-                    detail: (row.pick.reason.map(Highlighted.plain) ?? row.detail).text, onlyWhenCutOff: true)
+        .hoverLabel(detail: (row.pick.reason.map(Highlighted.plain) ?? row.detail).text, onlyWhenCutOff: true)
     }
 
     private func rowContent(_ row: PickRow<Payload>) -> some View {
@@ -98,7 +97,7 @@ struct SearchableSelect<Payload: Equatable>: View {
                 Text(symbol).font(.caption).foregroundStyle(.secondary).frame(width: 14)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.title.attributed).fontWeight(.medium).lineLimit(1).hoverLabelTitle()
+                Text(row.title.attributed).fontWeight(.medium).hoverLabelTitle()
                 let detail = row.pick.reason.map(Highlighted.plain) ?? row.detail
                 if !detail.text.isEmpty {
                     Text(detail.attributed).font(.caption).foregroundStyle(.secondary)

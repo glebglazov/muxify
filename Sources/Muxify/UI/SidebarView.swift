@@ -239,13 +239,13 @@ private struct RememberedSessions: View {
                 ForEach(windows) { window in
                     HStack(spacing: 6) {
                         Image(systemName: "clock.arrow.circlepath").font(.system(size: 11)).frame(width: 14)
-                        Text(window.name).font(.system(size: 12)).lineLimit(1).hoverLabelTitle()
+                        Text(window.name).font(.system(size: 12)).hoverLabelTitle()
                         Spacer(minLength: 4)
                     }
                     .foregroundStyle(.secondary)
                     .padding(.leading, 24).padding(.trailing, 6).padding(.vertical, 4)
                     .accessibilityElement(children: .combine)
-                    .hoverLabel(title: window.name, titleFont: .systemFont(ofSize: 12), detail: Paths.tildify(window.directory))
+                    .hoverLabel(detail: Paths.tildify(window.directory))
                     .accessibilityIdentifier("remembered-window-\(window.id)")
                 }
             }
@@ -1040,8 +1040,6 @@ struct WindowRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(content?.text.title ?? window.displayTitle)
                     .font(typography.font(for: .title))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
                     .hoverLabelTitle()
                 if let summary = content?.text.summary, !summary.isEmpty {
                     Text(summary)
@@ -1106,8 +1104,7 @@ struct WindowRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
         .hintAnchor(.window(window.id))
-        .hoverLabel(title: window.displayTitle, titleFont: .systemFont(ofSize: 12),
-                    detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
+        .hoverLabel(detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
     }
 
     private func customPart(_ parts: [SidebarPart], side: String) -> some View {
@@ -1183,7 +1180,7 @@ private struct PaneRow: View {
                     .font(.system(size: 10)).frame(width: 14)
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(formatted.title).font(.system(size: 12)).lineLimit(1).truncationMode(.tail).hoverLabelTitle()
+                    Text(formatted.title).font(.system(size: 12)).hoverLabelTitle()
                     if !formatted.summary.isEmpty {
                         Text(formatted.summary).font(.system(size: 11)).lineLimit(1).foregroundStyle(.secondary)
                     }
@@ -1201,8 +1198,7 @@ private struct PaneRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .hoverLabel(title: row.pane.label, titleFont: .systemFont(ofSize: 12),
-                    detail: row.pane.path.isEmpty ? row.pane.label : Paths.tildify(row.pane.path))
+        .hoverLabel(detail: row.pane.path.isEmpty ? row.pane.label : Paths.tildify(row.pane.path))
         .accessibilityIdentifier("pane-" + row.pane.id)
         .accessibilityValue([row.pane.isActive ? "active" : nil, mark?.rawValue].compactMap { $0 }.joined(separator: ", "))
     }
@@ -1280,8 +1276,6 @@ struct AgentRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(text.title)
                     .font(typography.font(for: .title))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
                     .hoverLabelTitle()
                 if !text.summary.isEmpty {
                     Text(text.summary)
@@ -1304,7 +1298,7 @@ struct AgentRow: View {
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityHint(detail)
-        .hoverLabel(title: text.title, titleFont: .systemFont(ofSize: 12), detail: detail)
+        .hoverLabel(detail: detail)
     }
 }
 

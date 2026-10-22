@@ -724,7 +724,8 @@ Each `title` or `summary` accepts a string, or a mapping with `topics` and `sess
 An empty Summary hides its line. An empty title uses the default title.
 Card Summaries appear only when the card is closed.
 Session headings within Topics, Snoozed and Settled Topic rows, and Command Palette rows keep their existing text.
-Agent hover labels use the formatted title. Other hover labels keep their existing text.
+A Window, Pane or Agent row's hover label shows the formatted title, in the row's font, when the row cuts it off.
+The line under it keeps its existing text.
 With `agents_scope: window`, the Agents section header uses the formatted Window title.
 
 ```yaml
