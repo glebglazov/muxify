@@ -179,10 +179,13 @@ class TopicsOptionSidebar(TopicsSidebar):
         time.sleep(REFRESH_LIMIT)
         self.assertEqual(cards(self.s.rows()), ['topic-press-upper', 'topic-press-lower'], 'a quick drag moved the Topic')
         self.s.act('drag', 'topic-press-lower', 'topic-press-upper', hold=2.0)
-        latency, rs = self.rows_until(lambda rs: cards(rs) == ['topic-press-lower', 'topic-press-upper'], seconds=5)
-        self.assertIsNotNone(latency, 'Topic order after the long press: %s' % cards(rs))
-        orders = {i: r.get('order') for i, r in self.records().items() if i.startswith('press-')}
-        self.assertLess(orders['press-lower'], orders['press-upper'], 'saved Topic orders: %s' % orders)
+        # The dropped card shows at its new place while it glides there, and the order is saved when it lands. So the
+        # saved order is the proof, and a check that ends on the rows would delete the records before the save.
+        orders = lambda: {i: r.get('order') for i, r in self.records().items() if i.startswith('press-')}
+        wait(lambda: orders()['press-lower'] < orders()['press-upper'],
+             'the long press did not save press-lower above press-upper', seconds=5)
+        self.s.wait_rows(lambda rs: cards(rs) == ['topic-press-lower', 'topic-press-upper'],
+                         'the Sidebar does not show the saved order', seconds=5)
 
     def test_move_up_and_move_down_move_the_topic_card_and_save_the_order(self):
         # A long press drags a card; the driver cannot hold a press, so the card's Move Up and Move Down

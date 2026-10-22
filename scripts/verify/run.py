@@ -1,13 +1,13 @@
 """Runs verify suites side by side, one process per suite, and reports each when it ends.
 
 Each suite has its own Sandbox, so suites do not share a tmux server or an app. The full
-unittest output of a suite goes to BASE/<suite>/last-run.log; a suite that fails prints it here too.
+unittest output of a suite goes to LOGS/<suite>/last-run.log; a suite that fails prints it here too.
 
     python3 scripts/verify/run.py [suite ...]
 
 Without a suite it runs every suite in suites/. At most JOBS suites run at the same time; set
 MUXIFY_VERIFY_JOBS to change that. A suite that fails runs again alone after the others. It is
-FLAKY when it passes then, and its first output stays in BASE/<suite>/first-run.log. The exit
+FLAKY when it passes then, and its first output stays in LOGS/<suite>/first-run.log. The exit
 status is 1 when a suite fails again.
 """
 
@@ -18,11 +18,9 @@ import sys
 import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
-
-from scripts.verify.sandbox import BASE  # noqa: E402
-
 SUITES = REPO/'scripts/verify/suites'
+# Inside the checkout, so a run in another checkout or worktree cannot truncate or move these logs.
+LOGS = REPO/'build/verify'
 # Each suite runs its own app, and each app starts tmux every second. With all 30 suites at once on a
 # 12-core Mac, a process start took 30 times longer and checks failed by chance; 10 at once was faster.
 JOBS = 10
@@ -36,7 +34,7 @@ def run(names, jobs, start):
     while waiting or running:
         while waiting and len(running) < jobs:
             name = waiting.pop(0)
-            log = BASE/name/'last-run.log'
+            log = LOGS/name/'last-run.log'
             log.parent.mkdir(parents=True, exist_ok=True)
             with open(log, 'w') as handle:
                 process = subprocess.Popen([sys.executable, '-m', 'unittest', '-v', 'scripts.verify.suites.' + name],
@@ -64,7 +62,7 @@ def main(names):
     if failed:
         print('running again alone: ' + ', '.join(failed), flush=True)
         for name in failed:
-            (BASE/name/'last-run.log').replace(BASE/name/'first-run.log')
+            (LOGS/name/'last-run.log').replace(LOGS/name/'first-run.log')
     still = run(failed, 1, start)
     flaky = [name for name in failed if name not in still]
 

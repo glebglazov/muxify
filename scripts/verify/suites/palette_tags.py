@@ -244,7 +244,7 @@ class PaletteTags(PaletteFixture):
         rs = self.s.wait_rows(lambda rs: 'not a Tag in topics.tags' in self.text('palette-note', rs),
                               'the note does not refuse a Tag the Config no longer defines')
         self.assertEqual(self.chips(rs), ['ops'], 'a Tag the Config no longer defines was added again')
-        self.assertEqual(self.record('ed-orphan').get('tags'), ['gone', 'ops'], 'Return wrote with a refused word in the field')
+        self.assertEqual(sorted(self.record('ed-orphan').get('tags')), ['gone', 'ops'], 'Return wrote with a refused word in the field')
         self.type('')
         self.s.act('action', 'palette-search', 'Accept')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Return did not save and close')

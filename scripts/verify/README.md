@@ -17,7 +17,7 @@ make verify SUITE=topics_cards_sidebar
 make verify SUITE="topics_cards_sidebar command_palette"
 ```
 
-`make verify` runs each suite in its own process, and 10 suites at the same time (`run.py`). Set `MUXIFY_VERIFY_JOBS` to change the number. With all suites at the same time, the Mac starts processes so slowly that checks fail by chance. It writes one line when a suite ends. The full output of a suite goes to `/tmp/muxify-verify/<suite>/last-run.log`. When a suite fails, `make verify` also writes that output.
+`make verify` runs each suite in its own process, and 10 suites at the same time (`run.py`). Set `MUXIFY_VERIFY_JOBS` to change the number. With all suites at the same time, the Mac starts processes so slowly that checks fail by chance. It writes one line when a suite ends. The full output of a suite goes to `build/verify/<suite>/last-run.log` in the checkout, so runs in two checkouts at the same time do not overwrite each other's logs. When a suite fails, `make verify` also writes that output.
 
 A suite that fails runs again alone after the others. When it passes then, the last line names it as FLAKY, and its first output stays in `first-run.log`. `make verify` fails only when a suite fails again. A FLAKY suite has a check that depends on timing: find the cause, do not ignore it.
 

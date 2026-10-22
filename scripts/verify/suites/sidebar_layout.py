@@ -118,6 +118,22 @@ class SidebarLayout(unittest.TestCase):
         def height(key, rs):
             bottom, top = frame(self.s.row(key, rs))
             return top - bottom
+        def closed(key):
+            """The closed card, once its close animation ended: the accessibility value changes at the start of the
+            animation, and the frame only at its end."""
+            heights = []
+            def settled(rs):
+                if not self.s.row(key, rs).get('accessibilityValue', '').startswith('collapsed'):
+                    return False
+                heights.append(height(key, rs))
+                return heights[-2:] == [heights[-1]] * 2
+            return self.s.wait_rows(settled, 'the card %s did not close' % key)
+        # A press opens or closes only the card that holds the selected Window; on another card it goes there. Just
+        # after launch the app can still move its client back, so the client moves on once the app shows layout-open.
+        self.s.wait_shown(self.sessions[0] + ':')
+        for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
+            self.s.tmux('switch-client', '-c', tty, '-t', self.sessions[1] + ':')
+        self.s.wait_shown(self.sessions[1] + ':')
         for mode, key in [('topics', 'topic-layout-other'), ('sessions', 'session-' + self.sessions[1])]:
             self.show_view(mode)
             self.write_config('')
@@ -125,9 +141,7 @@ class SidebarLayout(unittest.TestCase):
                                   'the card %s does not show its default title' % key)
             if self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded'):
                 self.s.act('press', key)
-            rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityValue', '').startswith('collapsed'),
-                                  'the card %s did not close' % key)
-            one_line = height(key, rs)
+            one_line = height(key, closed(key))
             self.write_config(long_titles)
             rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'layout-other' + tail
                                   and height(key, rs) > one_line + 8,

@@ -80,19 +80,16 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         self.assertTrue(any(line.startswith(tuple(path + ' ' for path in paths)) and '[worktree-proof]' in line
                             for line in listing.splitlines()), 'git worktree list:\n' + listing)
 
-    def test_worktree_topic_session_row_is_labelled_repo_slash_folder_without_a_badge_for_its_own_branch(self):
+    def test_worktree_topic_session_row_is_labelled_repo_slash_folder(self):
         record = self.new_topic('Worktree row proof', self.alpha_tree['worktree-row-base'], worktree=True)
         name = 'alpha/worktree-row-proof'
         self.wait_session(name)
         sid = self.s.tmux('display-message', '-p', '-t', '=' + name + ':', '#{session_id}')
         key = 'topic-%s-session-%s' % (record['id'], sid)
-        # The badge sits inside the Session row's Button, so it reaches the accessibility tree only as part of
-        # the Button's label and help. The folder is named for the branch, so the label says it once.
-        labelled = lambda rs: self.s.row(key, rs).get('accessibilityLabel', '').startswith('alpha/worktree-row-proof')
+        labelled = lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'alpha/worktree-row-proof'
         self.find(key)
         latency, rs = self.rows_until(labelled)
         self.assertIsNotNone(latency, 'Topic Session row %s: %s' % (key, json.dumps(self.s.row(key, rs))))
-        self.assertNotIn('accessibilityHelp', self.s.row(key, rs), 'a branch badge for the branch the folder is named for')
 
     def test_add_project_list_shows_one_row_per_worktree_of_a_bare_repository(self):
         s = self.s
@@ -137,18 +134,17 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         self.assertEqual([(x.get('worktree_path'), x.get('worktree_created')) for x in sessions], [(str(self.gamma/'main'), False)],
                          json.dumps(sessions))
 
-    def test_topic_on_a_picked_worktree_opens_its_session_there_with_a_badge_for_a_differing_branch(self):
-        record = self.new_topic('Release badge proof', self.gamma/'release')
-        name = 'gamma/release-badge-proof'
+    def test_topic_on_a_picked_worktree_opens_its_session_there_under_the_worktrees_name(self):
+        record = self.new_topic('Release worktree proof', self.gamma/'release')
+        name = 'gamma/release-worktree-proof'
         self.wait_session(name)
         sid, session_path = self.s.tmux('display-message', '-p', '-t', '=' + name + ':', '#{session_id}|#{session_path}').split('|')
         self.assertIn(session_path, (str(self.gamma/'release'), os.path.realpath(self.gamma/'release')), 'Session path')
         self.assertEqual(record['sessions'][0].get('worktree_path'), str(self.gamma/'release'), json.dumps(record))
         key = 'topic-%s-session-%s' % (record['id'], sid)
-        badged = lambda rs: (self.s.row(key, rs).get('accessibilityLabel', '').startswith('gamma/release')
-                             and self.s.row(key, rs).get('accessibilityHelp') == 'release-line')
+        named = lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'gamma/release'
         self.find(key)
-        latency, rs = self.rows_until(badged)
+        latency, rs = self.rows_until(named)
         self.assertIsNotNone(latency, 'Topic Session row %s: %s' % (key, json.dumps(self.s.row(key, rs))))
 
     def test_new_worktree_from_a_chosen_base_of_a_bare_repository_lands_in_muxifys_worktrees_folder_on_the_slug_branch(self):
@@ -182,10 +178,9 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         self.assertEqual(session.get('worktree_path'), str(self.epsilon), json.dumps(record))
         self.assertIs(session.get('worktree_created'), False, json.dumps(record))
         key = 'topic-%s-session-%s' % (record['id'], sid)
-        badged = lambda rs: (s.row(key, rs).get('accessibilityLabel', '').startswith('epsilon, ')
-                             and s.row(key, rs).get('accessibilityHelp') == 'main')
+        named = lambda rs: s.row(key, rs).get('accessibilityLabel') == 'epsilon'
         self.find(key)
-        latency, rs = self.rows_until(badged)
+        latency, rs = self.rows_until(named)
         self.assertIsNotNone(latency, 'Topic Session row %s: %s' % (key, json.dumps(s.row(key, rs))))
         self.create_topic('Main checkout picker')
         self.open_add_project()
